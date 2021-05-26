@@ -1,0 +1,32 @@
+<?xml version='1.0' encoding='utf-8'?>
+<materials>
+  <material depletable="true" id="1" name="LiF(0.65)-BeF2(0.29)-ZrF4(0.05)-UF4(0.01)">
+    <density units="g/cm3" value="58.57954675327744" />
+    <nuclide ao="0.325" name="Li7" />
+    <nuclide ao="0.5663333333333334" name="F19" />
+    <nuclide ao="0.09666666666666665" name="Be9" />
+    <nuclide ao="0.005145000000000001" name="Zr90" />
+    <nuclide ao="0.0011220000000000002" name="Zr91" />
+    <nuclide ao="0.0017150000000000004" name="Zr92" />
+    <nuclide ao="0.0017380000000000004" name="Zr94" />
+    <nuclide ao="0.00028000000000000003" name="Zr96" />
+    <nuclide ao="0.00010000000000000002" name="U233" />
+    <nuclide ao="0.0018999999999999998" name="U238" />
+  </material>
+  <material id="2" name="graphite">
+    <density units="sum" />
+    <nuclide ao="1.0" name="C0" />
+  </material>
+  <material id="3" name="pipe">
+    <density units="g/cm3" value="17.0" />
+    <nuclide ao="0.014" name="Pb204" />
+    <nuclide ao="0.241" name="Pb206" />
+    <nuclide ao="0.221" name="Pb207" />
+    <nuclide ao="0.524" name="Pb208" />
+  </material>
+  <material id="4" name="air">
+    <density units="sum" />
+    <nuclide ao="2e-06" name="He3" />
+    <nuclide ao="0.999998" name="He4" />
+  </material>
+</materials>
