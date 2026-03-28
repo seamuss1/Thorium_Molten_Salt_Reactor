@@ -5,6 +5,39 @@ references:
 assumptions:
   - This repository targets an openly reproducible, TMSR-LF1-inspired model rather than a proprietary plant replica.
   - Channel geometry is derived from the legacy thesis scripts, corrected for concentric consistency.
+evidence:
+  - id: openmsr-msre
+    topic: CAD-backed benchmark precedent
+    source: https://github.com/openmsr/msre
+    claim: The MSRE project combines a detailed CAD model with OpenMC benchmarks, settable control rods, temperature-coefficient studies, depletion analysis with fission-product removal, and heat-exchanger thermohydraulics.
+    relevance: This repo already has a strong config-driven CSG workflow; the next step is turning it into a benchmark-grade reactor twin with deeper physics and better traceability.
+  - id: openmsr-cad-to-openmc
+    topic: Dual geometry pipeline
+    source: https://github.com/openmsr/CAD_to_OpenMC
+    claim: CAD_to_OpenMC links STEP CAD geometry to OpenMC-readable h5m geometry, making CAD-informed neutronics part of an open workflow.
+    relevance: A future TMSR case could support both today's procedural CSG build and an optional CAD-to-h5m benchmark path for geometry cross-checks.
+  - id: openmsr-msrdynamics
+    topic: Transient modeling bridge
+    source: https://github.com/openmsr/msrDynamics
+    claim: msrDynamics provides a JiTCDDE-based nodal dynamics API with point kinetics, convective heat transfer, and advective heat transfer for flowing-fuel systems.
+    relevance: Your steady-state balance-of-plant model is a clean starting point for a transient layer that captures delayed transport and load-following behavior.
+  - id: openmsr-depletion-chains
+    topic: Flowing-fuel depletion
+    source: https://github.com/openmsr/ca_depletion_chains
+    claim: The repository publishes modified OpenMC depletion chains, including volatile and fission-product removal variants relevant to molten-salt systems.
+    relevance: This would let the repo move beyond single-state keff snapshots into cleanup, poison-control, and burnup what-if studies.
+  - id: openmsr-archive
+    topic: Searchable literature backbone
+    source: https://github.com/openmsr/msr-archive
+    claim: The archive curates OCR-searchable molten-salt reactor literature so modeling assumptions can be traced back to source documents more quickly.
+    relevance: Benchmark assumptions in this repo should grow from surrogate placeholders into source-linked claims with explicit confidence levels.
+novelty_tracks:
+  - name: Evidence-linked reactor twin
+    summary: Bind every validation target, geometry assumption, and operating parameter to a literature note or benchmark source, then surface the confidence level in generated reports.
+  - name: Dual-representation benchmark
+    summary: Build the same reactor case from both config-defined CSG and optional CAD-to-h5m geometry so discrepancies become a validation signal instead of a hidden modeling assumption.
+  - name: Load-following salt reactor sandbox
+    summary: Couple neutronics outputs with a nodal transient model to explore delayed-neutron drift, salt transport lag, and plant-level control scenarios that are hard to show in static LWR-style workflows.
 targets:
   nominal_thermal_power_mwth: 250.0
   nominal_hot_leg_temp_c: 700.0
