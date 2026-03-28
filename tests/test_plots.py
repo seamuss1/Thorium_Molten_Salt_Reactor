@@ -32,6 +32,58 @@ def test_generate_summary_plots_populates_plots_dir() -> None:
     assert Path(assets["bop_balance"]).exists()
 
 
+def test_generate_summary_plots_emits_flow_interface_plot_when_available() -> None:
+    bundle = create_result_bundle(REPO_ROOT / ".tmp" / "plot-flow-test", "plot_case", "run")
+    summary = {
+        "case": "plot_case",
+        "metrics": {
+            "channel_count": 91,
+        },
+        "flow": {
+            "interface_metrics": {
+                "plenum_connected_channels": 37,
+                "reflector_backed_channels": 54,
+                "plenum_connected_salt_area_cm2": 9.813587,
+                "reflector_backed_salt_area_cm2": 13.50382,
+            }
+        },
+        "neutronics": {
+            "status": "completed",
+        },
+    }
+
+    assets = generate_summary_plots(bundle, summary)
+
+    assert "flow_interfaces" in assets
+    assert Path(assets["flow_interfaces"]).exists()
+
+
+def test_generate_summary_plots_emits_active_flow_allocation_plot() -> None:
+    bundle = create_result_bundle(REPO_ROOT / ".tmp" / "plot-active-flow-test", "plot_case", "run")
+    summary = {
+        "case": "plot_case",
+        "metrics": {
+            "channel_count": 91,
+        },
+        "flow": {
+            "reduced_order": {
+                "variant_summary": [
+                    {"variant": "fuel", "allocated_mass_flow_kg_s": 991.839099},
+                    {"variant": "control_guides", "allocated_mass_flow_kg_s": 124.232329},
+                ]
+            }
+        },
+        "neutronics": {
+            "status": "completed",
+        },
+    }
+
+    assets = generate_summary_plots(bundle, summary)
+
+    assert "active_flow_allocation" in assets
+    assert Path(assets["active_flow_allocation"]).exists()
+
+
 def test_generate_validation_plot_updates_manifest() -> None:
     bundle = create_result_bundle(REPO_ROOT / ".tmp" / "plot-validation-test", "plot_case", "run")
     validation = {

@@ -25,6 +25,34 @@ def generate_summary_plots(bundle, summary: dict[str, Any]) -> dict[str, str]:
         _write_bar_chart_svg(bop_numeric, bop_path, title=f"{summary['case']} balance of plant")
         assets["bop_balance"] = str(bop_path)
 
+    flow_metrics = summary.get("flow", {}).get("interface_metrics", {})
+    flow_numeric = _coerce_numeric_mapping(
+        {
+            "plenum_connected_channels": flow_metrics.get("plenum_connected_channels"),
+            "reflector_backed_channels": flow_metrics.get("reflector_backed_channels"),
+            "plenum_connected_salt_bearing_channels": flow_metrics.get("plenum_connected_salt_bearing_channels"),
+            "reflector_backed_salt_bearing_channels": flow_metrics.get("reflector_backed_salt_bearing_channels"),
+        }
+    )
+    if flow_numeric:
+        flow_path = bundle.plots_dir / "flow_interfaces.svg"
+        _write_bar_chart_svg(flow_numeric, flow_path, title=f"{summary['case']} flow interface channel counts")
+        assets["flow_interfaces"] = str(flow_path)
+
+    reduced_order = summary.get("flow", {}).get("reduced_order", {})
+    allocation_metrics = {
+        str(item["variant"]): float(item["allocated_mass_flow_kg_s"])
+        for item in reduced_order.get("variant_summary", [])
+    }
+    if allocation_metrics:
+        allocation_path = bundle.plots_dir / "active_flow_allocation.svg"
+        _write_bar_chart_svg(
+            allocation_metrics,
+            allocation_path,
+            title=f"{summary['case']} active through-flow allocation (kg/s)",
+        )
+        assets["active_flow_allocation"] = str(allocation_path)
+
     statepoint_path = _resolve_statepoint_path(bundle, summary)
     if statepoint_path is not None and openmc is not None:
         history_path = bundle.plots_dir / "keff_history.svg"

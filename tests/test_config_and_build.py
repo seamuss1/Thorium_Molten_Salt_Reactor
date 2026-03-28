@@ -33,6 +33,37 @@ def test_core_case_manifest_has_expected_channel_count() -> None:
     assert built.geometry_description["type"] == "detailed_molten_salt_reactor"
 
 
+def test_core_case_flow_summary_exposes_plenum_access_split() -> None:
+    config = _load_case("tmsr_lf1_core")
+    built = build_case(config)
+    flow_summary = built.manifest["flow_summary"]
+
+    assert flow_summary["interface_metrics"] == {
+        "plenum_connected_channels": 37,
+        "reflector_backed_channels": 54,
+        "plenum_connected_salt_bearing_channels": 37,
+        "reflector_backed_salt_bearing_channels": 48,
+        "plenum_connected_salt_area_cm2": 9.813587,
+        "reflector_backed_salt_area_cm2": 13.50382,
+        "plenum_connected_salt_volume_cm3": 1884.208625,
+        "reflector_backed_salt_volume_cm3": 2592.733508,
+    }
+    assert flow_summary["variant_counts"] == {
+        "plenum_connected": {
+            "control_guides": 6,
+            "fuel": 31,
+        },
+        "reflector_backed": {
+            "fuel": 48,
+            "instrumentation_wells": 6,
+        },
+    }
+    first_channel = built.geometry_description["channels"][0]
+    assert first_channel["lower_boundary_region"] == "lower_plenum"
+    assert first_channel["upper_boundary_region"] == "upper_plenum"
+    assert first_channel["interface_class"] == "plenum_connected"
+
+
 def test_example_pin_case_builds_without_solver() -> None:
     config = _load_case("example_pin")
     built = build_case(config)

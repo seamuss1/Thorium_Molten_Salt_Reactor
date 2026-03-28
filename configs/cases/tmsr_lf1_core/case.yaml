@@ -115,6 +115,9 @@ reporting:
   plots:
     - name: tmsr_lf1_core_cross_section
       kind: svg
+flow:
+  reduced_order:
+    allocation_rule: salt_area_weighted
 validation_targets:
   expected_cells:
     metric: expected_cells

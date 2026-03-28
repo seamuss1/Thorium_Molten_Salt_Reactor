@@ -99,6 +99,9 @@ def resolve_msr_geometry(config: Any) -> ResolvedMSRGeometry:
 def build_msr_geometry_description(config: Any, resolved: ResolvedMSRGeometry | None = None) -> dict[str, Any]:
     geometry = config.geometry
     resolved = resolved or resolve_msr_geometry(config)
+    channel_flow_interfaces = {
+        channel["name"]: channel for channel in _build_channel_flow_interfaces(geometry, resolved)
+    }
     shells = _build_shells(geometry, resolved)
     channels = [
         {
@@ -109,6 +112,11 @@ def build_msr_geometry_description(config: Any, resolved: ResolvedMSRGeometry | 
             "layers": [dict(layer) for layer in channel["layers"]],
             "z_min": resolved.active_bottom_z,
             "z_max": resolved.active_top_z,
+            "lower_boundary_region": channel_flow_interfaces[channel["name"]]["lower_boundary_region"],
+            "upper_boundary_region": channel_flow_interfaces[channel["name"]]["upper_boundary_region"],
+            "interface_class": channel_flow_interfaces[channel["name"]]["interface_class"],
+            "salt_cross_section_area_cm2": channel_flow_interfaces[channel["name"]]["salt_cross_section_area_cm2"],
+            "salt_volume_cm3": channel_flow_interfaces[channel["name"]]["salt_volume_cm3"],
         }
         for channel in resolved.channels
     ]
@@ -126,6 +134,7 @@ def build_msr_geometry_description(config: Any, resolved: ResolvedMSRGeometry | 
         "guard_vessel_outer_radius": resolved.guard_vessel_outer_radius,
         "channel_variant_counts": dict(resolved.channel_variant_counts),
         "channel_envelope_radius": resolved.channel_envelope_radius,
+        "flow_summary": build_msr_flow_summary(config, resolved),
         "shells": shells,
         "channels": channels,
         "render_solids": render_solids,
@@ -198,6 +207,47 @@ def build_msr_invariants(config: Any, resolved: ResolvedMSRGeometry | None = Non
     return invariants
 
 
+def build_msr_flow_summary(config: Any, resolved: ResolvedMSRGeometry | None = None) -> dict[str, Any]:
+    geometry = config.geometry
+    resolved = resolved or resolve_msr_geometry(config)
+    channel_interfaces = _build_channel_flow_interfaces(geometry, resolved)
+
+    interface_metrics = {
+        "plenum_connected_channels": 0,
+        "reflector_backed_channels": 0,
+        "plenum_connected_salt_bearing_channels": 0,
+        "reflector_backed_salt_bearing_channels": 0,
+        "plenum_connected_salt_area_cm2": 0.0,
+        "reflector_backed_salt_area_cm2": 0.0,
+        "plenum_connected_salt_volume_cm3": 0.0,
+        "reflector_backed_salt_volume_cm3": 0.0,
+    }
+    variant_counts = {
+        "plenum_connected": Counter(),
+        "reflector_backed": Counter(),
+    }
+
+    for channel in channel_interfaces:
+        interface_class = channel["interface_class"]
+        interface_metrics[f"{interface_class}_channels"] += 1
+        variant_counts[interface_class][channel["variant"]] += 1
+        if channel["salt_cross_section_area_cm2"] > 0.0:
+            interface_metrics[f"{interface_class}_salt_bearing_channels"] += 1
+            interface_metrics[f"{interface_class}_salt_area_cm2"] += channel["salt_cross_section_area_cm2"]
+            interface_metrics[f"{interface_class}_salt_volume_cm3"] += channel["salt_volume_cm3"]
+
+    return {
+        "plenum_radius_cm": resolved.plenum_radius,
+        "active_height_cm": resolved.active_height,
+        "interface_metrics": {name: _round_metric(value) for name, value in interface_metrics.items()},
+        "variant_counts": {
+            name: dict(sorted(counts.items()))
+            for name, counts in variant_counts.items()
+        },
+        "channels": channel_interfaces,
+    }
+
+
 def _resolve_special_channels(geometry: dict[str, Any]) -> list[dict[str, Any]]:
     selectors: list[dict[str, Any]] = []
     for variant_name, spec in geometry.get("special_channels", {}).items():
@@ -247,6 +297,47 @@ def _build_channels(
                 }
             )
     return channels
+
+
+def _build_channel_flow_interfaces(
+    geometry: dict[str, Any],
+    resolved: ResolvedMSRGeometry,
+) -> list[dict[str, Any]]:
+    salt_material = geometry.get("salt_material", "fuel_salt")
+    interfaces: list[dict[str, Any]] = []
+    for channel in resolved.channels:
+        envelope_radius = max(float(layer["outer_radius"]) for layer in channel["layers"])
+        center_radius = math.hypot(float(channel["x"]), float(channel["y"]))
+        plenum_connected = center_radius + envelope_radius <= resolved.plenum_radius + CHANNEL_RADIUS_TOLERANCE
+        salt_cross_section_area = 0.0
+        for layer in channel["layers"]:
+            if layer.get("material") != salt_material:
+                continue
+            salt_cross_section_area += _annulus_area(layer)
+        interfaces.append(
+            {
+                "name": channel["name"],
+                "variant": channel["variant"],
+                "lower_boundary_region": "lower_plenum" if plenum_connected else "lower_reflector",
+                "upper_boundary_region": "upper_plenum" if plenum_connected else "upper_reflector",
+                "interface_class": "plenum_connected" if plenum_connected else "reflector_backed",
+                "salt_cross_section_area_cm2": salt_cross_section_area,
+                "salt_volume_cm3": salt_cross_section_area * resolved.active_height,
+            }
+        )
+    return interfaces
+
+
+def _annulus_area(layer: dict[str, Any]) -> float:
+    inner_radius = float(layer.get("inner_radius", 0.0))
+    outer_radius = float(layer["outer_radius"])
+    return math.pi * ((outer_radius * outer_radius) - (inner_radius * inner_radius))
+
+
+def _round_metric(value: float | int) -> float | int:
+    if isinstance(value, int):
+        return value
+    return round(float(value), 6)
 
 
 def _ring_positions(radius: float, count: int) -> list[tuple[float, float]]:

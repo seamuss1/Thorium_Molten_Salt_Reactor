@@ -48,6 +48,10 @@ class CaseConfig:
         return self.data["reporting"]
 
     @property
+    def flow(self) -> dict[str, Any]:
+        return self.data.get("flow", {})
+
+    @property
     def validation_targets(self) -> dict[str, Any]:
         return self.data["validation_targets"]
 

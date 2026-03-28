@@ -133,3 +133,59 @@ def test_report_can_include_plot_outputs() -> None:
         assert "validation_summary" in report
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_report_includes_reduced_order_flow_section() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-flow" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "dry-run"},
+                    "metrics": {"active_flow_channel_count": 37},
+                    "bop": {"primary_mass_flow_kg_s": 1116.071429},
+                    "flow": {
+                        "reduced_order": {
+                            "allocation_rule": "salt_area_weighted",
+                            "active_flow": {
+                                "channel_count": 37,
+                                "total_flow_area_cm2": 9.813587,
+                                "representative_velocity_m_s": 355.397391,
+                                "representative_residence_time_s": 0.005402,
+                            },
+                            "disconnected_inventory": {
+                                "channel_count": 48,
+                            },
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "tmsr_lf1_core",
+            {
+                "reactor": {
+                    "name": "TMSR-LF1-Inspired Core",
+                    "family": "TMSR-LF1-inspired MSR",
+                    "stage": "full-core",
+                    "design_power_mwth": 250.0,
+                    "benchmark": "benchmarks/tmsr_lf1/benchmark.yaml",
+                }
+            },
+            summary_path,
+            None,
+            None,
+        )
+
+        assert "## Reduced-Order Flow" in report
+        assert "salt_area_weighted" in report
+        assert "37" in report
+        assert "355.397391" in report
+        assert "0.005402" in report
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)

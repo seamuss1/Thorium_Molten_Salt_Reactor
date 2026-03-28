@@ -69,6 +69,18 @@ def generate_report(
         for key, value in summary["bop"].items():
             lines.append(f"- {key}: `{value}`")
 
+    reduced_order_flow = summary.get("flow", {}).get("reduced_order", {})
+    if reduced_order_flow:
+        active_flow = reduced_order_flow.get("active_flow", {})
+        disconnected_inventory = reduced_order_flow.get("disconnected_inventory", {})
+        lines.extend(["", "## Reduced-Order Flow", ""])
+        lines.append(f"- Allocation rule: `{reduced_order_flow.get('allocation_rule', 'n/a')}`")
+        lines.append(f"- Active through-flow channels: `{active_flow.get('channel_count', 'n/a')}`")
+        lines.append(f"- Active flow area (cm2): `{active_flow.get('total_flow_area_cm2', 'n/a')}`")
+        lines.append(f"- Representative velocity (m/s): `{active_flow.get('representative_velocity_m_s', 'n/a')}`")
+        lines.append(f"- Representative residence time (s): `{active_flow.get('representative_residence_time_s', 'n/a')}`")
+        lines.append(f"- Disconnected salt inventory channels: `{disconnected_inventory.get('channel_count', 'n/a')}`")
+
     if validation:
         lines.extend(["", "## Validation", ""])
         for check in validation.get("checks", []):

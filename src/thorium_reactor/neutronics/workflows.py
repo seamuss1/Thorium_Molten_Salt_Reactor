@@ -8,8 +8,10 @@ from typing import Any
 
 from thorium_reactor.bop.steady_state import BOPInputs, run_steady_state_bop
 from thorium_reactor.config import CaseConfig, load_yaml
+from thorium_reactor.flow.reduced_order import build_reduced_order_flow_summary
 from thorium_reactor.geometry.exporters import export_geometry
 from thorium_reactor.geometry.molten_salt_reactor import (
+    build_msr_flow_summary,
     build_msr_geometry_description,
     build_msr_invariants,
     resolve_msr_geometry,
@@ -92,6 +94,8 @@ def run_case(config: CaseConfig, bundle, solver_enabled: bool = True) -> dict[st
     }
     if "channel_count" in built.manifest:
         summary["metrics"]["channel_count"] = built.manifest["channel_count"]
+    if "flow_summary" in built.manifest:
+        summary["flow"] = json.loads(json.dumps(built.manifest["flow_summary"]))
 
     if openmc is not None and solver_enabled and built.model is not None:
         built.model.export_to_xml(directory=str(bundle.openmc_dir))
@@ -133,8 +137,22 @@ def run_case(config: CaseConfig, bundle, solver_enabled: bool = True) -> dict[st
         )
         summary["bop"] = run_steady_state_bop(bop_inputs).to_dict()
         summary["metrics"]["electric_power_mwe"] = round(summary["bop"]["electric_power_mw"], 3)
+        if "flow" in summary:
+            reduced_order_flow = build_reduced_order_flow_summary(
+                config,
+                summary["flow"],
+                float(summary["bop"]["primary_mass_flow_kg_s"]),
+            )
+            summary["flow"]["reduced_order"] = reduced_order_flow
+            summary["metrics"]["active_flow_channel_count"] = reduced_order_flow["active_flow"]["channel_count"]
+            summary["metrics"]["active_flow_area_cm2"] = reduced_order_flow["active_flow"]["total_flow_area_cm2"]
+            summary["metrics"]["active_flow_velocity_m_s"] = reduced_order_flow["active_flow"]["representative_velocity_m_s"]
+            summary["metrics"]["active_flow_residence_time_s"] = reduced_order_flow["active_flow"]["representative_residence_time_s"]
+            summary["metrics"]["disconnected_flow_inventory_channels"] = reduced_order_flow["disconnected_inventory"]["channel_count"]
 
     bundle.write_json("summary.json", summary)
+    if "flow" in summary:
+        bundle.write_json("flow_summary.json", summary["flow"])
     bundle.write_metrics(summary["metrics"])
     generate_summary_plots(bundle, summary)
     return summary
@@ -253,6 +271,7 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
     if geometry.get("style") == "detailed_msr":
         resolved = resolve_msr_geometry(config)
         invariants = build_msr_invariants(config, resolved)
+        flow_summary = build_msr_flow_summary(config, resolved)
         model = _create_openmc_detailed_msr_model(config, resolved) if openmc is not None else None
         material_inventory = {
             geometry["matrix_material"],
@@ -275,6 +294,7 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
                 "channel_variant_counts": dict(resolved.channel_variant_counts),
                 "geometry_kind": geometry["kind"],
                 "geometry_style": geometry["style"],
+                "flow_summary": flow_summary,
                 "material_inventory": sorted(material_inventory),
                 "invariants": invariants,
             },
