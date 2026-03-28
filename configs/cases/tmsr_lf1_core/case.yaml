@@ -3,6 +3,7 @@ reactor:
   name: TMSR-LF1-Inspired Core
   family: TMSR-LF1-inspired MSR
   stage: full-core
+  property_reference_temperature_c: 600.0
   design_power_mwth: 250.0
   hot_leg_temp_c: 700.0
   cold_leg_temp_c: 560.0

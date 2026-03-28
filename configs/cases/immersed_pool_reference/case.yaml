@@ -3,6 +3,7 @@ reactor:
   name: Immersed Pool MSR Reference
   family: reference-inspired immersed pool MSR demonstrator
   stage: full-core
+  property_reference_temperature_c: 600.0
   design_power_mwth: 8.0
   hot_leg_temp_c: 690.0
   cold_leg_temp_c: 555.0
@@ -11,10 +12,37 @@ reactor:
   primary_pump_efficiency: 0.74
   primary_elbow_loss_coefficient: 0.9
   primary_terminal_loss_coefficient: 1.6
+  primary_loop_ambient_temp_c: 470.0
+  primary_pipe_overall_u_w_m2k: 7.5
   steam_generator_effectiveness: 0.91
   steam_generator_overall_u_w_m2k: 820.0
+  hx_primary_hydraulic_diameter_m: 0.032
+  hx_secondary_hydraulic_diameter_m: 0.024
+  hx_primary_flow_area_m2: 0.0105
+  hx_secondary_flow_area_m2: 0.0115
   secondary_inlet_temp_c: 430.0
   secondary_outlet_temp_c: 585.0
+  secondary_density:
+    units: kg/m3
+    model: linear
+    reference_value: 3025.0
+    reference_temperature_c: 500.0
+    slope_per_c: -0.62
+  secondary_cp:
+    units: j/kg-k
+    model: linear
+    reference_value: 1650.0
+    reference_temperature_c: 500.0
+    slope_per_c: 0.28
+  secondary_dynamic_viscosity:
+    units: pa-s
+    model: arrhenius
+    pre_exponential: 0.0019
+    activation_temperature_k: 1080.0
+  secondary_thermal_conductivity:
+    units: w/m-k
+    model: constant
+    value: 0.88
   turbine_efficiency: 0.41
   generator_efficiency: 0.98
   fuel_heavy_metal_mass_fraction: 0.013
@@ -28,7 +56,27 @@ reactor:
 materials:
   fuel_salt:
     name: fuel_salt
-    density: { units: g/cm3, value: 3.2 }
+    density:
+      units: kg/m3
+      model: linear
+      reference_value: 3225.0
+      reference_temperature_c: 600.0
+      slope_per_c: -0.72
+    cp:
+      units: j/kg-k
+      model: linear
+      reference_value: 1580.0
+      reference_temperature_c: 600.0
+      slope_per_c: 0.35
+    dynamic_viscosity:
+      units: pa-s
+      model: arrhenius
+      pre_exponential: 0.0023
+      activation_temperature_k: 1225.0
+    thermal_conductivity:
+      units: w/m-k
+      model: constant
+      value: 1.08
     nuclides:
       - { name: Li7, ao: 0.325 }
       - { name: F19, ao: 0.5663333333 }
@@ -42,7 +90,12 @@ materials:
       - { name: U238, ao: 0.001880 }
   coolant_salt:
     name: coolant_salt
-    density: { units: g/cm3, value: 3.0 }
+    density:
+      units: kg/m3
+      model: linear
+      reference_value: 3010.0
+      reference_temperature_c: 500.0
+      slope_per_c: -0.58
     nuclides:
       - { name: Li7, ao: 0.44 }
       - { name: F19, ao: 0.42 }
@@ -162,6 +215,26 @@ geometry:
       control_material: pipe
       control_riser_top_z_cm: 46.0
     primary_loop:
+      components:
+        - id: heat_exchanger
+          kind: heat_sink
+        - id: pump
+          kind: pump
+        - id: core
+          kind: heat_source
+      connections:
+        - id: hx_to_pump
+          from: heat_exchanger
+          to: pump
+          leg: cold_leg
+        - id: pump_to_core
+          from: pump
+          to: core
+          leg: cold_leg
+        - id: core_to_hx
+          from: core
+          to: heat_exchanger
+          leg: hot_leg
       heat_exchanger:
         material: insulation
         x_min_cm: -54.0
@@ -178,14 +251,16 @@ geometry:
         radius_cm: 2.6
         header_radius_cm: 4.2
       pipes:
-        - radius_cm: 2.1
+        - id: hx_to_pump
+          radius_cm: 2.1
           material: pipe
           points:
             - [-24.0, -14.0, 16.0]
             - [-24.0, -14.0, 24.0]
             - [-24.0, -8.0, 24.0]
             - [-34.0, -8.0, 24.0]
-        - radius_cm: 2.1
+        - id: core_to_hx
+          radius_cm: 2.1
           material: pipe
           points:
             - [-46.0, -14.0, 16.0]
@@ -193,7 +268,8 @@ geometry:
             - [6.0, -14.0, -8.0]
             - [6.0, -12.0, -8.0]
             - [22.0, -12.0, -8.0]
-        - radius_cm: 2.0
+        - id: pump_to_core
+          radius_cm: 2.0
           material: pipe
           points:
             - [-34.0, -8.0, 34.0]
@@ -222,7 +298,7 @@ reporting:
       kind: png
 flow:
   reduced_order:
-    allocation_rule: salt_area_weighted
+    allocation_rule: pressure_balanced
 validation_targets:
   expected_cells:
     metric: expected_cells

@@ -3,6 +3,7 @@ reactor:
   name: TMSR Fuel Channel Submodel
   family: TMSR-LF1-inspired channel
   stage: submodel
+  property_reference_temperature_c: 600.0
   design_power_mwth: 250.0
   hot_leg_temp_c: 700.0
   cold_leg_temp_c: 560.0

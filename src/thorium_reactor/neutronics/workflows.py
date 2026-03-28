@@ -9,6 +9,12 @@ from typing import Any
 from thorium_reactor.benchmarking import assess_benchmark_traceability
 from thorium_reactor.bop.steady_state import BOPInputs, run_steady_state_bop
 from thorium_reactor.config import CaseConfig, load_yaml
+from thorium_reactor.flow.properties import (
+    average_primary_temperature_c,
+    evaluate_property,
+    primary_coolant_cp_kj_kgk,
+    property_reference_temperature_c,
+)
 from thorium_reactor.flow.primary_system import build_primary_system_summary
 from thorium_reactor.flow.reduced_order import build_reduced_order_flow_summary
 from thorium_reactor.geometry.exporters import export_geometry
@@ -44,20 +50,29 @@ def material_sanity_checks(config: CaseConfig) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     for name, spec in config.materials.items():
         density = spec.get("density", {})
-        density_value = density.get("value")
-        if density_value is not None:
-            passed = float(density_value) > 0.0
-            checks.append(
-                {
-                    "name": f"material_density::{name}",
-                    "passed": passed,
-                    "message": (
-                        f"Material {name} has positive density."
-                        if passed
-                        else f"Material {name} must have a positive density."
-                    ),
-                }
-            )
+        if density:
+            density_temperature_c = property_reference_temperature_c(config.reactor, density)
+            try:
+                density_value = evaluate_property(
+                    density,
+                    temperature_c=density_temperature_c,
+                    expected_quantity="density",
+                )
+            except Exception:
+                density_value = None
+            if density_value is not None:
+                passed = float(density_value) > 0.0
+                checks.append(
+                    {
+                        "name": f"material_density::{name}",
+                        "passed": passed,
+                        "message": (
+                            f"Material {name} has positive density."
+                            if passed
+                            else f"Material {name} must have a positive density."
+                        ),
+                    }
+                )
         nuclides = spec.get("nuclides", [])
         elements = spec.get("elements", [])
         checks.append(
@@ -132,7 +147,10 @@ def run_case(config: CaseConfig, bundle, solver_enabled: bool = True) -> dict[st
             thermal_power_mw=float(config.reactor["design_power_mwth"]),
             hot_leg_temp_c=float(config.reactor.get("hot_leg_temp_c", 700.0)),
             cold_leg_temp_c=float(config.reactor.get("cold_leg_temp_c", 560.0)),
-            primary_cp_kj_kgk=float(config.reactor.get("primary_cp_kj_kgk", 1.6)),
+            primary_cp_kj_kgk=primary_coolant_cp_kj_kgk(
+                config,
+                temperature_c=average_primary_temperature_c(config.reactor),
+            ),
             steam_generator_effectiveness=float(config.reactor.get("steam_generator_effectiveness", 0.92)),
             turbine_efficiency=float(config.reactor.get("turbine_efficiency", 0.42)),
             generator_efficiency=float(config.reactor.get("generator_efficiency", 0.98)),
@@ -426,13 +444,23 @@ def _validate_layers(layers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return invariants
 
 
-def _create_materials(material_specs: dict[str, Any]):
+def _create_materials(config: CaseConfig):
     materials = {}
-    for name, spec in material_specs.items():
+    for name, spec in config.materials.items():
         material = openmc.Material(name=spec.get("name", name))
         density = spec.get("density")
         if density:
-            material.set_density(density["units"], density["value"])
+            density_temperature_c = property_reference_temperature_c(
+                config.reactor,
+                density,
+                require_declared=True,
+            )
+            density_value_si = evaluate_property(
+                density,
+                temperature_c=density_temperature_c,
+                expected_quantity="density",
+            )
+            material.set_density("kg/m3", density_value_si)
         for nuclide in spec.get("nuclides", []):
             material.add_nuclide(nuclide["name"], nuclide["ao"])
         for element in spec.get("elements", []):
@@ -444,7 +472,7 @@ def _create_materials(material_specs: dict[str, Any]):
 
 
 def _create_openmc_pin_model(config: CaseConfig):
-    materials = _create_materials(config.materials)
+    materials = _create_materials(config)
     geometry = config.geometry
     layers = geometry["layers"]
     surfaces = []
@@ -488,7 +516,7 @@ def _create_openmc_pin_model(config: CaseConfig):
 
 
 def _create_openmc_ring_core_model(config: CaseConfig):
-    materials = _create_materials(config.materials)
+    materials = _create_materials(config)
     geometry = config.geometry
     channel_layers = geometry["channel_layers"]
     core_radius = geometry["core_radius"]
@@ -555,7 +583,7 @@ def _create_openmc_ring_core_model(config: CaseConfig):
 
 
 def _create_openmc_detailed_msr_model(config: CaseConfig, resolved) -> Any:
-    materials = _create_materials(config.materials)
+    materials = _create_materials(config)
     geometry = config.geometry
     boundary = geometry.get("boundary", "reflective")
     axial_boundary = geometry.get("axial_boundary", "vacuum")

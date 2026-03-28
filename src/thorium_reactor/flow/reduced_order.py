@@ -3,8 +3,11 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+from thorium_reactor.flow.properties import average_primary_temperature_c, evaluate_fluid_properties
 
-DEFAULT_ALLOCATION_RULE = "salt_area_weighted"
+
+DEFAULT_ALLOCATION_RULE = "pressure_balanced"
+LEGACY_ALLOCATION_RULE = "salt_area_weighted"
 ACTIVE_CHANNEL_SELECTION = "plenum_connected_salt_bearing_channels"
 DISCONNECTED_INVENTORY_SELECTION = "reflector_backed_salt_bearing_channels"
 
@@ -16,11 +19,16 @@ def build_reduced_order_flow_summary(
 ) -> dict[str, Any]:
     reduced_order_config = config.flow.get("reduced_order", {})
     allocation_rule = reduced_order_config.get("allocation_rule", DEFAULT_ALLOCATION_RULE)
-    if allocation_rule != DEFAULT_ALLOCATION_RULE:
+    if allocation_rule not in {DEFAULT_ALLOCATION_RULE, LEGACY_ALLOCATION_RULE}:
         raise ValueError(f"Unsupported reduced-order flow allocation rule: {allocation_rule}")
 
     salt_material_name = config.geometry.get("salt_material", "fuel_salt")
-    density_kg_m3 = _density_to_kg_m3(config.materials[salt_material_name]["density"])
+    bulk_temperature_c = average_primary_temperature_c(config.reactor)
+    salt_properties = evaluate_fluid_properties(
+        config.materials[salt_material_name],
+        temperature_c=bulk_temperature_c,
+    )
+    density_kg_m3 = float(salt_properties["density_kg_m3"])
 
     active_channels: list[dict[str, Any]] = []
     disconnected_channels: list[dict[str, Any]] = []
@@ -124,6 +132,8 @@ def build_reduced_order_flow_summary(
         "active_channel_selection": ACTIVE_CHANNEL_SELECTION,
         "disconnected_inventory_selection": DISCONNECTED_INVENTORY_SELECTION,
         "salt_density_kg_m3": _round_float(density_kg_m3),
+        "salt_bulk_temperature_c": _round_float(bulk_temperature_c),
+        "salt_properties": salt_properties,
         "primary_mass_flow_kg_s": _round_float(primary_mass_flow_kg_s),
         "active_flow": {
             "channel_count": len(active_channels),
@@ -146,20 +156,17 @@ def build_reduced_order_flow_summary(
 
 
 def _allocation_weight(channel: dict[str, Any], allocation_rule: str) -> float:
-    if allocation_rule == DEFAULT_ALLOCATION_RULE:
+    if allocation_rule == LEGACY_ALLOCATION_RULE:
         return float(channel["salt_cross_section_area_cm2"])
+    if allocation_rule == DEFAULT_ALLOCATION_RULE:
+        area_cm2 = float(channel["salt_cross_section_area_cm2"])
+        hydraulic_diameter_cm = float(channel.get("salt_hydraulic_diameter_cm", 0.0))
+        flow_length_cm = area_cm2 and float(channel.get("salt_volume_cm3", 0.0)) / area_cm2 or 0.0
+        if area_cm2 <= 0.0 or hydraulic_diameter_cm <= 0.0 or flow_length_cm <= 0.0:
+            return 0.0
+        # First-pass conductance proxy for equal-dp channel splitting.
+        return area_cm2 * hydraulic_diameter_cm * hydraulic_diameter_cm / flow_length_cm
     raise ValueError(f"Unsupported reduced-order flow allocation rule: {allocation_rule}")
-
-
-def _density_to_kg_m3(density: dict[str, Any]) -> float:
-    units = density["units"]
-    value = float(density["value"])
-    if units == "g/cm3":
-        return value * 1000.0
-    if units == "kg/m3":
-        return value
-    raise ValueError(f"Unsupported density units for reduced-order flow analysis: {units}")
-
 
 def _round_float(value: float) -> float:
     return round(float(value), 6)

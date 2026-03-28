@@ -3,6 +3,7 @@ reactor:
   name: Example Pin Smoke Test
   family: PWR-inspired regression pin
   stage: smoke
+  property_reference_temperature_c: 293.0
   design_power_mwth: 1.0
   hot_leg_temp_c: 320.0
   cold_leg_temp_c: 290.0

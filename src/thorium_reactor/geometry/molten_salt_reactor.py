@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import math
 from typing import Any
 
+from thorium_reactor.flow.properties import average_primary_temperature_c, evaluate_fluid_properties, evaluate_primary_coolant_properties, primary_coolant_cp_kj_kgk
+
 
 CHANNEL_RADIUS_TOLERANCE = 1.0e-3
 
@@ -326,6 +328,7 @@ def _build_channel_flow_interfaces(
                 "upper_boundary_region": "upper_plenum" if plenum_connected else "upper_reflector",
                 "interface_class": "plenum_connected" if plenum_connected else "reflector_backed",
                 "salt_cross_section_area_cm2": salt_cross_section_area,
+                "salt_hydraulic_diameter_cm": _salt_hydraulic_diameter_cm(channel["layers"], salt_material),
                 "salt_volume_cm3": salt_cross_section_area * resolved.active_height,
             }
         )
@@ -336,6 +339,23 @@ def _annulus_area(layer: dict[str, Any]) -> float:
     inner_radius = float(layer.get("inner_radius", 0.0))
     outer_radius = float(layer["outer_radius"])
     return math.pi * ((outer_radius * outer_radius) - (inner_radius * inner_radius))
+
+
+def _salt_hydraulic_diameter_cm(layers: list[dict[str, Any]], salt_material: str) -> float:
+    total_area_cm2 = 0.0
+    wetted_perimeter_cm = 0.0
+    for layer in layers:
+        if layer.get("material") != salt_material:
+            continue
+        inner_radius = float(layer.get("inner_radius", 0.0))
+        outer_radius = float(layer["outer_radius"])
+        total_area_cm2 += math.pi * max(outer_radius * outer_radius - inner_radius * inner_radius, 0.0)
+        if inner_radius > 0.0:
+            wetted_perimeter_cm += 2.0 * math.pi * inner_radius
+        wetted_perimeter_cm += 2.0 * math.pi * outer_radius
+    if wetted_perimeter_cm <= 0.0:
+        return 0.0
+    return 4.0 * total_area_cm2 / wetted_perimeter_cm
 
 
 def _round_metric(value: float | int) -> float | int:
@@ -772,7 +792,7 @@ def _estimate_animation_physics(
     thermal_power_mw = float(config.reactor.get("design_power_mwth", 0.0))
     hot_leg_temp_c = float(config.reactor.get("hot_leg_temp_c", 700.0))
     cold_leg_temp_c = float(config.reactor.get("cold_leg_temp_c", 560.0))
-    primary_cp_kj_kgk = float(config.reactor.get("primary_cp_kj_kgk", 1.6))
+    primary_cp_kj_kgk = primary_coolant_cp_kj_kgk(config, temperature_c=average_primary_temperature_c(config.reactor))
     delta_t = max(hot_leg_temp_c - cold_leg_temp_c, 1.0)
     primary_mass_flow_kg_s = thermal_power_mw * 1000.0 / (primary_cp_kj_kgk * delta_t)
 
@@ -781,9 +801,13 @@ def _estimate_animation_physics(
     active_flow_area_cm2 = float(interface_metrics["plenum_connected_salt_area_cm2"]) + float(
         interface_metrics["reflector_backed_salt_area_cm2"]
     )
-    salt_density_kg_m3 = _density_to_kg_m3(config.materials[config.geometry.get("salt_material", "fuel_salt")]["density"])
-    coolant_density_kg_m3 = _density_to_kg_m3(
-        config.materials[str(render_layout.get("pool", {}).get("material", config.geometry.get("salt_material", "fuel_salt")))]["density"]
+    bulk_temperature_c = average_primary_temperature_c(config.reactor)
+    salt_density_kg_m3 = float(evaluate_primary_coolant_properties(config, temperature_c=bulk_temperature_c)["density_kg_m3"])
+    coolant_density_kg_m3 = float(
+        evaluate_fluid_properties(
+            config.materials[str(render_layout.get("pool", {}).get("material", config.geometry.get("salt_material", "fuel_salt")))],
+            temperature_c=bulk_temperature_c,
+        )["density_kg_m3"]
     )
 
     volumetric_flow_m3_s = primary_mass_flow_kg_s / salt_density_kg_m3 if salt_density_kg_m3 > 0.0 else 0.0
@@ -821,17 +845,6 @@ def _normalize_animation_speed(velocity_m_s: float, reference_velocity_m_s: floa
         return 0.5
     scaled = velocity_m_s / reference_velocity_m_s
     return max(0.2, min(1.2, 0.18 + scaled))
-
-
-def _density_to_kg_m3(density: dict[str, Any]) -> float:
-    units = density["units"]
-    value = float(density["value"])
-    if units == "g/cm3":
-        return value * 1000.0
-    if units == "kg/m3":
-        return value
-    raise ValueError(f"Unsupported density units: {units}")
-
 
 def _estimate_pool_recirculation_area_cm2(
     render_layout: dict[str, Any],

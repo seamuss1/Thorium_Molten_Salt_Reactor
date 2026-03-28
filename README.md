@@ -80,3 +80,7 @@ Each active run is written to `results/<case>/<run_id>/` and is expected to cont
 ## Validation Status
 
 The benchmark folder now supports structured evidence, assumptions, target confidence, and traceability scoring, but the current target values are still explicitly labeled surrogate acceptance bands until citation-complete physics validation is added. Tighten those values over time as literature extraction and benchmarking mature.
+
+## Modeling Strategy Notes
+
+- [docs/thermal-hydraulics-modeling-strategy.md](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/docs/thermal-hydraulics-modeling-strategy.md) describes the recommended analysis ladder for this repo: whole-loop reduced-order thermal-hydraulics first, porous or homogenized core models second, and local 3D CFD only where geometry controls the answer. It also lays out the additional precursor-transport and neutronics coupling needed for liquid-fueled MSR studies.

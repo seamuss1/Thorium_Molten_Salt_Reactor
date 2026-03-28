@@ -81,7 +81,7 @@ def test_immersed_pool_reference_case_builds_with_reference_render_layout() -> N
     }
     assert built.geometry_description["render_layout"] == "immersed_pool_reference"
     physics = built.geometry_description["animation"]["physics"]
-    assert physics["primary_mass_flow_kg_s"] == pytest.approx(37.037037, rel=1.0e-6)
+    assert physics["primary_mass_flow_kg_s"] == pytest.approx(37.319852, rel=1.0e-6)
     assert physics["active_flow_area_cm2"] == pytest.approx(11.236156, rel=1.0e-6)
     assert 1.0 <= physics["active_channel_velocity_m_s"] <= 12.0
     assert 1.0 <= physics["loop_pipe_velocity_m_s"] <= 10.0
