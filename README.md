@@ -23,6 +23,7 @@ The `tmsr_lf1_core` case now resolves to a detailed CSG reactor stack with activ
 - `example_pin`: fast smoke/regression case
 - `fuel_channel`: layered fuel-channel submodel
 - `tmsr_lf1_core`: detailed OpenMC CSG core with vessel stack and specialized channel families inspired by the TMSR-LF1 concept
+- `immersed_pool_reference`: reference-inspired immersed-pool concept with offset core enclosure, primary-loop hardware, and animated flow render output
 
 ## Environment Setup
 
@@ -33,7 +34,7 @@ micromamba env create -f environment.yml
 micromamba activate thorium-reactor
 ```
 
-On Windows, `environment.yml` creates the base runnable environment for config loading, validation, reporting, geometry export, and BOP calculations. For solver-backed OpenMC runs on a supported host, use `environment-openmc-linux.yml`.
+On Windows, `environment.yml` creates the base runnable environment for config loading, validation, reporting, geometry export, BOP calculations, and `ffmpeg`-backed animation export. For solver-backed OpenMC runs on a supported host, use `environment-openmc-linux.yml`.
 
 ## Docker OpenMC Runtime
 
@@ -60,8 +61,8 @@ Command behavior:
 - `reactor build <case>` creates a new result bundle, emits a build manifest, geometry exports, and OpenMC XML if OpenMC is installed.
 - `reactor run <case>` performs the build, runs OpenMC when available, computes steady-state BOP outputs, and writes `summary.json` plus `metrics.csv`.
 - `reactor validate <case>` checks geometry/material invariants and compares available metrics to configured acceptance bands.
-- `reactor report <case>` generates `report.md` from the latest or specified run bundle.
-- `reactor render <case>` writes procedural geometry exports for visualization workflows, including OBJ, STL, and a rendered PNG for the detailed core case.
+- `reactor report <case>` generates `report.md` from the latest or specified run bundle, including benchmark traceability scorecards when benchmark metadata is present.
+- `reactor render <case>` writes procedural geometry exports for visualization workflows, including OBJ, STL, watertight mesh validation JSON, a rendered PNG, animated GIF flow output, and MP4 video output when a case defines flow-animation paths and `ffmpeg` is available.
 
 ## Result Bundle Contract
 
@@ -72,9 +73,10 @@ Each active run is written to `results/<case>/<run_id>/` and is expected to cont
 - `metrics.csv`
 - `validation.json` after validation
 - `report.md` after report generation
+- benchmark traceability in `build_manifest.json` and `summary.json` when a case is linked to benchmark metadata
 - `openmc/` for solver XML and statepoints
-- `geometry/exports/` for SVG, OBJ, STL, and rendered PNG geometry exports
+- `geometry/exports/` for SVG, OBJ, STL, watertight mesh validation, rendered PNG, and optional animated GIF or MP4 geometry exports
 
 ## Validation Status
 
-The benchmark folder currently contains explicitly labeled surrogate acceptance bands so the workflow is versioned and reproducible before citation-complete physics validation is added. Tighten those values over time as literature extraction and benchmarking mature.
+The benchmark folder now supports structured evidence, assumptions, target confidence, and traceability scoring, but the current target values are still explicitly labeled surrogate acceptance bands until citation-complete physics validation is added. Tighten those values over time as literature extraction and benchmarking mature.

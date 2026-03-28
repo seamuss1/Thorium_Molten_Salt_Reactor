@@ -3,34 +3,47 @@ references:
   - Public TMSR-LF1 concept descriptions and open molten-salt literature should replace or tighten these bands.
   - Current values are explicitly labeled surrogate acceptance bounds for implementation scaffolding.
 assumptions:
-  - This repository targets an openly reproducible, TMSR-LF1-inspired model rather than a proprietary plant replica.
-  - Channel geometry is derived from the legacy thesis scripts, corrected for concentric consistency.
+  - id: open_reproducible_scope
+    text: This repository targets an openly reproducible, TMSR-LF1-inspired model rather than a proprietary plant replica.
+    basis: project_scope
+    confidence: medium
+    evidence_refs: [openmsr-archive]
+  - id: legacy_geometry_seed
+    text: Channel geometry is derived from the legacy thesis scripts, corrected for concentric consistency.
+    basis: archived_thesis_geometry
+    confidence: medium
+    evidence_refs: [openmsr-msre, openmsr-archive]
 evidence:
   - id: openmsr-msre
     topic: CAD-backed benchmark precedent
     source: https://github.com/openmsr/msre
     claim: The MSRE project combines a detailed CAD model with OpenMC benchmarks, settable control rods, temperature-coefficient studies, depletion analysis with fission-product removal, and heat-exchanger thermohydraulics.
     relevance: This repo already has a strong config-driven CSG workflow; the next step is turning it into a benchmark-grade reactor twin with deeper physics and better traceability.
+    confidence: medium
   - id: openmsr-cad-to-openmc
     topic: Dual geometry pipeline
     source: https://github.com/openmsr/CAD_to_OpenMC
     claim: CAD_to_OpenMC links STEP CAD geometry to OpenMC-readable h5m geometry, making CAD-informed neutronics part of an open workflow.
     relevance: A future TMSR case could support both today's procedural CSG build and an optional CAD-to-h5m benchmark path for geometry cross-checks.
+    confidence: medium
   - id: openmsr-msrdynamics
     topic: Transient modeling bridge
     source: https://github.com/openmsr/msrDynamics
     claim: msrDynamics provides a JiTCDDE-based nodal dynamics API with point kinetics, convective heat transfer, and advective heat transfer for flowing-fuel systems.
     relevance: Your steady-state balance-of-plant model is a clean starting point for a transient layer that captures delayed transport and load-following behavior.
+    confidence: medium
   - id: openmsr-depletion-chains
     topic: Flowing-fuel depletion
     source: https://github.com/openmsr/ca_depletion_chains
     claim: The repository publishes modified OpenMC depletion chains, including volatile and fission-product removal variants relevant to molten-salt systems.
     relevance: This would let the repo move beyond single-state keff snapshots into cleanup, poison-control, and burnup what-if studies.
+    confidence: medium
   - id: openmsr-archive
     topic: Searchable literature backbone
     source: https://github.com/openmsr/msr-archive
     claim: The archive curates OCR-searchable molten-salt reactor literature so modeling assumptions can be traced back to source documents more quickly.
     relevance: Benchmark assumptions in this repo should grow from surrogate placeholders into source-linked claims with explicit confidence levels.
+    confidence: high
 novelty_tracks:
   - name: Evidence-linked reactor twin
     summary: Bind every validation target, geometry assumption, and operating parameter to a literature note or benchmark source, then surface the confidence level in generated reports.
@@ -39,9 +52,32 @@ novelty_tracks:
   - name: Load-following salt reactor sandbox
     summary: Couple neutronics outputs with a nodal transient model to explore delayed-neutron drift, salt transport lag, and plant-level control scenarios that are hard to show in static LWR-style workflows.
 targets:
-  nominal_thermal_power_mwth: 250.0
-  nominal_hot_leg_temp_c: 700.0
-  nominal_cold_leg_temp_c: 560.0
+  nominal_thermal_power_mwth:
+    value: 250.0
+    units: MWth
+    status: surrogate
+    confidence: low
+    evidence_refs: [openmsr-archive]
+    note: Replace with a citation-backed TMSR-LF1 thermal rating once the benchmark case is source-linked.
+  nominal_hot_leg_temp_c:
+    value: 700.0
+    units: C
+    status: surrogate
+    confidence: low
+    evidence_refs: [openmsr-archive]
+    note: Replace with a source-linked primary outlet temperature when literature extraction is complete.
+  nominal_cold_leg_temp_c:
+    value: 560.0
+    units: C
+    status: surrogate
+    confidence: low
+    evidence_refs: [openmsr-archive]
+    note: Replace with a source-linked primary inlet temperature when literature extraction is complete.
   expected_keff_band:
     min: 0.98
     max: 1.08
+    units: delta-k/k
+    status: surrogate
+    confidence: low
+    evidence_refs: [openmsr-msre, openmsr-archive]
+    note: Tighten this band against a benchmarked reference model once solver-backed cross-checking is in place.

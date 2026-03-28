@@ -1,0 +1,241 @@
+name: immersed_pool_reference
+reactor:
+  name: Immersed Pool MSR Reference
+  family: reference-inspired immersed pool MSR demonstrator
+  stage: full-core
+  design_power_mwth: 8.0
+  hot_leg_temp_c: 690.0
+  cold_leg_temp_c: 555.0
+  primary_cp_kj_kgk: 1.6
+  primary_dynamic_viscosity_pa_s: 0.012
+  primary_pump_efficiency: 0.74
+  primary_elbow_loss_coefficient: 0.9
+  primary_terminal_loss_coefficient: 1.6
+  steam_generator_effectiveness: 0.91
+  steam_generator_overall_u_w_m2k: 820.0
+  secondary_inlet_temp_c: 430.0
+  secondary_outlet_temp_c: 585.0
+  turbine_efficiency: 0.41
+  generator_efficiency: 0.98
+  fuel_heavy_metal_mass_fraction: 0.013
+  fissile_mass_fraction_of_heavy_metal: 0.065
+  cleanup_turnover_days: 10.0
+  cleanup_removal_efficiency: 0.78
+  xenon_yield_fraction: 0.0028
+  xenon_removal_fraction: 0.9
+  protactinium_holdup_days: 2.0
+  benchmark: benchmarks/tmsr_lf1/benchmark.yaml
+materials:
+  fuel_salt:
+    name: fuel_salt
+    density: { units: g/cm3, value: 3.2 }
+    nuclides:
+      - { name: Li7, ao: 0.325 }
+      - { name: F19, ao: 0.5663333333 }
+      - { name: Be9, ao: 0.0966666667 }
+      - { name: Zr90, ao: 0.005145 }
+      - { name: Zr91, ao: 0.001122 }
+      - { name: Zr92, ao: 0.001715 }
+      - { name: Zr94, ao: 0.001738 }
+      - { name: Zr96, ao: 0.000280 }
+      - { name: U233, ao: 0.000120 }
+      - { name: U238, ao: 0.001880 }
+  coolant_salt:
+    name: coolant_salt
+    density: { units: g/cm3, value: 3.0 }
+    nuclides:
+      - { name: Li7, ao: 0.44 }
+      - { name: F19, ao: 0.42 }
+      - { name: Be9, ao: 0.14 }
+  graphite:
+    name: graphite
+    density: { units: g/cm3, value: 1.8 }
+    elements:
+      - { name: C, ao: 1.0 }
+  pipe:
+    name: pipe
+    density: { units: g/cm3, value: 8.9 }
+    elements:
+      - { name: Ni, ao: 0.71 }
+      - { name: Mo, ao: 0.17 }
+      - { name: Cr, ao: 0.07 }
+      - { name: Fe, ao: 0.05 }
+  insulation:
+    name: insulation
+    density: { units: g/cm3, value: 2.4 }
+    elements:
+      - { name: Al, ao: 0.4 }
+      - { name: O, ao: 0.6 }
+  air:
+    name: air
+    density: { units: g/cm3, value: 0.00018 }
+    elements:
+      - { name: He, ao: 1.0 }
+geometry:
+  kind: ring_lattice_core
+  style: detailed_msr
+  pitch: 220.0
+  boundary: reflective
+  axial_boundary: vacuum
+  core_radius: 20.5
+  plenum_radius: 13.5
+  reflector_outer_radius: 24.0
+  downcomer_liner_outer_radius: 25.2
+  downcomer_outer_radius: 29.8
+  vessel_outer_radius: 31.6
+  guard_gap_outer_radius: 33.6
+  guard_vessel_outer_radius: 36.2
+  matrix_material: graphite
+  salt_material: fuel_salt
+  structure_material: pipe
+  background_material: air
+  height_cm: 76.0
+  lower_plenum_height_cm: 10.0
+  active_core_height_cm: 52.0
+  upper_plenum_height_cm: 8.0
+  cover_gas_height_cm: 6.0
+  channel_layers:
+    - { name: moderator_center, material: graphite, inner_radius: 0.0, outer_radius: 0.22 }
+    - { name: fuel_annulus, material: fuel_salt, inner_radius: 0.2201, outer_radius: 0.34, tag_as: fuel }
+    - { name: gas_gap_inner, material: null, inner_radius: 0.34, outer_radius: 0.35 }
+    - { name: primary_pipe, material: pipe, inner_radius: 0.35, outer_radius: 0.42 }
+    - { name: gas_gap_outer, material: null, inner_radius: 0.4201, outer_radius: 0.52 }
+  special_channels:
+    control_guides:
+      ring_radius: 8.2
+      every: 2
+      layers:
+        - { name: control_void, material: air, inner_radius: 0.0, outer_radius: 0.14, tag_as: control }
+        - { name: guide_tube, material: pipe, inner_radius: 0.1401, outer_radius: 0.22 }
+        - { name: bypass_salt, material: fuel_salt, inner_radius: 0.2201, outer_radius: 0.31 }
+        - { name: guide_graphite, material: graphite, inner_radius: 0.3101, outer_radius: 0.52 }
+    instrumentation_wells:
+      ring_radius: 16.4
+      every: 4
+      start_index: 1
+      layers:
+        - { name: sensor_well, material: air, inner_radius: 0.0, outer_radius: 0.11, tag_as: instrumentation }
+        - { name: sensor_sheath, material: pipe, inner_radius: 0.1101, outer_radius: 0.17 }
+        - { name: purge_annulus, material: air, inner_radius: 0.1701, outer_radius: 0.25 }
+        - { name: shield_graphite, material: graphite, inner_radius: 0.2501, outer_radius: 0.52 }
+  rings:
+    - { radius: 0.0, count: 1 }
+    - { radius: 4.1, count: 6 }
+    - { radius: 8.2, count: 12 }
+    - { radius: 12.3, count: 18 }
+    - { radius: 16.4, count: 24 }
+  render_layout:
+    type: immersed_pool_reference
+    core_offset_x_cm: 24.0
+    core_offset_y_cm: -8.0
+    pool:
+      radius_cm: 64.0
+      wall_thickness_cm: 1.8
+      top_z_cm: 64.0
+      cylinder_bottom_z_cm: -24.0
+      bottom_head_depth_cm: 40.0
+      fill_top_z_cm: 44.0
+      material: coolant_salt
+      shell_material: pipe
+      shell_opacity: 0.68
+      fill_opacity: 0.46
+    containment:
+      inner_radius_cm: 76.0
+      outer_radius_cm: 86.0
+      top_z_cm: 80.0
+      bottom_z_cm: -74.0
+      material: pipe
+      opacity: 0.34
+    core_box:
+      center_x_cm: 24.0
+      center_y_cm: -8.0
+      outer_width_cm: 54.0
+      outer_depth_cm: 54.0
+      wall_thickness_cm: 3.8
+      base_height_cm: 4.8
+      floor_z_cm: -31.0
+      cavity_top_z_cm: 36.0
+      wall_material: insulation
+      cavity_material: coolant_salt
+      barrel_radius_cm: 22.0
+      riser_material: insulation
+      control_material: pipe
+      control_riser_top_z_cm: 46.0
+    primary_loop:
+      heat_exchanger:
+        material: insulation
+        x_min_cm: -54.0
+        x_max_cm: -24.0
+        y_cm: -14.0
+        z_cm: 16.0
+        radius_cm: 4.4
+      pump:
+        material: pipe
+        x_cm: -34.0
+        y_cm: -8.0
+        z_min_cm: 22.0
+        z_max_cm: 34.0
+        radius_cm: 2.6
+        header_radius_cm: 4.2
+      pipes:
+        - radius_cm: 2.1
+          material: pipe
+          points:
+            - [-24.0, -14.0, 16.0]
+            - [-24.0, -14.0, 24.0]
+            - [-24.0, -8.0, 24.0]
+            - [-34.0, -8.0, 24.0]
+        - radius_cm: 2.1
+          material: pipe
+          points:
+            - [-46.0, -14.0, 16.0]
+            - [-46.0, -14.0, -8.0]
+            - [6.0, -14.0, -8.0]
+            - [6.0, -12.0, -8.0]
+            - [22.0, -12.0, -8.0]
+        - radius_cm: 2.0
+          material: pipe
+          points:
+            - [-34.0, -8.0, 34.0]
+            - [2.0, -8.0, 34.0]
+            - [16.0, -8.0, 34.0]
+            - [16.0, -8.0, 26.0]
+simulation:
+  mode: eigenvalue
+  particles: 70000
+  batches: 100
+  inactive: 20
+  source:
+    type: point
+    parameters: [0.0, 0.0, 0.0]
+  tallies:
+    - name: fuel_reaction_rates
+      cell: fuel
+      nuclides: [U233]
+      scores: [total, fission, absorption, "(n,gamma)"]
+    - name: core_flux
+      cell: core_matrix
+      scores: [flux]
+reporting:
+  plots:
+    - name: immersed_pool_reference_render
+      kind: png
+flow:
+  reduced_order:
+    allocation_rule: salt_area_weighted
+validation_targets:
+  expected_cells:
+    metric: expected_cells
+    source: metrics
+    min: 306
+    max: 306
+  channel_count:
+    metric: channel_count
+    source: build_manifest
+    min: 61
+    max: 61
+  keff_pool_band:
+    metric: keff
+    source: metrics
+    min: 0.85
+    max: 1.15

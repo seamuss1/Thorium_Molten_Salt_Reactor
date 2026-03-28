@@ -5,8 +5,10 @@ import json
 from json import JSONDecodeError
 from pathlib import Path
 
+from thorium_reactor.benchmarking import run_solver_backed_benchmark
 from thorium_reactor.config import load_case_config, load_yaml
 from thorium_reactor.geometry.exporters import export_geometry
+from thorium_reactor.neutronics.openmc_compat import openmc
 from thorium_reactor.neutronics.workflows import build_case, run_case, validate_case
 from thorium_reactor.paths import ResultBundle, case_config_path, create_result_bundle, discover_repo_root, latest_result_bundle
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot, load_plot_manifest
@@ -18,12 +20,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo-root", type=Path, default=None, help="Override the repository root.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    for command_name in ("build", "run", "validate", "report", "render"):
+    for command_name in ("build", "run", "validate", "report", "render", "benchmark"):
         command = subparsers.add_parser(command_name, help=f"{command_name.capitalize()} a reactor case")
         command.add_argument("case", help="Case name under configs/cases")
         command.add_argument("--run-id", default=None, help="Reuse or create a specific results run id")
         if command_name == "run":
             command.add_argument("--no-solver", action="store_true", help="Skip calling the OpenMC solver")
+        if command_name == "benchmark":
+            command.add_argument(
+                "--docker-openmc",
+                action="store_true",
+                help="Run the benchmark case through docker-compose.openmc.yml instead of the local runtime",
+            )
     return parser
 
 
@@ -34,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = args.repo_root.resolve() if args.repo_root else discover_repo_root()
     config = load_case_config(case_config_path(repo_root, args.case))
 
-    if args.command in {"build", "run"}:
+    if args.command in {"build", "run", "benchmark"}:
         bundle = create_result_bundle(repo_root, config.name, args.run_id)
     else:
         bundle = latest_result_bundle(repo_root, config.name) if args.run_id is None else _load_existing_bundle(repo_root, config.name, args.run_id)
@@ -102,6 +110,51 @@ def main(argv: list[str] | None = None) -> int:
         report = generate_report(config.name, config.data, summary_path, validation_path, geometry_assets, benchmark, plot_assets)
         report_path = bundle.write_text("report.md", report)
         print(report_path)
+        return 0
+
+    if args.command == "benchmark":
+        if args.docker_openmc:
+            execution = run_solver_backed_benchmark(repo_root, config.name, bundle.run_id)
+            bundle.write_json("benchmark_execution.json", execution)
+        else:
+            if openmc is None:
+                raise RuntimeError(
+                    "Benchmark runs require a solver-backed OpenMC runtime. "
+                    "Use `reactor benchmark <case> --docker-openmc` or run on a supported host."
+                )
+            summary = run_case(config, bundle, solver_enabled=True)
+            bundle.write_json(
+                "benchmark_execution.json",
+                {
+                    "runtime": "local-openmc",
+                    "summary_status": summary.get("neutronics", {}).get("status"),
+                },
+            )
+
+        summary_path = bundle.root / "summary.json"
+        if not summary_path.exists():
+            raise FileNotFoundError(
+                f"No summary found for benchmark case '{config.name}' in {bundle.root}. "
+                "The solver-backed benchmark run did not produce a summary bundle."
+            )
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        generate_summary_plots(bundle, summary)
+        validation = validate_case(config, bundle, summary=summary)
+        generate_validation_plot(bundle, validation)
+        geometry_assets = None
+        render_assets_path = bundle.root / "render_assets.json"
+        if render_assets_path.exists():
+            geometry_assets = json.loads(render_assets_path.read_text(encoding="utf-8"))
+        else:
+            build_manifest_path = bundle.root / "build_manifest.json"
+            if build_manifest_path.exists():
+                build_manifest = json.loads(build_manifest_path.read_text(encoding="utf-8"))
+                geometry_assets = build_manifest.get("geometry_assets")
+        plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
+        benchmark = load_yaml(config.benchmark_file) if config.benchmark_file and config.benchmark_file.exists() else {}
+        report = generate_report(config.name, config.data, summary_path, bundle.root / "validation.json", geometry_assets, benchmark, plot_assets)
+        bundle.write_text("report.md", report)
+        print(bundle.root)
         return 0
 
     return 1

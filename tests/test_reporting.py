@@ -49,7 +49,15 @@ def test_generate_report_includes_benchmark_evidence_and_novelty_tracks() -> Non
                     "stage": "full-core",
                     "design_power_mwth": 250.0,
                     "benchmark": "benchmarks/tmsr_lf1/benchmark.yaml",
-                }
+                },
+                "validation_targets": {
+                    "keff_core_band": {
+                        "metric": "keff",
+                        "source": "metrics",
+                        "min": 0.98,
+                        "max": 1.08,
+                    }
+                },
             },
             summary_path,
             validation_path,
@@ -57,13 +65,23 @@ def test_generate_report_includes_benchmark_evidence_and_novelty_tracks() -> Non
             {
                 "title": "TMSR-LF1-inspired surrogate benchmark",
                 "references": ["Current values are surrogate acceptance bands."],
-                "assumptions": ["The model is openly reproducible rather than proprietary."],
+                "assumptions": [
+                    {
+                        "id": "open_scope",
+                        "text": "The model is openly reproducible rather than proprietary.",
+                        "basis": "project_scope",
+                        "confidence": "medium",
+                        "evidence_refs": ["msrdynamics"],
+                    }
+                ],
                 "evidence": [
                     {
+                        "id": "msrdynamics",
                         "topic": "Transient modeling bridge",
                         "source": "https://github.com/openmsr/msrDynamics",
                         "claim": "msrDynamics provides a nodal dynamics API for flowing-fuel systems.",
                         "relevance": "This repo can grow from steady-state BOP into transients.",
+                        "confidence": "medium",
                     }
                 ],
                 "novelty_tracks": [
@@ -72,11 +90,31 @@ def test_generate_report_includes_benchmark_evidence_and_novelty_tracks() -> Non
                         "summary": "Tie assumptions to source-backed evidence and confidence.",
                     }
                 ],
+                "targets": {
+                    "nominal_thermal_power_mwth": {
+                        "value": 250.0,
+                        "units": "MWth",
+                        "status": "surrogate",
+                        "confidence": "low",
+                        "evidence_refs": ["msrdynamics"],
+                    },
+                    "expected_keff_band": {
+                        "min": 0.98,
+                        "max": 1.08,
+                        "units": "delta-k/k",
+                        "status": "surrogate",
+                        "confidence": "low",
+                        "evidence_refs": ["msrdynamics"],
+                    },
+                },
             },
         )
 
         assert "## Benchmark Context" in report
         assert "Current values are surrogate acceptance bands." in report
+        assert "## Benchmark Traceability" in report
+        assert "Traceability score" in report
+        assert "Surrogate targets remaining" in report
         assert "## Evidence Trail" in report
         assert "Transient modeling bridge" in report
         assert "https://github.com/openmsr/msrDynamics" in report
@@ -161,6 +199,33 @@ def test_report_includes_reduced_order_flow_section() -> None:
                             },
                         }
                     },
+                    "primary_system": {
+                        "loop_hydraulics": {
+                            "total_pressure_drop_kpa": 31.5,
+                            "pump_head_m": 1.04,
+                            "pump_shaft_power_kw": 1.7,
+                            "max_reynolds_number": 91234.0,
+                        },
+                        "heat_exchanger": {
+                            "duty_mw": 7.28,
+                            "required_area_m2": 63.4,
+                            "lmtd_c": 104.1,
+                        },
+                        "inventory": {
+                            "fuel_salt": {"total_m3": 0.092},
+                            "coolant_salt": {"net_pool_inventory_m3": 11.4},
+                        },
+                    },
+                    "fuel_cycle": {
+                        "heavy_metal_inventory_kg": 3.9,
+                        "fissile_inventory_kg": 0.25,
+                        "specific_power_mw_per_t_hm": 2051.3,
+                        "cleanup_turnover_days": 10.0,
+                        "cleanup_removal_efficiency": 0.78,
+                        "xenon_generation_rate_atoms_s": 6.99e14,
+                        "xenon_removal_fraction": 0.9,
+                        "protactinium_holdup_days": 2.0,
+                    },
                 }
             ),
             encoding="utf-8",
@@ -183,9 +248,13 @@ def test_report_includes_reduced_order_flow_section() -> None:
         )
 
         assert "## Reduced-Order Flow" in report
+        assert "## Primary System" in report
+        assert "## Fuel Cycle Assumptions" in report
         assert "salt_area_weighted" in report
         assert "37" in report
         assert "355.397391" in report
         assert "0.005402" in report
+        assert "31.5" in report
+        assert "63.4" in report
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)

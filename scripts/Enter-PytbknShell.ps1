@@ -67,6 +67,7 @@ else {
 Add-PathEntries -Entries @(
     $runtimePrefix,
     (Join-Path $runtimePrefix "Scripts"),
+    (Join-Path $runtimePrefix "Library\\bin"),
     (Join-Path $repoRoot ".tools\\Library\\bin")
 )
 
@@ -85,3 +86,4 @@ Write-Host "  repo   $repoRoot"
 Write-Host "  python $pythonExe"
 Write-Host "  tests  pytest"
 Write-Host "  cli    reactor"
+Write-Host "  video  ffmpeg"

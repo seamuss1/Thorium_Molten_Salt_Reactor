@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from thorium_reactor.benchmarking import assess_benchmark_traceability
 from thorium_reactor.bop.steady_state import BOPInputs, run_steady_state_bop
 from thorium_reactor.config import CaseConfig, load_yaml
+from thorium_reactor.flow.primary_system import build_primary_system_summary
 from thorium_reactor.flow.reduced_order import build_reduced_order_flow_summary
 from thorium_reactor.geometry.exporters import export_geometry
 from thorium_reactor.geometry.molten_salt_reactor import (
@@ -149,6 +151,26 @@ def run_case(config: CaseConfig, bundle, solver_enabled: bool = True) -> dict[st
             summary["metrics"]["active_flow_velocity_m_s"] = reduced_order_flow["active_flow"]["representative_velocity_m_s"]
             summary["metrics"]["active_flow_residence_time_s"] = reduced_order_flow["active_flow"]["representative_residence_time_s"]
             summary["metrics"]["disconnected_flow_inventory_channels"] = reduced_order_flow["disconnected_inventory"]["channel_count"]
+            primary_system = build_primary_system_summary(
+                config,
+                built.geometry_description,
+                reduced_order_flow,
+                summary["bop"],
+            )
+            if primary_system:
+                summary["primary_system"] = primary_system
+                summary["fuel_cycle"] = json.loads(json.dumps(primary_system["fuel_cycle"]))
+                hydraulics = primary_system["loop_hydraulics"]
+                heat_exchanger = primary_system["heat_exchanger"]
+                summary["metrics"]["primary_total_pressure_drop_kpa"] = hydraulics["total_pressure_drop_kpa"]
+                summary["metrics"]["primary_pump_head_m"] = hydraulics["pump_head_m"]
+                summary["metrics"]["primary_hx_area_m2"] = heat_exchanger["required_area_m2"]
+                summary["metrics"]["fuel_salt_inventory_m3"] = primary_system["inventory"]["fuel_salt"]["total_m3"]
+                summary["metrics"]["coolant_salt_inventory_m3"] = primary_system["inventory"]["coolant_salt"]["net_pool_inventory_m3"]
+                summary["metrics"]["fissile_inventory_kg"] = primary_system["fuel_cycle"]["fissile_inventory_kg"]
+    if built.manifest.get("benchmark_traceability"):
+        summary["benchmark_traceability"] = json.loads(json.dumps(built.manifest["benchmark_traceability"]))
+        summary["metrics"]["benchmark_traceability_score"] = built.manifest["benchmark_traceability"]["traceability_score"]
 
     bundle.write_json("summary.json", summary)
     if "flow" in summary:
@@ -179,6 +201,9 @@ def validate_case(config: CaseConfig, bundle, summary: dict[str, Any] | None = N
                 "message": invariant["message"],
             }
         )
+
+    for check in summary.get("primary_system", {}).get("checks", []):
+        checks.append(dict(check))
 
     if benchmark:
         checks.append(
@@ -243,6 +268,7 @@ def _build_pin_case(config: CaseConfig, benchmark: dict[str, Any]) -> BuiltCase:
     cell_count = len(layers) + 1
     material_inventory = sorted({layer["material"] for layer in layers if layer.get("material")} | {geometry["background_material"]})
     invariants.extend(material_sanity_checks(config))
+    benchmark_traceability = assess_benchmark_traceability(config, benchmark) if benchmark else {}
 
     model = _create_openmc_pin_model(config) if openmc is not None else None
 
@@ -253,6 +279,7 @@ def _build_pin_case(config: CaseConfig, benchmark: dict[str, Any]) -> BuiltCase:
             "geometry_kind": geometry["kind"],
             "material_inventory": material_inventory,
             "invariants": invariants,
+            "benchmark_traceability": benchmark_traceability,
         },
         geometry_description={
             "name": config.name,
@@ -272,6 +299,8 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
         resolved = resolve_msr_geometry(config)
         invariants = build_msr_invariants(config, resolved)
         flow_summary = build_msr_flow_summary(config, resolved)
+        geometry_description = build_msr_geometry_description(config, resolved)
+        benchmark_traceability = assess_benchmark_traceability(config, benchmark) if benchmark else {}
         model = _create_openmc_detailed_msr_model(config, resolved) if openmc is not None else None
         material_inventory = {
             geometry["matrix_material"],
@@ -283,6 +312,9 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
             for layer in channel["layers"]:
                 if layer.get("material"):
                     material_inventory.add(layer["material"])
+        for solid in geometry_description["render_solids"]:
+            if solid.get("material"):
+                material_inventory.add(str(solid["material"]))
         invariants.extend(material_sanity_checks(config))
         channel_cell_count = sum(len(channel["layers"]) for channel in resolved.channels)
         static_cell_count = 13
@@ -297,8 +329,9 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
                 "flow_summary": flow_summary,
                 "material_inventory": sorted(material_inventory),
                 "invariants": invariants,
+                "benchmark_traceability": benchmark_traceability,
             },
-            geometry_description=build_msr_geometry_description(config, resolved),
+            geometry_description=geometry_description,
             model=model,
             benchmark=benchmark,
         )
@@ -347,6 +380,7 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
         {layer["material"] for layer in channel_layers if layer.get("material")} | {geometry["matrix_material"], geometry["background_material"]}
     )
     invariants.extend(material_sanity_checks(config))
+    benchmark_traceability = assess_benchmark_traceability(config, benchmark) if benchmark else {}
     return BuiltCase(
         manifest={
             "case": config.name,
@@ -355,6 +389,7 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
             "geometry_kind": geometry["kind"],
             "material_inventory": material_inventory,
             "invariants": invariants,
+            "benchmark_traceability": benchmark_traceability,
         },
         geometry_description={
             "name": config.name,
