@@ -12,3 +12,4 @@ def test_result_bundle_creates_dedicated_geometry_exports_dir() -> None:
 
     assert bundle.geometry_exports_dir == repo_root / "results" / "layout_case" / "unit-test" / "geometry" / "exports"
     assert bundle.geometry_exports_dir.exists()
+    assert bundle.plots_dir.exists()

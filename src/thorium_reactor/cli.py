@@ -5,10 +5,11 @@ import json
 from json import JSONDecodeError
 from pathlib import Path
 
-from thorium_reactor.config import load_case_config
+from thorium_reactor.config import load_case_config, load_yaml
 from thorium_reactor.geometry.exporters import export_geometry
 from thorium_reactor.neutronics.workflows import build_case, run_case, validate_case
 from thorium_reactor.paths import ResultBundle, case_config_path, create_result_bundle, discover_repo_root, latest_result_bundle
+from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot, load_plot_manifest
 from thorium_reactor.reporting.reports import generate_report
 
 
@@ -75,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
                 "Run `reactor run <case>` first or specify an existing run id."
             )
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        generate_summary_plots(bundle, summary)
         validation_path = bundle.root / "validation.json"
         needs_validation = not validation_path.exists()
         if validation_path.exists():
@@ -84,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
                 needs_validation = True
         if needs_validation:
             validate_case(config, bundle, summary=summary)
+        validation = json.loads(validation_path.read_text(encoding="utf-8"))
+        generate_validation_plot(bundle, validation)
         geometry_assets = None
         render_assets_path = bundle.root / "render_assets.json"
         if render_assets_path.exists():
@@ -93,7 +97,9 @@ def main(argv: list[str] | None = None) -> int:
             if build_manifest_path.exists():
                 build_manifest = json.loads(build_manifest_path.read_text(encoding="utf-8"))
                 geometry_assets = build_manifest.get("geometry_assets")
-        report = generate_report(config.name, config.data, summary_path, validation_path, geometry_assets)
+        plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
+        benchmark = load_yaml(config.benchmark_file) if config.benchmark_file and config.benchmark_file.exists() else {}
+        report = generate_report(config.name, config.data, summary_path, validation_path, geometry_assets, benchmark, plot_assets)
         report_path = bundle.write_text("report.md", report)
         print(report_path)
         return 0

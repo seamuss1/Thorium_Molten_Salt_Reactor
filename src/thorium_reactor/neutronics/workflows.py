@@ -15,6 +15,7 @@ from thorium_reactor.geometry.molten_salt_reactor import (
     resolve_msr_geometry,
 )
 from thorium_reactor.neutronics.openmc_compat import openmc
+from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot
 
 
 @dataclass(slots=True)
@@ -135,6 +136,7 @@ def run_case(config: CaseConfig, bundle, solver_enabled: bool = True) -> dict[st
 
     bundle.write_json("summary.json", summary)
     bundle.write_metrics(summary["metrics"])
+    generate_summary_plots(bundle, summary)
     return summary
 
 
@@ -175,6 +177,7 @@ def validate_case(config: CaseConfig, bundle, summary: dict[str, Any] | None = N
         "passed": all(check["status"] == "pass" for check in checks),
     }
     bundle.write_json("validation.json", result)
+    generate_validation_plot(bundle, result)
     return result
 
 

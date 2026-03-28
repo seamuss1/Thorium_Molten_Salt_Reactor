@@ -15,7 +15,6 @@ authors = [
 dependencies = [
   "PyYAML>=6.0",
   "numpy>=1.26",
-  "matplotlib>=3.8",
   "Pillow>=10.0",
 ]
 
