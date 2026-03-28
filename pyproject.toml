@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thorium-reactor"
+version = "0.1.0"
+description = "Python-first reactor design platform for TMSR-LF1-inspired neutronics, BOP, geometry, and reporting."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "Thorium Molten Salt Reactor Contributors" }
+]
+dependencies = [
+  "PyYAML>=6.0",
+  "numpy>=1.26",
+  "matplotlib>=3.8",
+  "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0"
+]
+openmc = [
+  "openmc>=0.14; platform_system != 'Windows'"
+]
+
+[project.scripts]
+reactor = "thorium_reactor.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+cache_dir = ".tmp/pytest-cache"
+addopts = "-p no:cacheprovider"

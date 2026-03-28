@@ -1,0 +1,73 @@
+name: example_pin
+reactor:
+  name: Example Pin Smoke Test
+  family: PWR-inspired regression pin
+  stage: smoke
+  design_power_mwth: 1.0
+  hot_leg_temp_c: 320.0
+  cold_leg_temp_c: 290.0
+  primary_cp_kj_kgk: 4.2
+  steam_generator_effectiveness: 0.85
+  turbine_efficiency: 0.33
+  generator_efficiency: 0.96
+  benchmark: benchmarks/tmsr_lf1/benchmark.yaml
+materials:
+  uo2:
+    name: uo2
+    density: { units: g/cm3, value: 10.0 }
+    nuclides:
+      - { name: U235, ao: 0.03 }
+      - { name: U238, ao: 0.97 }
+      - { name: O16, ao: 2.0 }
+  zirconium:
+    name: zirconium
+    density: { units: g/cm3, value: 6.6 }
+    elements:
+      - { name: Zr, ao: 1.0 }
+  h2o:
+    name: h2o
+    density: { units: g/cm3, value: 1.0 }
+    nuclides:
+      - { name: H1, ao: 2.0 }
+      - { name: O16, ao: 1.0 }
+    sab:
+      - c_H_in_H2O
+geometry:
+  kind: pin_cell
+  pitch: 1.26
+  boundary: reflective
+  background_name: moderator
+  background_material: h2o
+  height_cm: 100.0
+  layers:
+    - { name: fuel, material: uo2, inner_radius: 0.0, outer_radius: 0.39 }
+    - { name: gap, material: null, inner_radius: 0.39, outer_radius: 0.40 }
+    - { name: clad, material: zirconium, inner_radius: 0.40, outer_radius: 0.46 }
+simulation:
+  mode: eigenvalue
+  particles: 1000
+  batches: 100
+  inactive: 10
+  source:
+    type: point
+    parameters: [0.0, 0.0, 0.0]
+  tallies:
+    - name: fuel_reaction_rates
+      cell: fuel
+      nuclides: [U235]
+      scores: [total, fission, absorption, "(n,gamma)"]
+reporting:
+  plots:
+    - name: example_pin_cross_section
+      kind: svg
+validation_targets:
+  expected_cells:
+    metric: expected_cells
+    source: metrics
+    min: 4
+    max: 4
+  keff_smoke_band:
+    metric: keff
+    source: metrics
+    min: 0.9
+    max: 1.2

@@ -1,0 +1,14 @@
+title: TMSR-LF1-inspired surrogate benchmark
+references:
+  - Public TMSR-LF1 concept descriptions and open molten-salt literature should replace or tighten these bands.
+  - Current values are explicitly labeled surrogate acceptance bounds for implementation scaffolding.
+assumptions:
+  - This repository targets an openly reproducible, TMSR-LF1-inspired model rather than a proprietary plant replica.
+  - Channel geometry is derived from the legacy thesis scripts, corrected for concentric consistency.
+targets:
+  nominal_thermal_power_mwth: 250.0
+  nominal_hot_leg_temp_c: 700.0
+  nominal_cold_leg_temp_c: 560.0
+  expected_keff_band:
+    min: 0.98
+    max: 1.08

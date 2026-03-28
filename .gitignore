@@ -41,6 +41,11 @@ pip-delete-this-directory.txt
 htmlcov/
 .tox/
 .nox/
+.tmp/
+.pip-cache/
+.mamba/
+.runtime-env/
+.tools/
 .coverage
 .coverage.*
 .cache
@@ -127,3 +132,16 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+.pytest_cache/
+
+# Reactor platform runtime outputs
+results/*
+!results/.gitkeep
+*.h5
+*.out
+*.ppm
+*.png
+*.svg
+*.obj
+*.xml
+!archive/legacy_openmc_2022/**

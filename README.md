@@ -1,2 +1,80 @@
-# Thorium_Molten_Salt_Reactor
-Repository of UML Master's Thesis class of 2022. The subject is a Molten Salt Thorium Research Reactor
+# Thorium Molten Salt Reactor Platform
+
+Python-first reactor design monorepo for a TMSR-LF1-inspired molten salt reactor workflow. The repository starts with OpenMC neutronics, standardizes result bundles, adds a steady-state balance-of-plant model, and emits procedural geometry plus report artifacts while preserving the original 2022 thesis outputs in an in-repo archive.
+
+## Featured Geometry
+
+![Detailed TMSR-LF1-inspired molten salt reactor cutaway](resources/tmsr_lf1_core_csg.png)
+
+The `tmsr_lf1_core` case now resolves to a detailed CSG reactor stack with active fuel channels, control-guide channels, instrumentation wells, stacked plena, graphite reflector zones, a downcomer annulus, and dual vessel shells. The same Python geometry definition drives both the OpenMC model build and the repository render artifact.
+
+## What This Repo Now Contains
+
+- `src/thorium_reactor`: installable platform package and `reactor` CLI
+- `configs/cases`: canonical reactor cases
+- `benchmarks/tmsr_lf1`: surrogate benchmark metadata and assumptions
+- `results`: generated result bundles at `results/<case>/<run_id>/`
+- `resources`: rendered reference images used in project documentation
+- `archive/legacy_openmc_2022`: preserved historical scripts and outputs from the thesis prototype
+- `tests`: unit tests for config loading, geometry manifests, BOP closure, and CLI wiring
+
+## Canonical Cases
+
+- `example_pin`: fast smoke/regression case
+- `fuel_channel`: layered fuel-channel submodel
+- `tmsr_lf1_core`: detailed OpenMC CSG core with vessel stack and specialized channel families inspired by the TMSR-LF1 concept
+
+## Environment Setup
+
+Use the provided conda or micromamba environment so OpenMC, analysis dependencies, and the local package are installed in one path.
+
+```bash
+micromamba env create -f environment.yml
+micromamba activate thorium-reactor
+```
+
+On Windows, `environment.yml` creates the base runnable environment for config loading, validation, reporting, geometry export, and BOP calculations. For solver-backed OpenMC runs on a supported host, use `environment-openmc-linux.yml`.
+
+## Docker OpenMC Runtime
+
+For a solver-backed runtime on Docker-capable hosts, the repository includes [docker/openmc-runner.Dockerfile](docker/openmc-runner.Dockerfile) and [docker-compose.openmc.yml](docker-compose.openmc.yml).
+
+```bash
+docker compose -f docker-compose.openmc.yml build
+docker compose -f docker-compose.openmc.yml run --rm openmc python -m thorium_reactor.cli run example_pin --run-id docker-example
+docker compose -f docker-compose.openmc.yml run --rm openmc python -m thorium_reactor.cli report example_pin --run-id docker-example
+```
+
+## CLI Workflow
+
+```bash
+reactor build example_pin
+reactor run example_pin
+reactor validate example_pin
+reactor report example_pin
+reactor render tmsr_lf1_core
+```
+
+Command behavior:
+
+- `reactor build <case>` creates a new result bundle, emits a build manifest, geometry exports, and OpenMC XML if OpenMC is installed.
+- `reactor run <case>` performs the build, runs OpenMC when available, computes steady-state BOP outputs, and writes `summary.json` plus `metrics.csv`.
+- `reactor validate <case>` checks geometry/material invariants and compares available metrics to configured acceptance bands.
+- `reactor report <case>` generates `report.md` from the latest or specified run bundle.
+- `reactor render <case>` writes procedural geometry exports for visualization workflows, including OBJ, STL, and a rendered PNG for the detailed core case.
+
+## Result Bundle Contract
+
+Each active run is written to `results/<case>/<run_id>/` and is expected to contain:
+
+- `build_manifest.json`
+- `summary.json`
+- `metrics.csv`
+- `validation.json` after validation
+- `report.md` after report generation
+- `openmc/` for solver XML and statepoints
+- `geometry/exports/` for SVG, OBJ, STL, and rendered PNG geometry exports
+
+## Validation Status
+
+The benchmark folder currently contains explicitly labeled surrogate acceptance bands so the workflow is versioned and reproducible before citation-complete physics validation is added. Tighten those values over time as literature extraction and benchmarking mature.

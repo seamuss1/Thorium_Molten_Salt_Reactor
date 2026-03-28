@@ -1,0 +1,90 @@
+name: fuel_channel
+reactor:
+  name: TMSR Fuel Channel Submodel
+  family: TMSR-LF1-inspired channel
+  stage: submodel
+  design_power_mwth: 250.0
+  hot_leg_temp_c: 700.0
+  cold_leg_temp_c: 560.0
+  primary_cp_kj_kgk: 1.6
+  steam_generator_effectiveness: 0.90
+  turbine_efficiency: 0.41
+  generator_efficiency: 0.98
+  benchmark: benchmarks/tmsr_lf1/benchmark.yaml
+materials:
+  fuel_salt:
+    name: fuel_salt
+    density: { units: g/cm3, value: 3.2 }
+    nuclides:
+      - { name: Li7, ao: 0.325 }
+      - { name: F19, ao: 0.5663333333 }
+      - { name: Be9, ao: 0.0966666667 }
+      - { name: Zr90, ao: 0.005145 }
+      - { name: Zr91, ao: 0.001122 }
+      - { name: Zr92, ao: 0.001715 }
+      - { name: Zr94, ao: 0.001738 }
+      - { name: Zr96, ao: 0.000280 }
+      - { name: U233, ao: 0.000100 }
+      - { name: U238, ao: 0.001900 }
+  graphite:
+    name: graphite
+    density: { units: g/cm3, value: 1.8 }
+    elements:
+      - { name: C, ao: 1.0 }
+  graphite_shell:
+    name: graphite_shell
+    density: { units: g/cm3, value: 1.8 }
+    elements:
+      - { name: C, ao: 1.0 }
+  pipe:
+    name: pipe
+    density: { units: g/cm3, value: 17.0 }
+    elements:
+      - { name: Pb, ao: 1.0 }
+  air:
+    name: air
+    density: { units: g/cm3, value: 0.00018 }
+    elements:
+      - { name: He, ao: 1.0 }
+geometry:
+  kind: layered_channel
+  pitch: 1.80
+  boundary: reflective
+  background_name: void
+  background_material: air
+  height_cm: 150.0
+  layers:
+    - { name: moderator_center, material: graphite, inner_radius: 0.0, outer_radius: 0.25 }
+    - { name: fuel_annulus, material: fuel_salt, inner_radius: 0.2501, outer_radius: 0.39, tag_as: fuel }
+    - { name: gas_gap_inner, material: null, inner_radius: 0.39, outer_radius: 0.40 }
+    - { name: primary_pipe, material: pipe, inner_radius: 0.40, outer_radius: 0.46, tag_as: pipe }
+    - { name: gas_gap_outer, material: null, inner_radius: 0.4601, outer_radius: 0.60 }
+    - { name: graphite_shell, material: graphite_shell, inner_radius: 0.60, outer_radius: 0.75 }
+simulation:
+  mode: eigenvalue
+  particles: 10000
+  batches: 40
+  inactive: 5
+  source:
+    type: point
+    parameters: [0.0, 0.0, 0.0]
+  tallies:
+    - name: fuel_reaction_rates
+      cell: fuel
+      nuclides: [U233]
+      scores: [total, fission, absorption, "(n,gamma)"]
+reporting:
+  plots:
+    - name: fuel_channel_cross_section
+      kind: svg
+validation_targets:
+  expected_cells:
+    metric: expected_cells
+    source: metrics
+    min: 7
+    max: 7
+  keff_channel_band:
+    metric: keff
+    source: metrics
+    min: 0.95
+    max: 1.15

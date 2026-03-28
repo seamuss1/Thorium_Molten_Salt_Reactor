@@ -1,0 +1,9 @@
+services:
+  openmc:
+    build:
+      context: .
+      dockerfile: docker/openmc-runner.Dockerfile
+    image: thorium-reactor-openmc:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
