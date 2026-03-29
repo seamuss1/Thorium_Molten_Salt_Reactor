@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from thorium_reactor.capabilities import resolve_primary_coolant_material_name
+
 
 def evaluate_fluid_properties(
     material_spec: dict[str, Any],
@@ -87,7 +89,7 @@ def property_reference_temperature_c(
 
 
 def primary_fluid_material_name(config: Any) -> str:
-    return str(config.geometry.get("salt_material", "fuel_salt"))
+    return resolve_primary_coolant_material_name(config)
 
 
 def evaluate_primary_coolant_properties(config: Any, *, temperature_c: float | None = None) -> dict[str, Any]:
@@ -128,8 +130,23 @@ def evaluate_secondary_coolant_properties(config: Any, *, temperature_c: float) 
 
 
 def primary_coolant_cp_kj_kgk(config: Any, *, temperature_c: float | None = None) -> float:
-    properties = evaluate_primary_coolant_properties(config, temperature_c=temperature_c)
-    cp_j_kgk = float(properties["cp_j_kgk"] or 1600.0)
+    material_name = primary_fluid_material_name(config)
+    material_spec = dict(config.materials[material_name])
+    cp_spec = material_spec.get("cp")
+    if cp_spec is None:
+        reactor_cp = config.reactor.get("primary_cp_kj_kgk")
+        if reactor_cp is None:
+            raise ValueError(
+                f"Primary coolant specific heat is not defined. "
+                f"Set reactor.primary_cp_kj_kgk or materials.{material_name}.cp."
+            )
+        return float(reactor_cp)
+    evaluation_temperature_c = average_primary_temperature_c(config.reactor) if temperature_c is None else float(temperature_c)
+    cp_j_kgk = _convert_property_value(
+        _evaluate_property_spec(cp_spec, temperature_c=evaluation_temperature_c),
+        cp_spec.get("units") if isinstance(cp_spec, dict) else None,
+        expected_quantity="specific_heat",
+    )
     return cp_j_kgk / 1000.0
 
 

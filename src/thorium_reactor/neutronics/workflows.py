@@ -6,6 +6,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from thorium_reactor.capabilities import (
+    BALANCE_OF_PLANT,
+    MSR_PRIMARY_SYSTEM,
+    THERMAL_NETWORK,
+    get_case_capabilities,
+    validate_case_capability,
+)
 from thorium_reactor.benchmarking import assess_benchmark_traceability
 from thorium_reactor.bop.steady_state import BOPInputs, run_steady_state_bop
 from thorium_reactor.config import CaseConfig, load_yaml
@@ -36,8 +43,14 @@ class BuiltCase:
     benchmark: dict[str, Any]
 
 
-def build_case(config: CaseConfig, output_dir: Path | None = None) -> BuiltCase:
-    benchmark = load_yaml(config.benchmark_file) if config.benchmark_file and config.benchmark_file.exists() else {}
+def build_case(
+    config: CaseConfig,
+    output_dir: Path | None = None,
+    benchmark: dict[str, Any] | None = None,
+) -> BuiltCase:
+    benchmark = json.loads(json.dumps(benchmark)) if benchmark is not None else (
+        load_yaml(config.benchmark_file) if config.benchmark_file and config.benchmark_file.exists() else {}
+    )
     geometry_kind = config.geometry["kind"]
     if geometry_kind in {"pin_cell", "layered_channel"}:
         return _build_pin_case(config, benchmark)
@@ -89,11 +102,21 @@ def material_sanity_checks(config: CaseConfig) -> list[dict[str, Any]]:
     return checks
 
 
-def run_case(config: CaseConfig, bundle, solver_enabled: bool = True) -> dict[str, Any]:
-    built = build_case(config, bundle.openmc_dir)
+def run_case(
+    config: CaseConfig,
+    bundle,
+    benchmark: dict[str, Any] | None = None,
+    solver_enabled: bool = True,
+    provenance: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    built = build_case(config, bundle.openmc_dir, benchmark=benchmark)
+    capabilities = get_case_capabilities(config)
     geometry_assets = export_geometry(built.geometry_description, bundle.geometry_exports_dir)
     build_manifest = dict(built.manifest)
     build_manifest["geometry_assets"] = geometry_assets
+    build_manifest["workflow_capabilities"] = sorted(capabilities)
+    if provenance:
+        build_manifest["input_provenance"] = json.loads(json.dumps(provenance))
     bundle.write_json("build_manifest.json", build_manifest)
 
     summary: dict[str, Any] = {
@@ -108,6 +131,7 @@ def run_case(config: CaseConfig, bundle, solver_enabled: bool = True) -> dict[st
             "expected_cells": built.manifest.get("cell_count", 0),
             "geometry_kind": config.geometry["kind"],
         },
+        "workflow_capabilities": sorted(capabilities),
     }
     if "channel_count" in built.manifest:
         summary["metrics"]["channel_count"] = built.manifest["channel_count"]
@@ -142,7 +166,8 @@ def run_case(config: CaseConfig, bundle, solver_enabled: bool = True) -> dict[st
             built.model.export_to_xml(directory=str(bundle.openmc_dir))
         summary["neutronics"]["status"] = "skipped_missing_solver" if openmc is None else "dry-run"
 
-    if config.reactor.get("design_power_mwth"):
+    if BALANCE_OF_PLANT in capabilities:
+        validate_case_capability(config, BALANCE_OF_PLANT)
         bop_inputs = BOPInputs(
             thermal_power_mw=float(config.reactor["design_power_mwth"]),
             hot_leg_temp_c=float(config.reactor.get("hot_leg_temp_c", 700.0)),
@@ -157,7 +182,8 @@ def run_case(config: CaseConfig, bundle, solver_enabled: bool = True) -> dict[st
         )
         summary["bop"] = run_steady_state_bop(bop_inputs).to_dict()
         summary["metrics"]["electric_power_mwe"] = round(summary["bop"]["electric_power_mw"], 3)
-        if "flow" in summary:
+        if THERMAL_NETWORK in capabilities and "flow" in summary:
+            validate_case_capability(config, THERMAL_NETWORK)
             reduced_order_flow = build_reduced_order_flow_summary(
                 config,
                 summary["flow"],
@@ -169,26 +195,30 @@ def run_case(config: CaseConfig, bundle, solver_enabled: bool = True) -> dict[st
             summary["metrics"]["active_flow_velocity_m_s"] = reduced_order_flow["active_flow"]["representative_velocity_m_s"]
             summary["metrics"]["active_flow_residence_time_s"] = reduced_order_flow["active_flow"]["representative_residence_time_s"]
             summary["metrics"]["disconnected_flow_inventory_channels"] = reduced_order_flow["disconnected_inventory"]["channel_count"]
-            primary_system = build_primary_system_summary(
-                config,
-                built.geometry_description,
-                reduced_order_flow,
-                summary["bop"],
-            )
-            if primary_system:
-                summary["primary_system"] = primary_system
-                summary["fuel_cycle"] = json.loads(json.dumps(primary_system["fuel_cycle"]))
-                hydraulics = primary_system["loop_hydraulics"]
-                heat_exchanger = primary_system["heat_exchanger"]
-                summary["metrics"]["primary_total_pressure_drop_kpa"] = hydraulics["total_pressure_drop_kpa"]
-                summary["metrics"]["primary_pump_head_m"] = hydraulics["pump_head_m"]
-                summary["metrics"]["primary_hx_area_m2"] = heat_exchanger["required_area_m2"]
-                summary["metrics"]["fuel_salt_inventory_m3"] = primary_system["inventory"]["fuel_salt"]["total_m3"]
-                summary["metrics"]["coolant_salt_inventory_m3"] = primary_system["inventory"]["coolant_salt"]["net_pool_inventory_m3"]
-                summary["metrics"]["fissile_inventory_kg"] = primary_system["fuel_cycle"]["fissile_inventory_kg"]
+            if MSR_PRIMARY_SYSTEM in capabilities:
+                validate_case_capability(config, MSR_PRIMARY_SYSTEM)
+                primary_system = build_primary_system_summary(
+                    config,
+                    built.geometry_description,
+                    reduced_order_flow,
+                    summary["bop"],
+                )
+                if primary_system:
+                    summary["primary_system"] = primary_system
+                    summary["fuel_cycle"] = json.loads(json.dumps(primary_system["fuel_cycle"]))
+                    hydraulics = primary_system["loop_hydraulics"]
+                    heat_exchanger = primary_system["heat_exchanger"]
+                    summary["metrics"]["primary_total_pressure_drop_kpa"] = hydraulics["total_pressure_drop_kpa"]
+                    summary["metrics"]["primary_pump_head_m"] = hydraulics["pump_head_m"]
+                    summary["metrics"]["primary_hx_area_m2"] = heat_exchanger["required_area_m2"]
+                    summary["metrics"]["fuel_salt_inventory_m3"] = primary_system["inventory"]["fuel_salt"]["total_m3"]
+                    summary["metrics"]["coolant_salt_inventory_m3"] = primary_system["inventory"]["coolant_salt"]["net_pool_inventory_m3"]
+                    summary["metrics"]["fissile_inventory_kg"] = primary_system["fuel_cycle"]["fissile_inventory_kg"]
     if built.manifest.get("benchmark_traceability"):
         summary["benchmark_traceability"] = json.loads(json.dumps(built.manifest["benchmark_traceability"]))
         summary["metrics"]["benchmark_traceability_score"] = built.manifest["benchmark_traceability"]["traceability_score"]
+    if provenance:
+        summary["input_provenance"] = json.loads(json.dumps(provenance))
 
     bundle.write_json("summary.json", summary)
     if "flow" in summary:
@@ -198,8 +228,14 @@ def run_case(config: CaseConfig, bundle, solver_enabled: bool = True) -> dict[st
     return summary
 
 
-def validate_case(config: CaseConfig, bundle, summary: dict[str, Any] | None = None) -> dict[str, Any]:
-    built = build_case(config, bundle.openmc_dir)
+def validate_case(
+    config: CaseConfig,
+    bundle,
+    summary: dict[str, Any] | None = None,
+    benchmark: dict[str, Any] | None = None,
+    provenance: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    built = build_case(config, bundle.openmc_dir, benchmark=benchmark)
     benchmark = built.benchmark
     if summary is None:
         summary_path = bundle.root / "summary.json"
@@ -237,6 +273,8 @@ def validate_case(config: CaseConfig, bundle, summary: dict[str, Any] | None = N
         "checks": checks,
         "passed": all(check["status"] == "pass" for check in checks),
     }
+    if provenance:
+        result["provenance"] = json.loads(json.dumps(provenance))
     bundle.write_json("validation.json", result)
     generate_validation_plot(bundle, result)
     return result

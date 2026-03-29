@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import yaml
 
@@ -57,10 +57,7 @@ class CaseConfig:
 
     @property
     def benchmark_file(self) -> Path | None:
-        raw_path = self.reactor.get("benchmark")
-        if not raw_path:
-            return None
-        return (self.path.parents[3] / raw_path).resolve()
+        return resolve_benchmark_path(self.path.parents[3], self.data)
 
 
 def load_case_config(path: Path) -> CaseConfig:
@@ -78,3 +75,13 @@ def load_case_config(path: Path) -> CaseConfig:
 def load_yaml(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return yaml.safe_load(handle) or {}
+
+
+def resolve_benchmark_path(repo_root: Path, data: Mapping[str, Any]) -> Path | None:
+    reactor = data.get("reactor")
+    if not isinstance(reactor, Mapping):
+        return None
+    raw_path = reactor.get("benchmark")
+    if not raw_path:
+        return None
+    return (repo_root / str(raw_path)).resolve()

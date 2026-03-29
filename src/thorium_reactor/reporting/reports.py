@@ -16,6 +16,7 @@ def generate_report(
     geometry_assets: dict[str, str] | None,
     benchmark: dict[str, Any] | None = None,
     plot_assets: dict[str, str] | None = None,
+    provenance: dict[str, Any] | None = None,
 ) -> str:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     validation = {}
@@ -42,6 +43,21 @@ def generate_report(
         f"- Benchmark source: `{config['reactor'].get('benchmark', 'n/a')}`",
         "",
     ]
+
+    if provenance:
+        case_provenance = provenance.get("case", {})
+        benchmark_provenance = provenance.get("benchmark", {})
+        lines.extend(
+            [
+                "## Input Provenance",
+                "",
+                f"- Case definition: `{case_provenance.get('source', 'unknown')}`",
+                f"- Case origin path: `{case_provenance.get('origin_path', 'n/a')}`",
+                f"- Benchmark metadata: `{benchmark_provenance.get('source', 'unknown')}`",
+                f"- Benchmark origin path: `{benchmark_provenance.get('origin_path', 'n/a')}`",
+                "",
+            ]
+        )
 
     if benchmark:
         lines.extend(

@@ -6,7 +6,8 @@ from json import JSONDecodeError
 from pathlib import Path
 
 from thorium_reactor.benchmarking import run_solver_backed_benchmark
-from thorium_reactor.config import load_case_config, load_yaml
+from thorium_reactor.bundle_inputs import ensure_bundle_inputs, load_bundle_inputs
+from thorium_reactor.config import load_case_config
 from thorium_reactor.geometry.exporters import export_geometry
 from thorium_reactor.neutronics.openmc_compat import openmc
 from thorium_reactor.neutronics.workflows import build_case, run_case, validate_case
@@ -44,14 +45,21 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command in {"build", "run", "benchmark"}:
         bundle = create_result_bundle(repo_root, config.name, args.run_id)
+        inputs = ensure_bundle_inputs(repo_root, bundle, config)
     else:
         bundle = latest_result_bundle(repo_root, config.name) if args.run_id is None else _load_existing_bundle(repo_root, config.name, args.run_id)
+        inputs = load_bundle_inputs(repo_root, bundle, config)
+
+    config = inputs.config
+    benchmark = inputs.benchmark
+    provenance = inputs.provenance
 
     if args.command == "build":
-        built = build_case(config, bundle.openmc_dir)
+        built = build_case(config, bundle.openmc_dir, benchmark=benchmark)
         geometry_assets = export_geometry(built.geometry_description, bundle.geometry_exports_dir)
         build_manifest = dict(built.manifest)
         build_manifest["geometry_assets"] = geometry_assets
+        build_manifest["input_provenance"] = provenance
         bundle.write_json("build_manifest.json", build_manifest)
         if built.model is not None:
             built.model.export_to_xml(directory=str(bundle.openmc_dir))
@@ -59,18 +67,24 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "run":
-        summary = run_case(config, bundle, solver_enabled=not args.no_solver)
+        summary = run_case(
+            config,
+            bundle,
+            benchmark=benchmark,
+            solver_enabled=not args.no_solver,
+            provenance=provenance,
+        )
         print(bundle.root)
         print(summary["neutronics"]["status"])
         return 0
 
     if args.command == "validate":
-        result = validate_case(config, bundle)
+        result = validate_case(config, bundle, benchmark=benchmark, provenance=provenance)
         print(result["passed"])
         return 0
 
     if args.command == "render":
-        built = build_case(config, bundle.openmc_dir)
+        built = build_case(config, bundle.openmc_dir, benchmark=benchmark)
         assets = export_geometry(built.geometry_description, bundle.geometry_exports_dir)
         bundle.write_json("render_assets.json", assets)
         print(json.dumps(assets, indent=2))
@@ -93,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
             except JSONDecodeError:
                 needs_validation = True
         if needs_validation:
-            validate_case(config, bundle, summary=summary)
+            validate_case(config, bundle, summary=summary, benchmark=benchmark, provenance=provenance)
         validation = json.loads(validation_path.read_text(encoding="utf-8"))
         generate_validation_plot(bundle, validation)
         geometry_assets = None
@@ -106,8 +120,16 @@ def main(argv: list[str] | None = None) -> int:
                 build_manifest = json.loads(build_manifest_path.read_text(encoding="utf-8"))
                 geometry_assets = build_manifest.get("geometry_assets")
         plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
-        benchmark = load_yaml(config.benchmark_file) if config.benchmark_file and config.benchmark_file.exists() else {}
-        report = generate_report(config.name, config.data, summary_path, validation_path, geometry_assets, benchmark, plot_assets)
+        report = generate_report(
+            config.name,
+            config.data,
+            summary_path,
+            validation_path,
+            geometry_assets,
+            benchmark,
+            plot_assets,
+            provenance=provenance,
+        )
         report_path = bundle.write_text("report.md", report)
         print(report_path)
         return 0
@@ -122,7 +144,13 @@ def main(argv: list[str] | None = None) -> int:
                     "Benchmark runs require a solver-backed OpenMC runtime. "
                     "Use `reactor benchmark <case> --docker-openmc` or run on a supported host."
                 )
-            summary = run_case(config, bundle, solver_enabled=True)
+            summary = run_case(
+                config,
+                bundle,
+                benchmark=benchmark,
+                solver_enabled=True,
+                provenance=provenance,
+            )
             bundle.write_json(
                 "benchmark_execution.json",
                 {
@@ -139,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         generate_summary_plots(bundle, summary)
-        validation = validate_case(config, bundle, summary=summary)
+        validation = validate_case(config, bundle, summary=summary, benchmark=benchmark, provenance=provenance)
         generate_validation_plot(bundle, validation)
         geometry_assets = None
         render_assets_path = bundle.root / "render_assets.json"
@@ -151,8 +179,16 @@ def main(argv: list[str] | None = None) -> int:
                 build_manifest = json.loads(build_manifest_path.read_text(encoding="utf-8"))
                 geometry_assets = build_manifest.get("geometry_assets")
         plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
-        benchmark = load_yaml(config.benchmark_file) if config.benchmark_file and config.benchmark_file.exists() else {}
-        report = generate_report(config.name, config.data, summary_path, bundle.root / "validation.json", geometry_assets, benchmark, plot_assets)
+        report = generate_report(
+            config.name,
+            config.data,
+            summary_path,
+            bundle.root / "validation.json",
+            geometry_assets,
+            benchmark,
+            plot_assets,
+            provenance=provenance,
+        )
         bundle.write_text("report.md", report)
         print(bundle.root)
         return 0
