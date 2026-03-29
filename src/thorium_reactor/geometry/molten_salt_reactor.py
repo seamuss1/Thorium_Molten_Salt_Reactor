@@ -798,9 +798,17 @@ def _estimate_animation_physics(
 
     flow_summary = build_msr_flow_summary(config, resolved)
     interface_metrics = flow_summary["interface_metrics"]
-    active_flow_area_cm2 = float(interface_metrics["plenum_connected_salt_area_cm2"]) + float(
-        interface_metrics["reflector_backed_salt_area_cm2"]
+    reduced_order_config = config.flow.get("reduced_order", {})
+    active_channel_selection = reduced_order_config.get(
+        "active_channel_selection",
+        "plenum_connected_salt_bearing_channels",
     )
+    if active_channel_selection == "all_salt_bearing_channels":
+        active_flow_area_cm2 = float(interface_metrics["plenum_connected_salt_area_cm2"]) + float(
+            interface_metrics["reflector_backed_salt_area_cm2"]
+        )
+    else:
+        active_flow_area_cm2 = float(interface_metrics["plenum_connected_salt_area_cm2"])
     bulk_temperature_c = average_primary_temperature_c(config.reactor)
     salt_density_kg_m3 = float(evaluate_primary_coolant_properties(config, temperature_c=bulk_temperature_c)["density_kg_m3"])
     coolant_density_kg_m3 = float(

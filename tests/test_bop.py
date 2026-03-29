@@ -16,3 +16,5 @@ def test_steady_state_bop_closure_is_near_zero() -> None:
 
     assert abs(results.closure_error_mw) < 1e-9
     assert results.primary_mass_flow_kg_s > 0.0
+    assert results.steam_generator_duty_mw == 250.0
+    assert results.steam_cycle_usable_duty_mw == 230.0

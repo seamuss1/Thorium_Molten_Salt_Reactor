@@ -6,10 +6,12 @@ from typing import Any
 from thorium_reactor.flow.properties import average_primary_temperature_c, evaluate_fluid_properties
 
 
-DEFAULT_ALLOCATION_RULE = "pressure_balanced"
-LEGACY_ALLOCATION_RULE = "salt_area_weighted"
-ACTIVE_CHANNEL_SELECTION = "plenum_connected_salt_bearing_channels"
-DISCONNECTED_INVENTORY_SELECTION = "reflector_backed_salt_bearing_channels"
+DEFAULT_ALLOCATION_RULE = "salt_area_weighted"
+PRESSURE_BALANCED_ALLOCATION_RULE = "pressure_balanced"
+PLENUM_CONNECTED_ACTIVE_SELECTION = "plenum_connected_salt_bearing_channels"
+ALL_SALT_BEARING_ACTIVE_SELECTION = "all_salt_bearing_channels"
+REFLECTOR_BACKED_DISCONNECTED_SELECTION = "reflector_backed_salt_bearing_channels"
+NON_ACTIVE_DISCONNECTED_SELECTION = "non_active_salt_bearing_channels"
 
 
 def build_reduced_order_flow_summary(
@@ -19,8 +21,14 @@ def build_reduced_order_flow_summary(
 ) -> dict[str, Any]:
     reduced_order_config = config.flow.get("reduced_order", {})
     allocation_rule = reduced_order_config.get("allocation_rule", DEFAULT_ALLOCATION_RULE)
-    if allocation_rule not in {DEFAULT_ALLOCATION_RULE, LEGACY_ALLOCATION_RULE}:
+    if allocation_rule not in {DEFAULT_ALLOCATION_RULE, PRESSURE_BALANCED_ALLOCATION_RULE}:
         raise ValueError(f"Unsupported reduced-order flow allocation rule: {allocation_rule}")
+    active_channel_selection = reduced_order_config.get("active_channel_selection", PLENUM_CONNECTED_ACTIVE_SELECTION)
+    if active_channel_selection not in {
+        PLENUM_CONNECTED_ACTIVE_SELECTION,
+        ALL_SALT_BEARING_ACTIVE_SELECTION,
+    }:
+        raise ValueError(f"Unsupported active channel selection rule: {active_channel_selection}")
 
     salt_material_name = config.geometry.get("salt_material", "fuel_salt")
     bulk_temperature_c = average_primary_temperature_c(config.reactor)
@@ -36,10 +44,17 @@ def build_reduced_order_flow_summary(
         salt_area_cm2 = float(channel.get("salt_cross_section_area_cm2", 0.0))
         if salt_area_cm2 <= 0.0:
             continue
-        if channel.get("interface_class") == "plenum_connected":
+        if active_channel_selection == ALL_SALT_BEARING_ACTIVE_SELECTION:
+            active_channels.append(channel)
+        elif channel.get("interface_class") == "plenum_connected":
             active_channels.append(channel)
         else:
             disconnected_channels.append(channel)
+    disconnected_inventory_selection = (
+        NON_ACTIVE_DISCONNECTED_SELECTION
+        if active_channel_selection == ALL_SALT_BEARING_ACTIVE_SELECTION
+        else REFLECTOR_BACKED_DISCONNECTED_SELECTION
+    )
 
     total_weight = sum(_allocation_weight(channel, allocation_rule) for channel in active_channels)
     total_area_cm2 = sum(float(channel["salt_cross_section_area_cm2"]) for channel in active_channels)
@@ -129,8 +144,8 @@ def build_reduced_order_flow_summary(
     return {
         "status": "completed" if active_channels else "no_active_flow_channels",
         "allocation_rule": allocation_rule,
-        "active_channel_selection": ACTIVE_CHANNEL_SELECTION,
-        "disconnected_inventory_selection": DISCONNECTED_INVENTORY_SELECTION,
+        "active_channel_selection": active_channel_selection,
+        "disconnected_inventory_selection": disconnected_inventory_selection,
         "salt_density_kg_m3": _round_float(density_kg_m3),
         "salt_bulk_temperature_c": _round_float(bulk_temperature_c),
         "salt_properties": salt_properties,
@@ -156,9 +171,9 @@ def build_reduced_order_flow_summary(
 
 
 def _allocation_weight(channel: dict[str, Any], allocation_rule: str) -> float:
-    if allocation_rule == LEGACY_ALLOCATION_RULE:
-        return float(channel["salt_cross_section_area_cm2"])
     if allocation_rule == DEFAULT_ALLOCATION_RULE:
+        return float(channel["salt_cross_section_area_cm2"])
+    if allocation_rule == PRESSURE_BALANCED_ALLOCATION_RULE:
         area_cm2 = float(channel["salt_cross_section_area_cm2"])
         hydraulic_diameter_cm = float(channel.get("salt_hydraulic_diameter_cm", 0.0))
         flow_length_cm = area_cm2 and float(channel.get("salt_volume_cm3", 0.0)) / area_cm2 or 0.0

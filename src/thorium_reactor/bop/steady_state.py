@@ -20,6 +20,7 @@ class BOPResults:
     primary_delta_t_c: float
     primary_mass_flow_kg_s: float
     steam_generator_duty_mw: float
+    steam_cycle_usable_duty_mw: float
     electric_power_mw: float
     condenser_duty_mw: float
     closure_error_mw: float
@@ -36,17 +37,21 @@ def run_steady_state_bop(inputs: BOPInputs) -> BOPResults:
         raise ValueError("Primary salt heat capacity must be positive.")
 
     primary_mass_flow = inputs.thermal_power_mw * 1_000.0 / (inputs.primary_cp_kj_kgk * delta_t)
-    steam_generator_duty = inputs.thermal_power_mw * inputs.steam_generator_effectiveness
-    electric_power = steam_generator_duty * inputs.turbine_efficiency * inputs.generator_efficiency
+    # In a steady closed-loop balance, the steam generator must remove the full reactor heat load.
+    # Effectiveness is treated here as a penalty on useful steam-cycle thermal quality, not on
+    # whether heat is removed from the primary loop at all.
+    steam_generator_duty = inputs.thermal_power_mw
+    steam_cycle_usable_duty = steam_generator_duty * inputs.steam_generator_effectiveness
+    electric_power = steam_cycle_usable_duty * inputs.turbine_efficiency * inputs.generator_efficiency
     condenser_duty = steam_generator_duty - electric_power
-    bypass_heat = inputs.thermal_power_mw - steam_generator_duty
-    closure_error = inputs.thermal_power_mw - electric_power - condenser_duty - bypass_heat
+    closure_error = inputs.thermal_power_mw - electric_power - condenser_duty
 
     return BOPResults(
         thermal_power_mw=inputs.thermal_power_mw,
         primary_delta_t_c=delta_t,
         primary_mass_flow_kg_s=primary_mass_flow,
         steam_generator_duty_mw=steam_generator_duty,
+        steam_cycle_usable_duty_mw=steam_cycle_usable_duty,
         electric_power_mw=electric_power,
         condenser_duty_mw=condenser_duty,
         closure_error_mw=closure_error,

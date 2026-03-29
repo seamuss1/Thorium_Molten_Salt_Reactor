@@ -299,6 +299,7 @@ reporting:
 flow:
   reduced_order:
     allocation_rule: pressure_balanced
+    active_channel_selection: all_salt_bearing_channels
 validation_targets:
   expected_cells:
     metric: expected_cells

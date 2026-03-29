@@ -1,6 +1,8 @@
 from copy import deepcopy
 from pathlib import Path
 
+import pytest
+
 from thorium_reactor.bop.steady_state import BOPInputs, run_steady_state_bop
 from thorium_reactor.config import load_case_config
 from thorium_reactor.flow.properties import average_primary_temperature_c, evaluate_fluid_properties, primary_coolant_cp_kj_kgk, property_reference_temperature_c
@@ -110,6 +112,8 @@ def test_immersed_pool_reference_primary_system_summary_is_engineering_useful() 
     fuel_cycle = primary_system["fuel_cycle"]
 
     assert primary_system["model"] == "reduced_order_primary_system"
+    assert reduced_order["active_channel_selection"] == "all_salt_bearing_channels"
+    assert reduced_order["active_flow"]["representative_velocity_m_s"] <= 12.0
     assert primary_system["bulk_temperature_c"] == 622.5
     assert primary_system["cold_leg_density_kg_m3"] > primary_system["hot_leg_density_kg_m3"]
     assert hydraulics["total_pipe_length_m"] > 1.0
@@ -137,7 +141,14 @@ def test_immersed_pool_reference_primary_system_summary_is_engineering_useful() 
     assert inventory["coolant_salt"]["net_pool_inventory_m3"] > inventory["fuel_salt"]["total_m3"]
     assert fuel_cycle["heavy_metal_inventory_kg"] > fuel_cycle["fissile_inventory_kg"] > 0.0
     assert fuel_cycle["cleanup_turnover_days"] == 10.0
-    assert all(check["status"] == "pass" for check in primary_system["checks"])
+    check_status = {check["name"]: check["status"] for check in primary_system["checks"]}
+    assert check_status["primary_system::loop_reynolds_reasonable"] == "pass"
+    assert check_status["primary_system::pump_head_reasonable"] == "pass"
+    assert check_status["primary_system::heat_exchanger_pinch_positive"] == "pass"
+    assert check_status["primary_system::heat_exchanger_area_reasonable"] == "pass"
+    assert check_status["primary_system::fuel_inventory_positive"] == "pass"
+    assert check_status["primary_system::active_channel_velocity_reasonable"] == "pass"
+    assert check_status["primary_system::heat_exchanger_duty_closure_reasonable"] == "pass"
 
 
 def test_temperature_dependent_property_models_are_supported() -> None:
@@ -175,6 +186,22 @@ def test_temperature_dependent_property_models_are_supported() -> None:
     assert properties["cp_j_kgk"] == 1620.0
     assert properties["thermal_conductivity_w_mk"] == 1.05
     assert properties["dynamic_viscosity_pa_s"] > 0.0
+
+
+def test_reduced_order_default_allocation_rule_is_conservative() -> None:
+    config = _load_case("immersed_pool_reference")
+    config.data = deepcopy(config.data)
+    config.data.setdefault("flow", {}).pop("reduced_order", None)
+    built = build_case(config)
+    bop = run_steady_state_bop(_primary_bop_inputs(config))
+
+    reduced_order = build_reduced_order_flow_summary(
+        config,
+        built.manifest["flow_summary"],
+        bop.primary_mass_flow_kg_s,
+    )
+
+    assert reduced_order["allocation_rule"] == "salt_area_weighted"
 
 
 def test_average_primary_temperature_uses_leg_temperatures() -> None:
@@ -369,5 +396,94 @@ def test_branch_flow_split_favors_lower_resistance_path() -> None:
 
     assert branch_summary["pump_to_core_a"]["flow_fraction"] > branch_summary["pump_to_core_b"]["flow_fraction"]
     assert branch_summary["pump_to_core_a"]["volumetric_flow_m3_s"] > branch_summary["pump_to_core_b"]["volumetric_flow_m3_s"]
+    assert branch_summary["pump_to_core_a"]["path_pressure_drop_kpa"] == pytest.approx(
+        branch_summary["pump_to_core_b"]["path_pressure_drop_kpa"],
+        rel=1.0e-3,
+    )
     assert "mix_mix_header" in thermal_segments
     assert thermal_segments["mix_mix_header"]["kind"] == "mix"
+
+
+def test_heat_exchanger_summary_uses_branch_resolved_hot_leg_inlets() -> None:
+    config = _load_case("immersed_pool_reference")
+    config.data = deepcopy(config.data)
+    primary_loop = config.geometry["render_layout"]["primary_loop"]
+    primary_loop["components"].append({"id": "splitter", "kind": "junction"})
+    primary_loop["connections"] = [
+        {"id": "hx_to_pump", "from": "heat_exchanger", "to": "pump", "leg": "cold_leg"},
+        {"id": "pump_to_core", "from": "pump", "to": "core", "leg": "cold_leg"},
+        {"id": "core_to_hx_a", "from": "core", "to": "heat_exchanger", "leg": "hot_leg", "heat_exchanger_area_fraction": 0.7},
+        {"id": "core_to_hx_b", "from": "core", "to": "heat_exchanger", "leg": "hot_leg", "heat_exchanger_area_fraction": 0.3},
+    ]
+    primary_loop["pipes"] = [
+        pipe for pipe in primary_loop["pipes"] if pipe["id"] == "hx_to_pump"
+    ] + [
+        {
+            "id": "pump_to_core",
+            "radius_cm": 2.0,
+            "material": "pipe",
+            "points": [
+                [-34.0, -8.0, 34.0],
+                [2.0, -8.0, 34.0],
+                [16.0, -8.0, 34.0],
+                [16.0, -8.0, 26.0],
+            ],
+        },
+        {
+            "id": "core_to_hx_a",
+            "radius_cm": 2.1,
+            "material": "pipe",
+            "points": [
+                [22.0, -12.0, -8.0],
+                [0.0, -12.0, -8.0],
+                [-24.0, -14.0, 8.0],
+                [-24.0, -14.0, 16.0],
+            ],
+        },
+        {
+            "id": "core_to_hx_b",
+            "radius_cm": 1.3,
+            "material": "pipe",
+            "points": [
+                [22.0, -12.0, -8.0],
+                [10.0, -12.0, 6.0],
+                [-10.0, -14.0, 12.0],
+                [-24.0, -14.0, 16.0],
+            ],
+        },
+    ]
+
+    built = build_case(config)
+    bop = run_steady_state_bop(_primary_bop_inputs(config))
+    reduced_order = build_reduced_order_flow_summary(
+        config,
+        built.manifest["flow_summary"],
+        bop.primary_mass_flow_kg_s,
+    )
+    primary_system = build_primary_system_summary(
+        config,
+        built.geometry_description,
+        reduced_order,
+        bop.to_dict(),
+    )
+
+    hx = primary_system["heat_exchanger"]
+    branches = hx["primary_inlet_branches"]
+
+    assert len(branches) == 2
+    weighted_temp_c = sum(branch["mass_flow_kg_s"] * branch["inlet_temp_c"] for branch in branches) / sum(
+        branch["mass_flow_kg_s"] for branch in branches
+    )
+    assert hx["primary_inlet_mixed_temp_c"] == round(weighted_temp_c, 6)
+    assert sum(branch["duty_share_mw"] for branch in branches) == pytest.approx(hx["duty_mw"], rel=1.0e-6)
+    assert sum(branch["duty_fraction"] for branch in branches) == pytest.approx(1.0, rel=1.0e-6)
+    assert all(branch["local_hot_side_entry_h_w_m2k"] > 0.0 for branch in branches)
+    assert hx["primary_hx_side"]["branch_modeling_mode"] == "explicit_area_fraction"
+    assert all(branch["hx_area_fraction"] is not None for branch in branches)
+    assert all(branch["hx_local_h_w_m2k"] is not None and branch["hx_local_h_w_m2k"] > 0.0 for branch in branches)
+    assert branches[0]["hx_local_velocity_m_s"] != branches[1]["hx_local_velocity_m_s"]
+    weighted_branch_h = sum(branch["duty_fraction"] * branch["hx_local_h_w_m2k"] for branch in branches)
+    assert hx["primary_hx_side"]["branch_weighted_heat_transfer_coefficient_w_m2k"] == pytest.approx(
+        weighted_branch_h,
+        rel=1.0e-6,
+    )

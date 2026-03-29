@@ -66,6 +66,7 @@ def build_primary_system_summary(
     loop_graph = _build_primary_loop_graph(primary_loop, segment_summary["segments"])
     thermal_profile = _build_primary_thermal_profile(
         config,
+        primary_loop=primary_loop,
         loop_graph=loop_graph,
         bop=bop,
         salt_properties=salt_properties,
@@ -94,6 +95,7 @@ def build_primary_system_summary(
     loop_graph = _build_primary_loop_graph(primary_loop, segment_summary["segments"])
     thermal_profile = _build_primary_thermal_profile(
         config,
+        primary_loop=primary_loop,
         loop_graph=loop_graph,
         bop=bop,
         salt_properties=salt_properties,
@@ -116,6 +118,9 @@ def build_primary_system_summary(
         primary_hot_leg_c=float(thermal_profile["estimated_hot_leg_temp_c"]),
         primary_cold_leg_c=float(thermal_profile["estimated_cold_leg_temp_c"]),
         required_duty_mw=float(thermal_profile["required_heat_exchanger_duty_mw"]),
+        loop_graph=loop_graph,
+        thermal_profile=thermal_profile,
+        branch_flow_summary=branch_flow_summary,
         segment_summary=segment_summary,
     )
     inventory_summary = _build_inventory_summary(config, geometry_description, reduced_order_flow, primary_loop)
@@ -166,9 +171,11 @@ def build_primary_system_summary(
         "inventory": inventory_summary,
         "fuel_cycle": fuel_cycle_summary,
         "checks": _build_primary_system_checks(
+            reduced_order_flow,
             segment_summary["max_reynolds_number"],
             pump_head_m,
             heat_exchanger_summary,
+            thermal_profile,
             inventory_summary,
         ),
     }
@@ -331,6 +338,7 @@ def _build_primary_loop_graph(
             "from": str(connection.get("from") or ""),
             "to": str(connection.get("to") or ""),
             "leg": str(connection.get("leg", "unknown")),
+            "heat_exchanger_area_fraction": connection.get("heat_exchanger_area_fraction"),
         }
         edges.append(edge)
         if edge["from"]:
@@ -524,7 +532,8 @@ def _build_pressure_budget(
     ]
     hot_leg_rise_m = sum(float(segment.get("vertical_rise_m", 0.0)) for segment in hot_leg_segments)
     cold_leg_drop_m = sum(float(segment.get("vertical_drop_m", 0.0)) for segment in cold_leg_segments)
-    if hot_leg_rise_m > 0.0 and cold_leg_drop_m > 0.0:
+    buoyancy_geometry_complete = hot_leg_rise_m > 0.0 and cold_leg_drop_m > 0.0
+    if buoyancy_geometry_complete:
         representative_elevation_span_m = 0.5 * (hot_leg_rise_m + cold_leg_drop_m)
     else:
         hot_leg_high_m = max((float(segment.get("max_elevation_m", 0.0)) for segment in hot_leg_segments), default=0.0)
@@ -535,7 +544,11 @@ def _build_pressure_budget(
         lowest_elevation_m = min((float(segment.get("min_elevation_m", 0.0)) for segment in segments), default=0.0)
         representative_elevation_span_m = max(highest_elevation_m - lowest_elevation_m, 0.0)
     density_difference_kg_m3 = max(cold_leg_density_kg_m3 - hot_leg_density_kg_m3, 0.0)
-    buoyancy_driving_pressure_pa = density_difference_kg_m3 * GRAVITY_M_S2 * representative_elevation_span_m
+    buoyancy_driving_pressure_pa = (
+        density_difference_kg_m3 * GRAVITY_M_S2 * representative_elevation_span_m
+        if buoyancy_geometry_complete
+        else 0.0
+    )
     net_resistive_pressure_pa = frictional_pressure_drop_pa + local_pressure_drop_pa + hydrostatic_pressure_change_pa
     required_pump_pressure_pa = net_resistive_pressure_pa - buoyancy_driving_pressure_pa
     average_density_kg_m3 = 0.5 * (hot_leg_density_kg_m3 + cold_leg_density_kg_m3)
@@ -556,6 +569,7 @@ def _build_pressure_budget(
         "representative_elevation_span_m": representative_elevation_span_m,
         "hot_leg_rise_m": hot_leg_rise_m,
         "cold_leg_drop_m": cold_leg_drop_m,
+        "buoyancy_geometry_complete": buoyancy_geometry_complete,
     }
 
 
@@ -568,10 +582,36 @@ def _build_heat_exchanger_summary(
     primary_hot_leg_c: float | None = None,
     primary_cold_leg_c: float | None = None,
     required_duty_mw: float | None = None,
+    loop_graph: dict[str, Any] | None = None,
+    thermal_profile: dict[str, Any] | None = None,
+    branch_flow_summary: dict[str, Any] | None = None,
     segment_summary: dict[str, Any],
 ) -> dict[str, Any]:
+    primary_cp_j_kgk = float(salt_properties["cp_j_kgk"] or 1600.0)
+    primary_dynamic_viscosity_pa_s = float(salt_properties["dynamic_viscosity_pa_s"] or 0.012)
+    primary_thermal_conductivity_w_mk = float(salt_properties["thermal_conductivity_w_mk"] or 1.0)
+    hx_geometry = _build_heat_exchanger_geometry(config)
+    primary_inlet_summary = _build_primary_hx_inlet_summary(
+        loop_graph=loop_graph or {},
+        thermal_profile=thermal_profile or {},
+        branch_flow_summary=branch_flow_summary or {},
+        segment_summary=segment_summary,
+        salt_density_kg_m3=float(salt_properties["density_kg_m3"]),
+        default_primary_mass_flow_kg_s=primary_mass_flow_kg_s,
+        target_cold_leg_temp_c=(
+            config.reactor.get("cold_leg_temp_c", 560.0) if primary_cold_leg_c is None else primary_cold_leg_c
+        ),
+        required_duty_mw=float(required_duty_mw if required_duty_mw is not None else bop.get("steam_generator_duty_mw", 0.0)),
+        hx_primary_hydraulic_diameter_m=hx_geometry["primary_hydraulic_diameter_m"],
+        hx_primary_flow_area_m2=hx_geometry["primary_flow_area_m2"],
+        dynamic_viscosity_pa_s=primary_dynamic_viscosity_pa_s,
+        cp_j_kgk=primary_cp_j_kgk,
+        thermal_conductivity_w_mk=primary_thermal_conductivity_w_mk,
+    )
     primary_hot_leg_c = float(
-        config.reactor.get("hot_leg_temp_c", 700.0) if primary_hot_leg_c is None else primary_hot_leg_c
+        primary_inlet_summary.get("mixed_inlet_temp_c")
+        if primary_inlet_summary.get("mixed_inlet_temp_c") is not None
+        else config.reactor.get("hot_leg_temp_c", 700.0) if primary_hot_leg_c is None else primary_hot_leg_c
     )
     primary_cold_leg_c = float(
         config.reactor.get("cold_leg_temp_c", 560.0) if primary_cold_leg_c is None else primary_cold_leg_c
@@ -596,14 +636,13 @@ def _build_heat_exchanger_summary(
     limiting_velocity_m_s = float(segment_summary.get("limiting_velocity_m_s", 0.0))
     primary_pipe_heat_transfer = _estimate_internal_convection(
         density_kg_m3=float(salt_properties["density_kg_m3"]),
-        dynamic_viscosity_pa_s=float(salt_properties["dynamic_viscosity_pa_s"] or 0.012),
-        cp_j_kgk=float(salt_properties["cp_j_kgk"] or 1600.0),
-        thermal_conductivity_w_mk=float(salt_properties["thermal_conductivity_w_mk"] or 1.0),
+        dynamic_viscosity_pa_s=primary_dynamic_viscosity_pa_s,
+        cp_j_kgk=primary_cp_j_kgk,
+        thermal_conductivity_w_mk=primary_thermal_conductivity_w_mk,
         hydraulic_diameter_m=limiting_inner_diameter_m,
         velocity_m_s=limiting_velocity_m_s,
     )
 
-    hx_geometry = _build_heat_exchanger_geometry(config)
     primary_hx_velocity_m_s = _velocity_from_mass_flow(
         mass_flow_kg_s=primary_mass_flow_kg_s,
         density_kg_m3=float(salt_properties["density_kg_m3"]),
@@ -616,11 +655,17 @@ def _build_heat_exchanger_summary(
     )
     primary_hx_heat_transfer = _estimate_internal_convection(
         density_kg_m3=float(salt_properties["density_kg_m3"]),
-        dynamic_viscosity_pa_s=float(salt_properties["dynamic_viscosity_pa_s"] or 0.012),
-        cp_j_kgk=float(salt_properties["cp_j_kgk"] or 1600.0),
-        thermal_conductivity_w_mk=float(salt_properties["thermal_conductivity_w_mk"] or 1.0),
+        dynamic_viscosity_pa_s=primary_dynamic_viscosity_pa_s,
+        cp_j_kgk=primary_cp_j_kgk,
+        thermal_conductivity_w_mk=primary_thermal_conductivity_w_mk,
         hydraulic_diameter_m=hx_geometry["primary_hydraulic_diameter_m"],
         velocity_m_s=primary_hx_velocity_m_s,
+    )
+    branch_weighted_primary_h_w_m2k = primary_inlet_summary.get("branch_weighted_heat_transfer_coefficient_w_m2k")
+    effective_primary_h_w_m2k = (
+        float(branch_weighted_primary_h_w_m2k)
+        if branch_weighted_primary_h_w_m2k is not None and float(branch_weighted_primary_h_w_m2k) > 0.0
+        else float(primary_hx_heat_transfer["heat_transfer_coefficient_w_m2k"])
     )
     secondary_hx_heat_transfer = _estimate_internal_convection(
         density_kg_m3=float(secondary_properties["density_kg_m3"]),
@@ -631,7 +676,7 @@ def _build_heat_exchanger_summary(
         velocity_m_s=secondary_hx_velocity_m_s,
     )
     estimated_clean_u_w_m2k = _combine_film_coefficients(
-        primary_h_w_m2k=float(primary_hx_heat_transfer["heat_transfer_coefficient_w_m2k"]),
+        primary_h_w_m2k=effective_primary_h_w_m2k,
         secondary_h_w_m2k=float(secondary_hx_heat_transfer["heat_transfer_coefficient_w_m2k"]),
     )
     effective_u_w_m2k = overall_u_w_m2k if overall_u_w_m2k > 0.0 else estimated_clean_u_w_m2k
@@ -648,6 +693,8 @@ def _build_heat_exchanger_summary(
         "secondary_outlet_temp_c": _round_float(secondary_outlet_c),
         "secondary_bulk_temperature_c": _round_float(secondary_bulk_temperature_c),
         "secondary_mass_flow_kg_s": _round_float(secondary_mass_flow_kg_s),
+        "primary_inlet_mixed_temp_c": _round_float(primary_hot_leg_c),
+        "primary_inlet_branches": primary_inlet_summary.get("branches", []),
         "terminal_hot_delta_c": _round_float(terminal_hot_delta),
         "terminal_cold_delta_c": _round_float(terminal_cold_delta),
         "lmtd_c": _round_float(lmtd_k),
@@ -655,6 +702,13 @@ def _build_heat_exchanger_summary(
         "primary_pipe_heat_transfer": primary_pipe_heat_transfer,
         "primary_hx_side": {
             **primary_hx_heat_transfer,
+            "effective_heat_transfer_coefficient_w_m2k": _round_float(effective_primary_h_w_m2k),
+            "branch_modeling_mode": str(primary_inlet_summary.get("hx_modeling_mode", "lumped_primary_side")),
+            "branch_weighted_heat_transfer_coefficient_w_m2k": (
+                _round_float(float(branch_weighted_primary_h_w_m2k))
+                if branch_weighted_primary_h_w_m2k is not None
+                else None
+            ),
             "velocity_m_s": _round_float(primary_hx_velocity_m_s),
             "hydraulic_diameter_m": _round_float(hx_geometry["primary_hydraulic_diameter_m"]),
             "flow_area_m2": _round_float(hx_geometry["primary_flow_area_m2"]),
@@ -694,32 +748,15 @@ def _solve_branch_flow_distribution(
         branches = group.get("branches", [])
         if len(branches) < 2:
             continue
-        branch_flows = {
-            str(branch["branch_id"]): max(total_volumetric_flow_m3_s / len(branches), 1.0e-9)
-            for branch in branches
-        }
-        for _ in range(10):
-            branch_drop_pa = {}
-            branch_conductance = {}
-            for branch in branches:
-                branch_id = str(branch["branch_id"])
-                drop_pa = _evaluate_branch_path_pressure_drop(
-                    edge_ids=[str(edge_id) for edge_id in branch.get("edge_ids", [])],
-                    volumetric_flow_m3_s=branch_flows[branch_id],
-                    pipe_runs=pipe_runs,
-                    salt_density_kg_m3=salt_density_kg_m3,
-                    dynamic_viscosity_pa_s=dynamic_viscosity_pa_s,
-                    elbow_loss_coefficient=elbow_loss_coefficient,
-                    terminal_loss_coefficient=terminal_loss_coefficient,
-                )
-                branch_drop_pa[branch_id] = drop_pa
-                branch_conductance[branch_id] = branch_flows[branch_id] / max(drop_pa, 1.0)
-            conductance_sum = sum(branch_conductance.values())
-            if conductance_sum <= 0.0:
-                break
-            for branch in branches:
-                branch_id = str(branch["branch_id"])
-                branch_flows[branch_id] = total_volumetric_flow_m3_s * branch_conductance[branch_id] / conductance_sum
+        branch_flows = _solve_parallel_branch_group_flows(
+            branches=branches,
+            total_volumetric_flow_m3_s=total_volumetric_flow_m3_s,
+            pipe_runs=pipe_runs,
+            salt_density_kg_m3=salt_density_kg_m3,
+            dynamic_viscosity_pa_s=dynamic_viscosity_pa_s,
+            elbow_loss_coefficient=elbow_loss_coefficient,
+            terminal_loss_coefficient=terminal_loss_coefficient,
+        )
         for branch in branches:
             branch_id = str(branch["branch_id"])
             for edge_id in branch.get("edge_ids", []):
@@ -733,6 +770,18 @@ def _solve_branch_flow_distribution(
                         "branch_id": str(branch["branch_id"]),
                         "edge_ids": [str(edge_id) for edge_id in branch.get("edge_ids", [])],
                         "volumetric_flow_m3_s": _round_float(branch_flows[str(branch["branch_id"])]),
+                        "path_pressure_drop_kpa": _round_float(
+                            _evaluate_branch_path_pressure_drop(
+                                edge_ids=[str(edge_id) for edge_id in branch.get("edge_ids", [])],
+                                volumetric_flow_m3_s=branch_flows[str(branch["branch_id"])],
+                                pipe_runs=pipe_runs,
+                                salt_density_kg_m3=salt_density_kg_m3,
+                                dynamic_viscosity_pa_s=dynamic_viscosity_pa_s,
+                                elbow_loss_coefficient=elbow_loss_coefficient,
+                                terminal_loss_coefficient=terminal_loss_coefficient,
+                            )
+                            / 1000.0
+                        ),
                         "flow_fraction": _round_float(
                             branch_flows[str(branch["branch_id"])] / total_volumetric_flow_m3_s
                             if total_volumetric_flow_m3_s > 0.0
@@ -747,6 +796,279 @@ def _solve_branch_flow_distribution(
     return {
         "edge_flow_m3_s": {edge_id: _round_float(flow) for edge_id, flow in edge_flow_m3_s.items()},
         "branch_groups": branch_groups_summary,
+    }
+
+
+def _solve_parallel_branch_group_flows(
+    *,
+    branches: list[dict[str, Any]],
+    total_volumetric_flow_m3_s: float,
+    pipe_runs: dict[str, dict[str, Any]],
+    salt_density_kg_m3: float,
+    dynamic_viscosity_pa_s: float,
+    elbow_loss_coefficient: float,
+    terminal_loss_coefficient: float,
+) -> dict[str, float]:
+    if total_volumetric_flow_m3_s <= 0.0:
+        return {str(branch["branch_id"]): 0.0 for branch in branches}
+
+    def total_group_flow_for_drop(target_drop_pa: float) -> float:
+        return sum(
+            _solve_branch_flow_for_pressure_drop(
+                edge_ids=[str(edge_id) for edge_id in branch.get("edge_ids", [])],
+                target_drop_pa=target_drop_pa,
+                max_volumetric_flow_m3_s=total_volumetric_flow_m3_s,
+                pipe_runs=pipe_runs,
+                salt_density_kg_m3=salt_density_kg_m3,
+                dynamic_viscosity_pa_s=dynamic_viscosity_pa_s,
+                elbow_loss_coefficient=elbow_loss_coefficient,
+                terminal_loss_coefficient=terminal_loss_coefficient,
+            )
+            for branch in branches
+        )
+
+    high_drop_pa = max(
+        _evaluate_branch_path_pressure_drop(
+            edge_ids=[str(edge_id) for edge_id in branch.get("edge_ids", [])],
+            volumetric_flow_m3_s=total_volumetric_flow_m3_s,
+            pipe_runs=pipe_runs,
+            salt_density_kg_m3=salt_density_kg_m3,
+            dynamic_viscosity_pa_s=dynamic_viscosity_pa_s,
+            elbow_loss_coefficient=elbow_loss_coefficient,
+            terminal_loss_coefficient=terminal_loss_coefficient,
+        )
+        for branch in branches
+    )
+    high_drop_pa = max(high_drop_pa, 1.0)
+    low_drop_pa = 0.0
+    for _ in range(40):
+        mid_drop_pa = 0.5 * (low_drop_pa + high_drop_pa)
+        if total_group_flow_for_drop(mid_drop_pa) >= total_volumetric_flow_m3_s:
+            high_drop_pa = mid_drop_pa
+        else:
+            low_drop_pa = mid_drop_pa
+
+    solved_flows = {
+        str(branch["branch_id"]): _solve_branch_flow_for_pressure_drop(
+            edge_ids=[str(edge_id) for edge_id in branch.get("edge_ids", [])],
+            target_drop_pa=high_drop_pa,
+            max_volumetric_flow_m3_s=total_volumetric_flow_m3_s,
+            pipe_runs=pipe_runs,
+            salt_density_kg_m3=salt_density_kg_m3,
+            dynamic_viscosity_pa_s=dynamic_viscosity_pa_s,
+            elbow_loss_coefficient=elbow_loss_coefficient,
+            terminal_loss_coefficient=terminal_loss_coefficient,
+        )
+        for branch in branches
+    }
+    solved_total_flow_m3_s = sum(solved_flows.values())
+    if solved_total_flow_m3_s > 0.0:
+        flow_scale = total_volumetric_flow_m3_s / solved_total_flow_m3_s
+        solved_flows = {
+            branch_id: flow_m3_s * flow_scale
+            for branch_id, flow_m3_s in solved_flows.items()
+        }
+    return solved_flows
+
+
+def _solve_branch_flow_for_pressure_drop(
+    *,
+    edge_ids: list[str],
+    target_drop_pa: float,
+    max_volumetric_flow_m3_s: float,
+    pipe_runs: dict[str, dict[str, Any]],
+    salt_density_kg_m3: float,
+    dynamic_viscosity_pa_s: float,
+    elbow_loss_coefficient: float,
+    terminal_loss_coefficient: float,
+) -> float:
+    if target_drop_pa <= 0.0 or max_volumetric_flow_m3_s <= 0.0:
+        return 0.0
+    full_flow_drop_pa = _evaluate_branch_path_pressure_drop(
+        edge_ids=edge_ids,
+        volumetric_flow_m3_s=max_volumetric_flow_m3_s,
+        pipe_runs=pipe_runs,
+        salt_density_kg_m3=salt_density_kg_m3,
+        dynamic_viscosity_pa_s=dynamic_viscosity_pa_s,
+        elbow_loss_coefficient=elbow_loss_coefficient,
+        terminal_loss_coefficient=terminal_loss_coefficient,
+    )
+    if full_flow_drop_pa <= target_drop_pa:
+        return max_volumetric_flow_m3_s
+
+    low_flow_m3_s = 0.0
+    high_flow_m3_s = max_volumetric_flow_m3_s
+    for _ in range(40):
+        mid_flow_m3_s = 0.5 * (low_flow_m3_s + high_flow_m3_s)
+        mid_drop_pa = _evaluate_branch_path_pressure_drop(
+            edge_ids=edge_ids,
+            volumetric_flow_m3_s=mid_flow_m3_s,
+            pipe_runs=pipe_runs,
+            salt_density_kg_m3=salt_density_kg_m3,
+            dynamic_viscosity_pa_s=dynamic_viscosity_pa_s,
+            elbow_loss_coefficient=elbow_loss_coefficient,
+            terminal_loss_coefficient=terminal_loss_coefficient,
+        )
+        if mid_drop_pa >= target_drop_pa:
+            high_flow_m3_s = mid_flow_m3_s
+        else:
+            low_flow_m3_s = mid_flow_m3_s
+    return high_flow_m3_s
+
+
+def _build_primary_hx_inlet_summary(
+    *,
+    loop_graph: dict[str, Any],
+    thermal_profile: dict[str, Any],
+    branch_flow_summary: dict[str, Any],
+    segment_summary: dict[str, Any],
+    salt_density_kg_m3: float,
+    default_primary_mass_flow_kg_s: float,
+    target_cold_leg_temp_c: float,
+    required_duty_mw: float,
+    hx_primary_hydraulic_diameter_m: float,
+    hx_primary_flow_area_m2: float,
+    dynamic_viscosity_pa_s: float,
+    cp_j_kgk: float,
+    thermal_conductivity_w_mk: float,
+) -> dict[str, Any]:
+    edge_lookup = {
+        str(edge.get("id") or edge.get("name")): edge
+        for edge in loop_graph.get("edges", [])
+    }
+    segment_lookup = {
+        str(segment.get("name")): segment
+        for segment in thermal_profile.get("segments", [])
+        if segment.get("name")
+    }
+    hydraulic_segment_lookup = {
+        str(segment.get("id") or segment.get("name")): segment
+        for segment in segment_summary.get("segments", [])
+        if segment.get("id") or segment.get("name")
+    }
+    edge_flow_m3_s = branch_flow_summary.get("edge_flow_m3_s", {})
+    incoming_edges = [
+        edge
+        for edge in edge_lookup.values()
+        if str(edge.get("to") or "") == "heat_exchanger"
+    ]
+    explicit_area_fraction_sum = 0.0
+    explicit_area_fractions: dict[str, float] = {}
+    for edge in incoming_edges:
+        edge_id = str(edge["id"])
+        area_fraction = edge.get("heat_exchanger_area_fraction")
+        if area_fraction is None:
+            explicit_area_fractions = {}
+            explicit_area_fraction_sum = 0.0
+            break
+        area_fraction_value = float(area_fraction)
+        if area_fraction_value <= 0.0:
+            explicit_area_fractions = {}
+            explicit_area_fraction_sum = 0.0
+            break
+        explicit_area_fractions[edge_id] = area_fraction_value
+        explicit_area_fraction_sum += area_fraction_value
+    has_explicit_hx_area_split = len(explicit_area_fractions) == len(incoming_edges) and explicit_area_fraction_sum > 0.0
+    branches: list[dict[str, Any]] = []
+    for edge in incoming_edges:
+        edge_id = str(edge["id"])
+        segment = segment_lookup.get(edge_id)
+        if not segment:
+            continue
+        volumetric_flow_m3_s = float(edge_flow_m3_s.get(edge_id, 0.0))
+        mass_flow_kg_s = (
+            volumetric_flow_m3_s * salt_density_kg_m3
+            if volumetric_flow_m3_s > 0.0 and salt_density_kg_m3 > 0.0
+            else default_primary_mass_flow_kg_s
+        )
+        hydraulic_segment = hydraulic_segment_lookup.get(edge_id, {})
+        inlet_temp_c = float(segment.get("outlet_temp_c", segment.get("inlet_temp_c", 0.0)))
+        branch_flow_fraction = mass_flow_kg_s / default_primary_mass_flow_kg_s if default_primary_mass_flow_kg_s > 0.0 else 0.0
+        local_hot_side_heat_transfer = _estimate_internal_convection(
+            density_kg_m3=salt_density_kg_m3,
+            dynamic_viscosity_pa_s=dynamic_viscosity_pa_s,
+            cp_j_kgk=cp_j_kgk,
+            thermal_conductivity_w_mk=thermal_conductivity_w_mk,
+            hydraulic_diameter_m=float(
+                hydraulic_segment.get("inner_diameter_m", hx_primary_hydraulic_diameter_m)
+            ),
+            velocity_m_s=float(hydraulic_segment.get("velocity_m_s", 0.0)),
+        )
+        branch_thermal_capacity_w = max(inlet_temp_c - target_cold_leg_temp_c, 0.0) * mass_flow_kg_s * cp_j_kgk
+        hx_area_fraction = (
+            explicit_area_fractions[edge_id] / explicit_area_fraction_sum
+            if has_explicit_hx_area_split
+            else None
+        )
+        branch_hx_area_m2 = hx_primary_flow_area_m2 * hx_area_fraction if hx_area_fraction is not None else None
+        branch_hx_velocity_m_s = (
+            _velocity_from_mass_flow(
+                mass_flow_kg_s=mass_flow_kg_s,
+                density_kg_m3=salt_density_kg_m3,
+                flow_area_m2=branch_hx_area_m2 or 0.0,
+            )
+            if branch_hx_area_m2 is not None
+            else None
+        )
+        branch_hx_heat_transfer = (
+            _estimate_internal_convection(
+                density_kg_m3=salt_density_kg_m3,
+                dynamic_viscosity_pa_s=dynamic_viscosity_pa_s,
+                cp_j_kgk=cp_j_kgk,
+                thermal_conductivity_w_mk=thermal_conductivity_w_mk,
+                hydraulic_diameter_m=hx_primary_hydraulic_diameter_m,
+                velocity_m_s=branch_hx_velocity_m_s or 0.0,
+            )
+            if branch_hx_velocity_m_s is not None
+            else None
+        )
+        branches.append(
+            {
+                "edge_id": edge_id,
+                "inlet_temp_c": _round_float(inlet_temp_c),
+                "mass_flow_kg_s": _round_float(mass_flow_kg_s),
+                "volumetric_flow_m3_s": _round_float(volumetric_flow_m3_s),
+                "flow_fraction": _round_float(branch_flow_fraction),
+                "thermal_capacity_mw": _round_float(branch_thermal_capacity_w / 1.0e6),
+                "hx_area_fraction": _round_float(hx_area_fraction) if hx_area_fraction is not None else None,
+                "local_hot_side_entry_h_w_m2k": local_hot_side_heat_transfer["heat_transfer_coefficient_w_m2k"],
+                "local_hot_side_entry_velocity_m_s": _round_float(float(hydraulic_segment.get("velocity_m_s", 0.0))),
+                "hx_local_h_w_m2k": (
+                    branch_hx_heat_transfer["heat_transfer_coefficient_w_m2k"]
+                    if branch_hx_heat_transfer is not None
+                    else None
+                ),
+                "hx_local_velocity_m_s": _round_float(branch_hx_velocity_m_s) if branch_hx_velocity_m_s is not None else None,
+                "hx_allocated_flow_area_m2": _round_float(branch_hx_area_m2) if branch_hx_area_m2 is not None else None,
+            }
+        )
+    total_mass_flow_kg_s = sum(float(branch["mass_flow_kg_s"]) for branch in branches)
+    total_thermal_capacity_mw = sum(float(branch["thermal_capacity_mw"]) for branch in branches)
+    duty_mw = abs(float(required_duty_mw))
+    for branch in branches:
+        thermal_capacity_mw = float(branch["thermal_capacity_mw"])
+        duty_fraction = (
+            thermal_capacity_mw / total_thermal_capacity_mw
+            if total_thermal_capacity_mw > 0.0
+            else float(branch["mass_flow_kg_s"]) / total_mass_flow_kg_s if total_mass_flow_kg_s > 0.0 else 0.0
+        )
+        branch["duty_fraction"] = _round_float(duty_fraction)
+        branch["duty_share_mw"] = _round_float(duty_fraction * duty_mw)
+    mixed_inlet_temp_c = (
+        sum(float(branch["mass_flow_kg_s"]) * float(branch["inlet_temp_c"]) for branch in branches) / total_mass_flow_kg_s
+        if total_mass_flow_kg_s > 0.0
+        else None
+    )
+    branch_weighted_heat_transfer_coefficient_w_m2k = (
+        sum(float(branch["duty_fraction"]) * float(branch["hx_local_h_w_m2k"]) for branch in branches)
+        if has_explicit_hx_area_split and branches
+        else None
+    )
+    return {
+        "mixed_inlet_temp_c": mixed_inlet_temp_c,
+        "branches": branches,
+        "hx_modeling_mode": "explicit_area_fraction" if has_explicit_hx_area_split else "lumped_primary_side",
+        "branch_weighted_heat_transfer_coefficient_w_m2k": branch_weighted_heat_transfer_coefficient_w_m2k,
     }
 
 
@@ -914,6 +1236,7 @@ def _build_inventory_summary(
 def _build_primary_thermal_profile(
     config: Any,
     *,
+    primary_loop: dict[str, Any] | None = None,
     loop_graph: dict[str, Any],
     bop: dict[str, Any],
     salt_properties: dict[str, Any],
@@ -956,7 +1279,9 @@ def _build_primary_thermal_profile(
         solved_profile["primary_mass_flow_kg_s"] = float(fixed_primary_mass_flow_kg_s)
     else:
         solved_profile = _solve_primary_loop_thermal_state(
+            primary_loop=primary_loop or {},
             component_lookup=component_lookup,
+            loop_graph=loop_graph,
             edge_lookup=edge_lookup,
             cycle_edge_ids=cycle_edge_ids,
             ambient_temp_c=ambient_temp_c,
@@ -966,6 +1291,12 @@ def _build_primary_thermal_profile(
             target_delta_t_c=target_delta_t_c,
             target_cold_leg_temp_c=target_cold_leg_temp_c,
             initial_mass_flow_kg_s=initial_mass_flow_kg_s,
+            salt_density_kg_m3=float(salt_density_kg_m3 or 0.0),
+            dynamic_viscosity_pa_s=float(
+                salt_properties["dynamic_viscosity_pa_s"] if salt_properties.get("dynamic_viscosity_pa_s") is not None else 0.012
+            ),
+            elbow_loss_coefficient=float(reactor.get("primary_elbow_loss_coefficient", 0.9)),
+            terminal_loss_coefficient=float(reactor.get("primary_terminal_loss_coefficient", 1.6)),
         )
 
     return {
@@ -995,7 +1326,9 @@ def _build_primary_thermal_profile(
 
 def _solve_primary_loop_thermal_state(
     *,
+    primary_loop: dict[str, Any],
     component_lookup: dict[str, dict[str, Any]],
+    loop_graph: dict[str, Any],
     edge_lookup: dict[str, dict[str, Any]],
     cycle_edge_ids: list[str],
     ambient_temp_c: float,
@@ -1005,6 +1338,10 @@ def _solve_primary_loop_thermal_state(
     target_delta_t_c: float,
     target_cold_leg_temp_c: float,
     initial_mass_flow_kg_s: float,
+    salt_density_kg_m3: float,
+    dynamic_viscosity_pa_s: float,
+    elbow_loss_coefficient: float,
+    terminal_loss_coefficient: float,
 ) -> dict[str, Any]:
     if not cycle_edge_ids or initial_mass_flow_kg_s <= 0.0:
         return {
@@ -1019,6 +1356,15 @@ def _solve_primary_loop_thermal_state(
         }
 
     guess_a = max(float(initial_mass_flow_kg_s), 1.0e-6)
+    branch_flow_a = _solve_branch_flow_distribution(
+        primary_loop=primary_loop,
+        loop_graph=loop_graph,
+        total_volumetric_flow_m3_s=guess_a / salt_density_kg_m3 if salt_density_kg_m3 > 0.0 else 0.0,
+        salt_density_kg_m3=salt_density_kg_m3,
+        dynamic_viscosity_pa_s=dynamic_viscosity_pa_s,
+        elbow_loss_coefficient=elbow_loss_coefficient,
+        terminal_loss_coefficient=terminal_loss_coefficient,
+    )
     result_a = _simulate_primary_loop_pass(
         primary_mass_flow_kg_s=guess_a,
         component_lookup=component_lookup,
@@ -1030,14 +1376,38 @@ def _solve_primary_loop_thermal_state(
         primary_cp_j_kgk=primary_cp_j_kgk,
         core_heat_kw=core_heat_kw,
     )
+    if loop_graph.get("branch_groups"):
+        result_a = _simulate_primary_loop_network_pass(
+            loop_graph=loop_graph,
+            component_lookup=component_lookup,
+            edge_lookup=edge_lookup,
+            ambient_temp_c=ambient_temp_c,
+            pipe_overall_u_w_m2k=pipe_overall_u_w_m2k,
+            target_cold_leg_temp_c=target_cold_leg_temp_c,
+            primary_cp_j_kgk=primary_cp_j_kgk,
+            core_heat_kw=core_heat_kw,
+            default_primary_mass_flow_kg_s=guess_a,
+            edge_flow_m3_s=branch_flow_a["edge_flow_m3_s"],
+            salt_density_kg_m3=salt_density_kg_m3,
+        )
     error_a = float((result_a["hot_leg_temp_c"] - result_a["cold_leg_temp_c"]) - target_delta_t_c)
     if abs(error_a) <= 1.0e-6:
         result_a["iterations"] = 1
+        result_a["primary_mass_flow_kg_s"] = guess_a
         return result_a
 
     guess_b = max(guess_a * 1.05, guess_a + 1.0)
     if math.isclose(guess_b, guess_a, rel_tol=1.0e-9, abs_tol=1.0e-9):
         guess_b = guess_a + 5.0
+    branch_flow_b = _solve_branch_flow_distribution(
+        primary_loop=primary_loop,
+        loop_graph=loop_graph,
+        total_volumetric_flow_m3_s=guess_b / salt_density_kg_m3 if salt_density_kg_m3 > 0.0 else 0.0,
+        salt_density_kg_m3=salt_density_kg_m3,
+        dynamic_viscosity_pa_s=dynamic_viscosity_pa_s,
+        elbow_loss_coefficient=elbow_loss_coefficient,
+        terminal_loss_coefficient=terminal_loss_coefficient,
+    )
     result_b = _simulate_primary_loop_pass(
         primary_mass_flow_kg_s=guess_b,
         component_lookup=component_lookup,
@@ -1049,6 +1419,20 @@ def _solve_primary_loop_thermal_state(
         primary_cp_j_kgk=primary_cp_j_kgk,
         core_heat_kw=core_heat_kw,
     )
+    if loop_graph.get("branch_groups"):
+        result_b = _simulate_primary_loop_network_pass(
+            loop_graph=loop_graph,
+            component_lookup=component_lookup,
+            edge_lookup=edge_lookup,
+            ambient_temp_c=ambient_temp_c,
+            pipe_overall_u_w_m2k=pipe_overall_u_w_m2k,
+            target_cold_leg_temp_c=target_cold_leg_temp_c,
+            primary_cp_j_kgk=primary_cp_j_kgk,
+            core_heat_kw=core_heat_kw,
+            default_primary_mass_flow_kg_s=guess_b,
+            edge_flow_m3_s=branch_flow_b["edge_flow_m3_s"],
+            salt_density_kg_m3=salt_density_kg_m3,
+        )
     error_b = float((result_b["hot_leg_temp_c"] - result_b["cold_leg_temp_c"]) - target_delta_t_c)
 
     latest_result = result_b
@@ -1056,6 +1440,7 @@ def _solve_primary_loop_thermal_state(
     for iteration in range(2, 13):
         if abs(latest_error) <= 1.0e-6:
             latest_result["iterations"] = iteration
+            latest_result["primary_mass_flow_kg_s"] = guess_b
             return latest_result
         denominator = error_b - error_a
         if math.isclose(denominator, 0.0, rel_tol=1.0e-12, abs_tol=1.0e-12):
@@ -1065,6 +1450,15 @@ def _solve_primary_loop_thermal_state(
         next_guess = max(next_guess, 1.0e-6)
         guess_a, error_a = guess_b, error_b
         guess_b = next_guess
+        branch_flow_b = _solve_branch_flow_distribution(
+            primary_loop=primary_loop,
+            loop_graph=loop_graph,
+            total_volumetric_flow_m3_s=guess_b / salt_density_kg_m3 if salt_density_kg_m3 > 0.0 else 0.0,
+            salt_density_kg_m3=salt_density_kg_m3,
+            dynamic_viscosity_pa_s=dynamic_viscosity_pa_s,
+            elbow_loss_coefficient=elbow_loss_coefficient,
+            terminal_loss_coefficient=terminal_loss_coefficient,
+        )
         latest_result = _simulate_primary_loop_pass(
             primary_mass_flow_kg_s=guess_b,
             component_lookup=component_lookup,
@@ -1076,10 +1470,25 @@ def _solve_primary_loop_thermal_state(
             primary_cp_j_kgk=primary_cp_j_kgk,
             core_heat_kw=core_heat_kw,
         )
+        if loop_graph.get("branch_groups"):
+            latest_result = _simulate_primary_loop_network_pass(
+                loop_graph=loop_graph,
+                component_lookup=component_lookup,
+                edge_lookup=edge_lookup,
+                ambient_temp_c=ambient_temp_c,
+                pipe_overall_u_w_m2k=pipe_overall_u_w_m2k,
+                target_cold_leg_temp_c=target_cold_leg_temp_c,
+                primary_cp_j_kgk=primary_cp_j_kgk,
+                core_heat_kw=core_heat_kw,
+                default_primary_mass_flow_kg_s=guess_b,
+                edge_flow_m3_s=branch_flow_b["edge_flow_m3_s"],
+                salt_density_kg_m3=salt_density_kg_m3,
+            )
         error_b = float((latest_result["hot_leg_temp_c"] - latest_result["cold_leg_temp_c"]) - target_delta_t_c)
         latest_error = error_b
 
     latest_result["iterations"] = 12
+    latest_result["primary_mass_flow_kg_s"] = guess_b
     return latest_result
 
 
@@ -1453,11 +1862,15 @@ def _build_fuel_cycle_summary(config: Any, bop: dict[str, Any], inventory_summar
 
 
 def _build_primary_system_checks(
+    reduced_order_flow: dict[str, Any],
     max_reynolds_number: float,
     pump_head_m: float,
     heat_exchanger_summary: dict[str, Any],
+    thermal_profile: dict[str, Any],
     inventory_summary: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    active_flow_velocity_m_s = float(reduced_order_flow.get("active_flow", {}).get("representative_velocity_m_s", 0.0))
+    heat_exchanger_duty_error_mw = abs(float(thermal_profile.get("heat_exchanger_duty_error_mw", 0.0)))
     checks = [
         (
             "primary_system::loop_reynolds_reasonable",
@@ -1489,6 +1902,18 @@ def _build_primary_system_checks(
             float(inventory_summary["fuel_salt"].get("total_m3", 0.0)) > 0.0,
             "Fuel-salt inventory accounting is positive.",
             "Fuel-salt inventory must remain positive.",
+        ),
+        (
+            "primary_system::active_channel_velocity_reasonable",
+            1.0 <= active_flow_velocity_m_s <= 12.0,
+            f"Representative active-channel velocity is {active_flow_velocity_m_s:.2f} m/s.",
+            "Representative active-channel velocity should stay between 1 and 12 m/s for this reduced-order screening model.",
+        ),
+        (
+            "primary_system::heat_exchanger_duty_closure_reasonable",
+            heat_exchanger_duty_error_mw <= 0.25,
+            f"Heat-exchanger available-duty mismatch is {heat_exchanger_duty_error_mw:.3f} MW.",
+            "Heat-exchanger required duty should stay within 0.25 MW of the available BOP duty for a self-consistent steady-state screening case.",
         ),
     ]
     return [
