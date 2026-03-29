@@ -101,3 +101,36 @@ def test_generate_validation_plot_updates_manifest() -> None:
     assert "validation_summary" in assets
     assert "validation_summary" in manifest
     assert Path(assets["validation_summary"]).exists()
+
+
+def test_generate_summary_plots_emits_transient_plots_when_history_exists() -> None:
+    bundle = create_result_bundle(REPO_ROOT / ".tmp" / "plot-transient-test", "plot_case", "run")
+    transient_path = bundle.write_json(
+        "transient.json",
+        {
+            "history": [
+                {"time_s": 0.0, "power_fraction": 1.0, "fuel_temp_c": 690.0},
+                {"time_s": 10.0, "power_fraction": 1.08, "fuel_temp_c": 702.0},
+                {"time_s": 20.0, "power_fraction": 1.03, "fuel_temp_c": 698.0},
+            ]
+        },
+    )
+    summary = {
+        "case": "plot_case",
+        "metrics": {
+            "channel_count": 91,
+        },
+        "transient": {
+            "history_path": str(transient_path),
+        },
+        "neutronics": {
+            "status": "completed",
+        },
+    }
+
+    assets = generate_summary_plots(bundle, summary)
+
+    assert "transient_power" in assets
+    assert "transient_fuel_temperature" in assets
+    assert Path(assets["transient_power"]).exists()
+    assert Path(assets["transient_fuel_temperature"]).exists()

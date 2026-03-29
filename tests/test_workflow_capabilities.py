@@ -11,6 +11,7 @@ from thorium_reactor.capabilities import (
     MSR_PRIMARY_SYSTEM,
     NEUTRONICS_ONLY,
     THERMAL_NETWORK,
+    TRANSIENT_ANALYSIS,
     CapabilityConfigurationError,
     get_case_capabilities,
 )
@@ -46,6 +47,7 @@ def test_example_pin_run_no_solver_succeeds_end_to_end() -> None:
         assert "bop" not in summary
         assert "primary_system" not in summary
         assert "flow" not in summary
+        assert "transient" not in summary
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
@@ -62,6 +64,7 @@ def test_msr_run_still_produces_primary_system_summary() -> None:
         assert BALANCE_OF_PLANT in summary["workflow_capabilities"]
         assert THERMAL_NETWORK in summary["workflow_capabilities"]
         assert MSR_PRIMARY_SYSTEM in summary["workflow_capabilities"]
+        assert TRANSIENT_ANALYSIS in summary["workflow_capabilities"]
         assert "bop" in summary
         assert "flow" in summary
         assert "primary_system" in summary
@@ -76,8 +79,8 @@ def test_capability_inference_distinguishes_generic_and_msr_cases() -> None:
     immersed_pool = _load_case("immersed_pool_reference")
 
     assert get_case_capabilities(example_pin) == {NEUTRONICS_ONLY}
-    assert get_case_capabilities(tmsr_core) == {NEUTRONICS_ONLY, BALANCE_OF_PLANT, THERMAL_NETWORK}
-    assert get_case_capabilities(immersed_pool) == {NEUTRONICS_ONLY, BALANCE_OF_PLANT, THERMAL_NETWORK, MSR_PRIMARY_SYSTEM}
+    assert get_case_capabilities(tmsr_core) == {NEUTRONICS_ONLY, BALANCE_OF_PLANT, THERMAL_NETWORK, TRANSIENT_ANALYSIS}
+    assert get_case_capabilities(immersed_pool) == {NEUTRONICS_ONLY, BALANCE_OF_PLANT, THERMAL_NETWORK, MSR_PRIMARY_SYSTEM, TRANSIENT_ANALYSIS}
 
 
 def test_explicit_capability_override_can_disable_primary_system_logic() -> None:
@@ -94,6 +97,7 @@ def test_explicit_capability_override_can_disable_primary_system_logic() -> None
         assert BALANCE_OF_PLANT in summary["workflow_capabilities"]
         assert THERMAL_NETWORK in summary["workflow_capabilities"]
         assert MSR_PRIMARY_SYSTEM not in summary["workflow_capabilities"]
+        assert TRANSIENT_ANALYSIS in summary["workflow_capabilities"]
         assert "bop" in summary
         assert "flow" in summary
         assert "primary_system" not in summary
@@ -116,5 +120,47 @@ def test_missing_molten_salt_inputs_report_capability_and_field() -> None:
         message = str(exc_info.value)
         assert "Capability 'thermal_network'" in message
         assert "materials.fuel_salt.density" in message
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_transient_command_produces_configured_history() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-transient-run" / uuid.uuid4().hex
+    case_dir = scratch_root / "configs" / "cases" / "immersed_pool_reference"
+    benchmark_dir = scratch_root / "benchmarks" / "tmsr_lf1"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    benchmark_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml", case_dir / "case.yaml")
+        shutil.copy2(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", benchmark_dir / "benchmark.yaml")
+
+        exit_code = main(
+            [
+                "--repo-root",
+                str(scratch_root),
+                "transient",
+                "immersed_pool_reference",
+                "--run-id",
+                "transient-smoke",
+                "--scenario",
+                "partial_heat_sink_loss",
+            ]
+        )
+
+        assert exit_code == 0
+        summary = json.loads(
+            (scratch_root / "results" / "immersed_pool_reference" / "transient-smoke" / "summary.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        transient = json.loads(
+            (scratch_root / "results" / "immersed_pool_reference" / "transient-smoke" / "transient.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert summary["transient"]["scenario_name"] == "partial_heat_sink_loss"
+        assert summary["transient"]["peak_fuel_temperature_c"] >= summary["primary_system"]["thermal_profile"]["estimated_hot_leg_temp_c"]
+        assert transient["metrics"]["history_points"] > 10
+        assert transient["depletion"]["chain"] == "thorium_u233_cleanup_proxy"
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)

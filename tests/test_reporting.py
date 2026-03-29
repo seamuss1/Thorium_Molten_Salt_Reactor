@@ -258,3 +258,143 @@ def test_report_includes_reduced_order_flow_section() -> None:
         assert "63.4" in report
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_report_includes_neutronics_input_section() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-neutronics" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "result_dir": str(scratch_root),
+                    "neutronics": {
+                        "status": "dry-run",
+                        "openmc_available": False,
+                        "simulation": {
+                            "mode": "eigenvalue",
+                            "particles": 100000,
+                            "batches": 120,
+                            "inactive": 20,
+                            "active_batches": 100,
+                            "source": {
+                                "type": "point",
+                                "parameters": [0.0, 0.0, 0.0],
+                            },
+                            "tallies": [
+                                {
+                                    "name": "core_flux",
+                                    "cell": "core_matrix",
+                                    "scores": ["flux"],
+                                    "nuclides": [],
+                                }
+                            ],
+                            "geometry_boundary": "reflective",
+                            "axial_boundary": "vacuum",
+                        },
+                    },
+                    "metrics": {"keff": 1.01},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "tmsr_lf1_core",
+            {
+                "reactor": {
+                    "name": "TMSR-LF1-Inspired Core",
+                    "family": "TMSR-LF1-inspired MSR",
+                    "stage": "full-core",
+                    "design_power_mwth": 250.0,
+                    "benchmark": "benchmarks/tmsr_lf1/benchmark.yaml",
+                }
+            },
+            summary_path,
+            None,
+            None,
+        )
+
+        assert "## Neutronics Inputs" in report
+        assert "Particles per generation" in report
+        assert "Active batches" in report
+        assert "Radial boundary" in report
+        assert "Axial boundary" in report
+        assert "Tally `core_flux`" in report
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_report_includes_transient_and_depletion_sections() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-transient" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "dry-run"},
+                    "metrics": {"keff": 1.01},
+                    "fuel_cycle": {
+                        "depletion_chain": "thorium_u233_cleanup_proxy",
+                        "cleanup_scenario": "baseline_online_cleanup",
+                        "heavy_metal_inventory_kg": 3.9,
+                        "fissile_inventory_kg": 0.25,
+                        "specific_power_mw_per_t_hm": 2051.3,
+                        "cleanup_turnover_days": 10.0,
+                        "cleanup_removal_efficiency": 0.78,
+                        "xenon_generation_rate_atoms_s": 6.99e14,
+                        "xenon_removal_fraction": 0.9,
+                        "protactinium_holdup_days": 2.0,
+                        "depletion_assumptions": {
+                            "volatile_removal_efficiency": 0.78,
+                        },
+                    },
+                    "transient": {
+                        "status": "completed",
+                        "model": "reduced_order_transient_proxy",
+                        "scenario_name": "partial_heat_sink_loss",
+                        "duration_s": 120.0,
+                        "time_step_s": 1.0,
+                        "event_count": 1,
+                        "peak_power_fraction": 1.05,
+                        "final_power_fraction": 1.02,
+                        "peak_fuel_temperature_c": 705.0,
+                        "peak_graphite_temperature_c": 666.0,
+                        "peak_coolant_temperature_c": 681.0,
+                        "minimum_precursor_core_fraction": 0.34,
+                        "final_total_reactivity_pcm": -22.0,
+                        "depletion_chain": "thorium_u233_cleanup_proxy",
+                        "cleanup_scenario": "baseline_online_cleanup",
+                        "history_path": "transient.json",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "immersed_pool_reference",
+            {
+                "reactor": {
+                    "name": "Immersed Pool MSR Reference",
+                    "family": "reference-inspired immersed pool MSR demonstrator",
+                    "stage": "full-core",
+                    "design_power_mwth": 8.0,
+                    "benchmark": "benchmarks/tmsr_lf1/benchmark.yaml",
+                }
+            },
+            summary_path,
+            None,
+            None,
+        )
+
+        assert "## Fuel Cycle Assumptions" in report
+        assert "Depletion chain" in report
+        assert "## Transient Scenario" in report
+        assert "partial_heat_sink_loss" in report
+        assert "transient.json" in report
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)

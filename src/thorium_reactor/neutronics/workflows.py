@@ -125,6 +125,7 @@ def run_case(
         "neutronics": {
             "status": "dry-run",
             "openmc_available": openmc is not None,
+            "simulation": describe_simulation_settings(config),
         },
         "metrics": {
             "design_power_mwth": config.reactor.get("design_power_mwth", 0.0),
@@ -150,16 +151,22 @@ def run_case(
                 summary["neutronics"] = {
                     "status": "completed",
                     "statepoint": str(statepoint_path),
+                    "openmc_available": True,
+                    "simulation": describe_simulation_settings(config),
                 }
                 summary["metrics"]["keff"] = round(keff, 6)
             else:
                 summary["neutronics"] = {
                     "status": "completed_without_statepoint",
+                    "openmc_available": True,
+                    "simulation": describe_simulation_settings(config),
                 }
         except Exception as exc:  # pragma: no cover - depends on external solver
             summary["neutronics"] = {
                 "status": "failed",
                 "error": str(exc),
+                "openmc_available": True,
+                "simulation": describe_simulation_settings(config),
             }
     else:
         if built.model is not None and openmc is not None:
@@ -336,6 +343,7 @@ def _build_pin_case(config: CaseConfig, benchmark: dict[str, Any]) -> BuiltCase:
             "material_inventory": material_inventory,
             "invariants": invariants,
             "benchmark_traceability": benchmark_traceability,
+            "simulation": describe_simulation_settings(config),
         },
         geometry_description={
             "name": config.name,
@@ -386,6 +394,7 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
                 "material_inventory": sorted(material_inventory),
                 "invariants": invariants,
                 "benchmark_traceability": benchmark_traceability,
+                "simulation": describe_simulation_settings(config),
             },
             geometry_description=geometry_description,
             model=model,
@@ -446,6 +455,7 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
             "material_inventory": material_inventory,
             "invariants": invariants,
             "benchmark_traceability": benchmark_traceability,
+            "simulation": describe_simulation_settings(config),
         },
         geometry_description={
             "name": config.name,
@@ -767,6 +777,36 @@ def _create_settings(config: CaseConfig):
     if source["type"] == "point":
         settings.source = openmc.IndependentSource(space=openmc.stats.Point(tuple(source["parameters"])))
     return settings
+
+
+def describe_simulation_settings(config: CaseConfig) -> dict[str, Any]:
+    simulation = config.simulation
+    tallies = []
+    for index, spec in enumerate(simulation.get("tallies", []), start=1):
+        tallies.append(
+            {
+                "name": spec.get("name", f"tally_{index}"),
+                "cell": spec.get("cell"),
+                "scores": list(spec.get("scores", [])),
+                "nuclides": list(spec.get("nuclides", [])),
+            }
+        )
+    geometry_kind = str(config.geometry.get("kind", "unknown"))
+    return {
+        "mode": str(simulation.get("mode", "eigenvalue")),
+        "particles": int(simulation["particles"]),
+        "batches": int(simulation["batches"]),
+        "inactive": int(simulation.get("inactive", 0)),
+        "active_batches": int(simulation["batches"]) - int(simulation.get("inactive", 0)),
+        "source": json.loads(json.dumps(simulation.get("source", {"type": "point", "parameters": [0.0, 0.0, 0.0]}))),
+        "tallies": tallies,
+        "geometry_boundary": str(config.geometry.get("boundary", "reflective")),
+        "axial_boundary": (
+            str(config.geometry.get("axial_boundary", "vacuum"))
+            if geometry_kind == "ring_lattice_core"
+            else None
+        ),
+    }
 
 
 def _create_tallies(config: CaseConfig, cell_lookup: dict[str, Any]):

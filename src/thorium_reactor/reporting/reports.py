@@ -109,6 +109,33 @@ def generate_report(
         ]
     )
 
+    neutronics = summary.get("neutronics", {})
+    simulation = neutronics.get("simulation", {})
+    if simulation:
+        lines.extend(["", "## Neutronics Inputs", ""])
+        lines.append(f"- OpenMC availability: `{neutronics.get('openmc_available', 'n/a')}`")
+        lines.append(f"- Run mode: `{simulation.get('mode', 'n/a')}`")
+        lines.append(f"- Particles per generation: `{simulation.get('particles', 'n/a')}`")
+        lines.append(f"- Total batches: `{simulation.get('batches', 'n/a')}`")
+        lines.append(f"- Inactive batches: `{simulation.get('inactive', 'n/a')}`")
+        lines.append(f"- Active batches: `{simulation.get('active_batches', 'n/a')}`")
+        lines.append(f"- Radial boundary: `{simulation.get('geometry_boundary', 'n/a')}`")
+        if simulation.get("axial_boundary") is not None:
+            lines.append(f"- Axial boundary: `{simulation.get('axial_boundary', 'n/a')}`")
+        source = simulation.get("source", {})
+        lines.append(f"- Source type: `{source.get('type', 'n/a')}`")
+        if source.get("parameters") is not None:
+            lines.append(f"- Source parameters: `{source.get('parameters')}`")
+        tallies = simulation.get("tallies", [])
+        lines.append(f"- Tally count: `{len(tallies)}`")
+        for tally in tallies:
+            lines.append(
+                f"- Tally `{tally.get('name', 'unnamed')}`: "
+                f"cell=`{tally.get('cell', 'n/a')}`, "
+                f"scores=`{', '.join(tally.get('scores', [])) or 'n/a'}`, "
+                f"nuclides=`{', '.join(tally.get('nuclides', [])) or 'all'}`"
+            )
+
     for key, value in summary.get("metrics", {}).items():
         lines.append(f"- {key}: `{value}`")
 
@@ -168,6 +195,8 @@ def generate_report(
     fuel_cycle = summary.get("fuel_cycle", {})
     if fuel_cycle:
         lines.extend(["", "## Fuel Cycle Assumptions", ""])
+        lines.append(f"- Depletion chain: `{fuel_cycle.get('depletion_chain', 'n/a')}`")
+        lines.append(f"- Cleanup scenario: `{fuel_cycle.get('cleanup_scenario', 'n/a')}`")
         lines.append(f"- Heavy metal inventory (kg): `{fuel_cycle.get('heavy_metal_inventory_kg', 'n/a')}`")
         lines.append(f"- Fissile inventory (kg): `{fuel_cycle.get('fissile_inventory_kg', 'n/a')}`")
         lines.append(f"- Specific power (MW/tHM): `{fuel_cycle.get('specific_power_mw_per_t_hm', 'n/a')}`")
@@ -176,6 +205,29 @@ def generate_report(
         lines.append(f"- Xenon generation rate (atoms/s): `{fuel_cycle.get('xenon_generation_rate_atoms_s', 'n/a')}`")
         lines.append(f"- Xenon removal fraction: `{fuel_cycle.get('xenon_removal_fraction', 'n/a')}`")
         lines.append(f"- Protactinium holdup (days): `{fuel_cycle.get('protactinium_holdup_days', 'n/a')}`")
+        depletion_assumptions = fuel_cycle.get("depletion_assumptions", {})
+        if depletion_assumptions:
+            lines.append(f"- Volatile removal efficiency: `{depletion_assumptions.get('volatile_removal_efficiency', 'n/a')}`")
+
+    transient = summary.get("transient", {})
+    if transient:
+        lines.extend(["", "## Transient Scenario", ""])
+        lines.append(f"- Model: `{transient.get('model', 'n/a')}`")
+        lines.append(f"- Status: `{transient.get('status', 'n/a')}`")
+        lines.append(f"- Scenario: `{transient.get('scenario_name', 'n/a')}`")
+        lines.append(f"- Duration (s): `{transient.get('duration_s', 'n/a')}`")
+        lines.append(f"- Time step (s): `{transient.get('time_step_s', 'n/a')}`")
+        lines.append(f"- Event count: `{transient.get('event_count', 'n/a')}`")
+        lines.append(f"- Peak power fraction: `{transient.get('peak_power_fraction', 'n/a')}`")
+        lines.append(f"- Final power fraction: `{transient.get('final_power_fraction', 'n/a')}`")
+        lines.append(f"- Peak fuel temperature (C): `{transient.get('peak_fuel_temperature_c', 'n/a')}`")
+        lines.append(f"- Peak graphite temperature (C): `{transient.get('peak_graphite_temperature_c', 'n/a')}`")
+        lines.append(f"- Peak coolant temperature (C): `{transient.get('peak_coolant_temperature_c', 'n/a')}`")
+        lines.append(f"- Minimum precursor core fraction: `{transient.get('minimum_precursor_core_fraction', 'n/a')}`")
+        lines.append(f"- Final total reactivity (pcm): `{transient.get('final_total_reactivity_pcm', 'n/a')}`")
+        lines.append(f"- Depletion chain: `{transient.get('depletion_chain', 'n/a')}`")
+        lines.append(f"- Cleanup scenario: `{transient.get('cleanup_scenario', 'n/a')}`")
+        lines.append(f"- Transient history: `{transient.get('history_path', 'n/a')}`")
 
     if validation:
         lines.extend(["", "## Validation", ""])

@@ -16,6 +16,20 @@ REQUIRED_CASE_KEYS = (
     "validation_targets",
 )
 
+SUPPORTED_PROPERTY_UNITS: dict[str, set[str]] = {
+    "density": {"g/cm3", "kg/m3"},
+    "cp": {"j/kg-k", "kj/kg-k"},
+    "thermal_conductivity": {"w/m-k"},
+    "dynamic_viscosity": {"pa-s"},
+}
+PROPERTY_MODEL_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    "constant": ("value",),
+    "linear": ("reference_value", "reference_temperature_c", "slope_per_c"),
+    "arrhenius": ("pre_exponential", "activation_temperature_k"),
+}
+SUPPORTED_BOUNDARY_TYPES = {"reflective", "vacuum", "periodic", "transmission", "white"}
+SUPPORTED_SOURCE_TYPES = {"point"}
+
 
 class ConfigError(ValueError):
     """Raised when a case configuration is invalid."""
@@ -67,6 +81,7 @@ def load_case_config(path: Path) -> CaseConfig:
     missing = [key for key in REQUIRED_CASE_KEYS if key not in raw]
     if missing:
         raise ConfigError(f"Case config {path} is missing required keys: {', '.join(missing)}")
+    _validate_case_schema(path, raw)
 
     name = raw.get("name") or path.parent.name
     return CaseConfig(name=name, path=path, data=raw)
@@ -85,3 +100,201 @@ def resolve_benchmark_path(repo_root: Path, data: Mapping[str, Any]) -> Path | N
     if not raw_path:
         return None
     return (repo_root / str(raw_path)).resolve()
+
+
+def _validate_case_schema(path: Path, raw: Mapping[str, Any]) -> None:
+    _validate_material_properties(path, raw.get("materials"))
+    _validate_geometry_settings(path, raw.get("geometry"))
+    _validate_simulation_settings(path, raw.get("simulation"))
+    _validate_optional_transient_settings(path, raw.get("transient"))
+    _validate_optional_depletion_settings(path, raw.get("depletion"))
+
+
+def _validate_material_properties(path: Path, materials: Any) -> None:
+    if not isinstance(materials, Mapping):
+        raise ConfigError(f"Case config {path} has invalid 'materials'; expected a mapping.")
+    for material_name, material_spec in materials.items():
+        if not isinstance(material_spec, Mapping):
+            raise ConfigError(f"Case config {path} material '{material_name}' must be a mapping.")
+        for quantity, supported_units in SUPPORTED_PROPERTY_UNITS.items():
+            property_spec = material_spec.get(quantity)
+            if property_spec is None:
+                continue
+            if not isinstance(property_spec, Mapping):
+                raise ConfigError(
+                    f"Case config {path} material '{material_name}' property '{quantity}' must be a mapping."
+                )
+            units = property_spec.get("units")
+            if units not in supported_units:
+                supported = ", ".join(sorted(supported_units))
+                raise ConfigError(
+                    f"Case config {path} material '{material_name}' property '{quantity}' has unsupported units "
+                    f"'{units}'. Supported units: {supported}."
+                )
+            model = str(property_spec.get("model", "constant"))
+            required_fields = PROPERTY_MODEL_REQUIRED_FIELDS.get(model)
+            if required_fields is None:
+                supported_models = ", ".join(sorted(PROPERTY_MODEL_REQUIRED_FIELDS))
+                raise ConfigError(
+                    f"Case config {path} material '{material_name}' property '{quantity}' has unsupported model "
+                    f"'{model}'. Supported models: {supported_models}."
+                )
+            missing_fields = [field for field in required_fields if field not in property_spec]
+            if missing_fields:
+                raise ConfigError(
+                    f"Case config {path} material '{material_name}' property '{quantity}' is missing required "
+                    f"fields for model '{model}': {', '.join(missing_fields)}."
+                )
+
+
+def _validate_geometry_settings(path: Path, geometry: Any) -> None:
+    if not isinstance(geometry, Mapping):
+        raise ConfigError(f"Case config {path} has invalid 'geometry'; expected a mapping.")
+    boundary = geometry.get("boundary", "reflective")
+    if boundary not in SUPPORTED_BOUNDARY_TYPES:
+        supported = ", ".join(sorted(SUPPORTED_BOUNDARY_TYPES))
+        raise ConfigError(
+            f"Case config {path} geometry.boundary '{boundary}' is unsupported. Supported values: {supported}."
+        )
+    axial_boundary = geometry.get("axial_boundary")
+    if axial_boundary is not None and axial_boundary not in SUPPORTED_BOUNDARY_TYPES:
+        supported = ", ".join(sorted(SUPPORTED_BOUNDARY_TYPES))
+        raise ConfigError(
+            f"Case config {path} geometry.axial_boundary '{axial_boundary}' is unsupported. Supported values: {supported}."
+        )
+
+
+def _validate_simulation_settings(path: Path, simulation: Any) -> None:
+    if not isinstance(simulation, Mapping):
+        raise ConfigError(f"Case config {path} has invalid 'simulation'; expected a mapping.")
+    particles = _require_positive_int(path, "simulation.particles", simulation.get("particles"))
+    batches = _require_positive_int(path, "simulation.batches", simulation.get("batches"))
+    inactive = _require_non_negative_int(path, "simulation.inactive", simulation.get("inactive", 0))
+    if inactive >= batches:
+        raise ConfigError(
+            f"Case config {path} must keep simulation.inactive ({inactive}) below simulation.batches ({batches})."
+        )
+    source = simulation.get("source", {"type": "point", "parameters": [0.0, 0.0, 0.0]})
+    if not isinstance(source, Mapping):
+        raise ConfigError(f"Case config {path} simulation.source must be a mapping.")
+    source_type = source.get("type", "point")
+    if source_type not in SUPPORTED_SOURCE_TYPES:
+        supported = ", ".join(sorted(SUPPORTED_SOURCE_TYPES))
+        raise ConfigError(
+            f"Case config {path} simulation.source.type '{source_type}' is unsupported. Supported values: {supported}."
+        )
+    if source_type == "point":
+        parameters = source.get("parameters", [])
+        if not isinstance(parameters, list) or len(parameters) != 3:
+            raise ConfigError(
+                f"Case config {path} simulation.source.parameters must contain exactly three coordinates for a point source."
+            )
+    tallies = simulation.get("tallies", [])
+    if tallies is None:
+        tallies = []
+    if not isinstance(tallies, list):
+        raise ConfigError(f"Case config {path} simulation.tallies must be a list when provided.")
+    for index, tally in enumerate(tallies, start=1):
+        if not isinstance(tally, Mapping):
+            raise ConfigError(f"Case config {path} simulation.tallies[{index}] must be a mapping.")
+        if not tally.get("cell"):
+            raise ConfigError(f"Case config {path} simulation.tallies[{index}] must declare a target cell.")
+        scores = tally.get("scores")
+        if not isinstance(scores, list) or not scores:
+            raise ConfigError(f"Case config {path} simulation.tallies[{index}] must declare at least one score.")
+
+
+def _require_positive_int(path: Path, field_name: str, value: Any) -> int:
+    parsed = _coerce_int(path, field_name, value)
+    if parsed <= 0:
+        raise ConfigError(f"Case config {path} field '{field_name}' must be a positive integer.")
+    return parsed
+
+
+def _require_non_negative_int(path: Path, field_name: str, value: Any) -> int:
+    parsed = _coerce_int(path, field_name, value)
+    if parsed < 0:
+        raise ConfigError(f"Case config {path} field '{field_name}' must be a non-negative integer.")
+    return parsed
+
+
+def _coerce_int(path: Path, field_name: str, value: Any) -> int:
+    if isinstance(value, bool) or value is None:
+        raise ConfigError(f"Case config {path} field '{field_name}' must be an integer.")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    raise ConfigError(f"Case config {path} field '{field_name}' must be an integer.")
+
+
+def _validate_optional_transient_settings(path: Path, transient: Any) -> None:
+    if transient is None:
+        return
+    if not isinstance(transient, Mapping):
+        raise ConfigError(f"Case config {path} optional 'transient' section must be a mapping.")
+    for field_name in (
+        "duration_s",
+        "time_step_s",
+        "power_response_time_s",
+        "fuel_temperature_response_time_s",
+        "graphite_temperature_response_time_s",
+        "coolant_temperature_response_time_s",
+        "precursor_inventory_response_time_s",
+        "precursor_transport_response_time_s",
+        "xenon_response_time_s",
+        "reactivity_to_power_scale_pcm",
+        "fuel_temperature_feedback_pcm_per_c",
+        "graphite_temperature_feedback_pcm_per_c",
+        "coolant_temperature_feedback_pcm_per_c",
+        "precursor_worth_pcm",
+        "xenon_worth_pcm_per_fraction",
+        "max_power_fraction",
+    ):
+        if field_name in transient:
+            _require_number(path, f"transient.{field_name}", transient[field_name])
+    scenarios = transient.get("scenarios")
+    if scenarios is not None:
+        if not isinstance(scenarios, list):
+            raise ConfigError(f"Case config {path} transient.scenarios must be a list.")
+        for index, scenario in enumerate(scenarios, start=1):
+            if not isinstance(scenario, Mapping):
+                raise ConfigError(f"Case config {path} transient.scenarios[{index}] must be a mapping.")
+            if "duration_s" in scenario:
+                _require_number(path, f"transient.scenarios[{index}].duration_s", scenario["duration_s"])
+            if "time_step_s" in scenario:
+                _require_number(path, f"transient.scenarios[{index}].time_step_s", scenario["time_step_s"])
+            events = scenario.get("events")
+            if events is not None:
+                if not isinstance(events, list):
+                    raise ConfigError(f"Case config {path} transient.scenarios[{index}].events must be a list.")
+                for event_index, event in enumerate(events, start=1):
+                    if not isinstance(event, Mapping):
+                        raise ConfigError(
+                            f"Case config {path} transient.scenarios[{index}].events[{event_index}] must be a mapping."
+                        )
+                    _require_number(
+                        path,
+                        f"transient.scenarios[{index}].events[{event_index}].time_s",
+                        event.get("time_s", 0.0),
+                    )
+
+
+def _validate_optional_depletion_settings(path: Path, depletion: Any) -> None:
+    if depletion is None:
+        return
+    if not isinstance(depletion, Mapping):
+        raise ConfigError(f"Case config {path} optional 'depletion' section must be a mapping.")
+    for field_name in (
+        "volatile_removal_efficiency",
+        "xenon_removal_fraction",
+        "protactinium_holdup_days",
+    ):
+        if field_name in depletion:
+            _require_number(path, f"depletion.{field_name}", depletion[field_name])
+
+
+def _require_number(path: Path, field_name: str, value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(f"Case config {path} field '{field_name}' must be numeric.")
+    return float(value)

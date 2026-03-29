@@ -6,7 +6,12 @@ import pytest
 from thorium_reactor.bop.steady_state import BOPInputs, run_steady_state_bop
 from thorium_reactor.config import load_case_config
 from thorium_reactor.flow.properties import average_primary_temperature_c, evaluate_fluid_properties, primary_coolant_cp_kj_kgk, property_reference_temperature_c
-from thorium_reactor.flow.primary_system import build_primary_system_summary
+from thorium_reactor.flow.primary_system import (
+    _darcy_friction_factor,
+    _internal_nusselt_number,
+    _log_mean_temperature_difference,
+    build_primary_system_summary,
+)
 from thorium_reactor.flow.reduced_order import build_reduced_order_flow_summary
 from thorium_reactor.neutronics.workflows import build_case
 
@@ -263,6 +268,14 @@ def test_primary_thermal_profile_tracks_component_temperatures() -> None:
     assert segments["heat_exchanger_rejection"]["outlet_temp_c"] < segments["heat_exchanger_rejection"]["inlet_temp_c"]
     assert segments["pump"]["outlet_temp_c"] == segments["pump"]["inlet_temp_c"]
     assert abs(primary_system["thermal_profile"]["loop_closure_error_c"]) < 1.0e-3
+
+
+def test_primary_system_helper_correlations_are_stable() -> None:
+    assert _darcy_friction_factor(1600.0) == pytest.approx(0.04, rel=1.0e-9)
+    assert _darcy_friction_factor(10000.0) == pytest.approx(0.03164, rel=1.0e-9)
+    assert _internal_nusselt_number(1200.0, 6.5) == pytest.approx(3.66, rel=1.0e-9)
+    assert _internal_nusselt_number(10000.0, 6.5) == pytest.approx(77.071388, rel=1.0e-6)
+    assert _log_mean_temperature_difference(140.0, 70.0) == pytest.approx(100.988653, rel=1.0e-6)
 
 
 def test_primary_loop_uses_declared_component_graph() -> None:

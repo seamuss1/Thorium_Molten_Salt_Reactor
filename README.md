@@ -54,6 +54,7 @@ reactor run example_pin
 reactor validate example_pin
 reactor report example_pin
 reactor render tmsr_lf1_core
+reactor transient immersed_pool_reference --scenario partial_heat_sink_loss
 ```
 
 Command behavior:
@@ -63,6 +64,7 @@ Command behavior:
 - `reactor validate <case>` checks geometry/material invariants and compares available metrics to configured acceptance bands.
 - `reactor report <case>` generates `report.md` from the latest or specified run bundle, including benchmark traceability scorecards when benchmark metadata is present.
 - `reactor render <case>` writes procedural geometry exports for visualization workflows, including OBJ, STL, watertight mesh validation JSON, a rendered PNG, animated GIF flow output, and MP4 video output when a case defines flow-animation paths and `ffmpeg` is available.
+- `reactor transient <case>` runs a reduced-order nodal transient proxy from the steady-state summary, writes `transient.json`, updates `summary.json`, and emits transient plots when the case defines transient scenarios.
 
 ## Result Bundle Contract
 
@@ -84,3 +86,4 @@ The benchmark folder now supports structured evidence, assumptions, target confi
 ## Modeling Strategy Notes
 
 - [docs/thermal-hydraulics-modeling-strategy.md](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/docs/thermal-hydraulics-modeling-strategy.md) describes the recommended analysis ladder for this repo: whole-loop reduced-order thermal-hydraulics first, porous or homogenized core models second, and local 3D CFD only where geometry controls the answer. It also lays out the additional precursor-transport and neutronics coupling needed for liquid-fueled MSR studies.
+- [docs/current-model-equations.md](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/docs/current-model-equations.md) documents the equations, correlations, supported property units, and OpenMC input assumptions used by the current reduced-order implementation.

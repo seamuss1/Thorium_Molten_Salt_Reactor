@@ -1,8 +1,11 @@
 from pathlib import Path
+import shutil
+import uuid
 
 import pytest
+import yaml
 
-from thorium_reactor.config import load_case_config
+from thorium_reactor.config import ConfigError, load_case_config
 from thorium_reactor.neutronics.workflows import build_case
 
 
@@ -35,6 +38,33 @@ def test_core_case_manifest_has_expected_channel_count() -> None:
     assert built.geometry_description["type"] == "detailed_molten_salt_reactor"
     assert built.manifest["benchmark_traceability"]["traceability_score"] >= 80.0
     assert built.manifest["benchmark_traceability"]["maturity_stage"] == "traceable_surrogate"
+    assert built.manifest["simulation"] == {
+        "mode": "eigenvalue",
+        "particles": 100000,
+        "batches": 120,
+        "inactive": 20,
+        "active_batches": 100,
+        "source": {
+            "type": "point",
+            "parameters": [0.0, 0.0, 0.0],
+        },
+        "tallies": [
+            {
+                "name": "fuel_reaction_rates",
+                "cell": "fuel",
+                "scores": ["total", "fission", "absorption", "(n,gamma)"],
+                "nuclides": ["U233"],
+            },
+            {
+                "name": "core_flux",
+                "cell": "core_matrix",
+                "scores": ["flux"],
+                "nuclides": [],
+            },
+        ],
+        "geometry_boundary": "reflective",
+        "axial_boundary": "vacuum",
+    }
 
 
 def test_core_case_flow_summary_exposes_plenum_access_split() -> None:
@@ -125,3 +155,49 @@ def test_example_pin_case_builds_without_solver() -> None:
 
     assert built.manifest["cell_count"] == 4
     assert built.geometry_description["type"] == "pin"
+    assert built.manifest["simulation"]["axial_boundary"] is None
+
+
+def test_case_loader_rejects_unsupported_material_units() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml").read_text(encoding="utf-8"))
+        payload["materials"]["uo2"]["density"]["units"] = "lb/ft3"
+        case_path = scratch_root / "case.yaml"
+        case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="unsupported units"):
+            load_case_config(case_path)
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_case_loader_rejects_invalid_openmc_batch_configuration() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml").read_text(encoding="utf-8"))
+        payload["simulation"]["inactive"] = payload["simulation"]["batches"]
+        case_path = scratch_root / "case.yaml"
+        case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="simulation.inactive"):
+            load_case_config(case_path)
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_case_loader_rejects_non_numeric_transient_duration() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8"))
+        payload["transient"]["duration_s"] = "fast"
+        case_path = scratch_root / "case.yaml"
+        case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="transient.duration_s"):
+            load_case_config(case_path)
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)

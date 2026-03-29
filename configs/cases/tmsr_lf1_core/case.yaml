@@ -119,6 +119,34 @@ reporting:
 flow:
   reduced_order:
     allocation_rule: salt_area_weighted
+transient:
+  duration_s: 100.0
+  time_step_s: 1.0
+  power_response_time_s: 2.0
+  fuel_temperature_response_time_s: 7.0
+  graphite_temperature_response_time_s: 24.0
+  coolant_temperature_response_time_s: 10.0
+  precursor_inventory_response_time_s: 4.0
+  precursor_transport_response_time_s: 2.5
+  xenon_response_time_s: 220.0
+  fuel_temperature_feedback_pcm_per_c: -3.0
+  graphite_temperature_feedback_pcm_per_c: -0.8
+  coolant_temperature_feedback_pcm_per_c: -0.5
+  precursor_worth_pcm: 170.0
+  xenon_worth_pcm_per_fraction: -110.0
+  scenarios:
+    - name: mild_reactivity_insertion
+      duration_s: 80.0
+      time_step_s: 1.0
+      events:
+        - time_s: 5.0
+          reactivity_step_pcm: 45.0
+depletion:
+  chain: thorium_u233_cleanup_proxy
+  cleanup_scenario: surrogate_core_cleanup
+  volatile_removal_efficiency: 0.75
+  xenon_removal_fraction: 0.9
+  protactinium_holdup_days: 2.0
 validation_targets:
   expected_cells:
     metric: expected_cells

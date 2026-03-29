@@ -7,6 +7,7 @@ NEUTRONICS_ONLY = "neutronics_only"
 THERMAL_NETWORK = "thermal_network"
 BALANCE_OF_PLANT = "balance_of_plant"
 MSR_PRIMARY_SYSTEM = "msr_primary_system"
+TRANSIENT_ANALYSIS = "transient_analysis"
 
 
 class CapabilityConfigurationError(ValueError):
@@ -22,6 +23,8 @@ def get_case_capabilities(config: Any) -> set[str]:
         capabilities.update({BALANCE_OF_PLANT, THERMAL_NETWORK})
     if render_layout.get("type") == "immersed_pool_reference":
         capabilities.add(MSR_PRIMARY_SYSTEM)
+    if THERMAL_NETWORK in capabilities and BALANCE_OF_PLANT in capabilities:
+        capabilities.add(TRANSIENT_ANALYSIS)
 
     for capability, enabled in _capability_overrides(config).items():
         if enabled:
@@ -104,6 +107,11 @@ def validate_case_capability(config: Any, capability: str) -> None:
                     "requires geometry.render_layout.primary_loop.pipes for the reduced-order primary-loop model.",
                 )
             )
+        validate_case_capability(config, THERMAL_NETWORK)
+        return
+
+    if capability == TRANSIENT_ANALYSIS:
+        validate_case_capability(config, BALANCE_OF_PLANT)
         validate_case_capability(config, THERMAL_NETWORK)
 
 

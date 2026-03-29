@@ -59,6 +59,46 @@ def generate_summary_plots(bundle, summary: dict[str, Any]) -> dict[str, str]:
         if _write_keff_history_svg(statepoint_path, history_path):
             assets["keff_history"] = str(history_path)
 
+    transient = summary.get("transient", {})
+    transient_path = _resolve_transient_path(bundle, transient)
+    if transient_path is not None:
+        try:
+            transient_payload = json.loads(transient_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            transient_payload = {}
+        history = transient_payload.get("history", [])
+        if isinstance(history, list) and history:
+            power_points = [
+                (float(item["time_s"]), float(item["power_fraction"]))
+                for item in history
+                if isinstance(item, dict) and "time_s" in item and "power_fraction" in item
+            ]
+            if power_points:
+                power_path = bundle.plots_dir / "transient_power.svg"
+                _write_xy_line_chart_svg(
+                    power_points,
+                    power_path,
+                    title=f"{summary['case']} transient power fraction",
+                    x_label="Time (s)",
+                    y_label="Power fraction",
+                )
+                assets["transient_power"] = str(power_path)
+            fuel_points = [
+                (float(item["time_s"]), float(item["fuel_temp_c"]))
+                for item in history
+                if isinstance(item, dict) and "time_s" in item and "fuel_temp_c" in item
+            ]
+            if fuel_points:
+                fuel_path = bundle.plots_dir / "transient_fuel_temperature.svg"
+                _write_xy_line_chart_svg(
+                    fuel_points,
+                    fuel_path,
+                    title=f"{summary['case']} transient fuel temperature",
+                    x_label="Time (s)",
+                    y_label="Fuel temperature (C)",
+                )
+                assets["transient_fuel_temperature"] = str(fuel_path)
+
     return _update_plot_manifest(bundle.root / "plots_manifest.json", assets)
 
 
@@ -122,6 +162,18 @@ def _resolve_statepoint_path(bundle, summary: dict[str, Any]) -> Path | None:
     if candidate.exists():
         return candidate
     return None
+
+
+def _resolve_transient_path(bundle, transient: dict[str, Any]) -> Path | None:
+    history_path = transient.get("history_path")
+    if not isinstance(history_path, str):
+        candidate = bundle.root / "transient.json"
+        return candidate if candidate.exists() else None
+    path = Path(history_path)
+    if path.exists():
+        return path
+    candidate = bundle.root / path.name
+    return candidate if candidate.exists() else None
 
 
 def _write_bar_chart_svg(
@@ -207,7 +259,25 @@ def _write_bar_chart_svg(
 
 
 def _write_line_chart_svg(values: list[float], output_path: Path, title: str) -> None:
-    if not values:
+    points = [(float(index), float(value)) for index, value in enumerate(values)]
+    _write_xy_line_chart_svg(
+        points,
+        output_path,
+        title=title,
+        x_label="Generation",
+        y_label="k-effective",
+    )
+
+
+def _write_xy_line_chart_svg(
+    points: list[tuple[float, float]],
+    output_path: Path,
+    *,
+    title: str,
+    x_label: str,
+    y_label: str,
+) -> None:
+    if not points:
         return
 
     width = 960
@@ -219,8 +289,16 @@ def _write_line_chart_svg(values: list[float], output_path: Path, title: str) ->
     chart_width = width - left - right
     chart_height = height - top - bottom
 
-    min_value = min(values)
-    max_value = max(values)
+    x_values = [point[0] for point in points]
+    y_values = [point[1] for point in points]
+    min_x = min(x_values)
+    max_x = max(x_values)
+    if math.isclose(min_x, max_x):
+        max_x = min_x + 1.0
+    x_span = max_x - min_x
+
+    min_value = min(y_values)
+    max_value = max(y_values)
     if math.isclose(min_value, max_value):
         if math.isclose(max_value, 0.0):
             max_value = 1.0
@@ -232,12 +310,10 @@ def _write_line_chart_svg(values: list[float], output_path: Path, title: str) ->
     def value_to_y(value: float) -> float:
         return top + ((max_value - value) / span) * chart_height
 
-    def index_to_x(index: int) -> float:
-        if len(values) == 1:
-            return left + chart_width / 2.0
-        return left + (chart_width * index / (len(values) - 1))
+    def value_to_x(value: float) -> float:
+        return left + ((value - min_x) / x_span) * chart_width
 
-    points = " ".join(f"{index_to_x(index):.2f},{value_to_y(value):.2f}" for index, value in enumerate(values))
+    polyline_points = " ".join(f"{value_to_x(x_value):.2f},{value_to_y(y_value):.2f}" for x_value, y_value in points)
 
     grid_lines: list[str] = []
     for index in range(5):
@@ -256,9 +332,9 @@ def _write_line_chart_svg(values: list[float], output_path: Path, title: str) ->
   <line x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" stroke="#475569" stroke-width="1.5" />
   <line x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" stroke="#475569" stroke-width="1.5" />
   {''.join(grid_lines)}
-  <polyline fill="none" stroke="#1d4ed8" stroke-width="3" points="{points}" />
-  <text x="{width / 2:.2f}" y="{height - 26}" text-anchor="middle" font-size="13" fill="#334155">Generation</text>
-  <text x="24" y="{height / 2:.2f}" text-anchor="middle" font-size="13" fill="#334155" transform="rotate(-90 24 {height / 2:.2f})">k-effective</text>
+  <polyline fill="none" stroke="#1d4ed8" stroke-width="3" points="{polyline_points}" />
+  <text x="{width / 2:.2f}" y="{height - 26}" text-anchor="middle" font-size="13" fill="#334155">{escape(x_label)}</text>
+  <text x="24" y="{height / 2:.2f}" text-anchor="middle" font-size="13" fill="#334155" transform="rotate(-90 24 {height / 2:.2f})">{escape(y_label)}</text>
 </svg>
 """
     output_path.write_text(svg, encoding="utf-8")

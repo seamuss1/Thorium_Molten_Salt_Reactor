@@ -9,6 +9,7 @@ from thorium_reactor.flow.properties import (
     evaluate_primary_coolant_properties,
     evaluate_secondary_coolant_properties,
 )
+from thorium_reactor.transient import build_depletion_assumptions
 
 
 GRAVITY_M_S2 = 9.80665
@@ -1843,9 +1844,12 @@ def _build_fuel_cycle_summary(config: Any, bop: dict[str, Any], inventory_summar
     xenon_generation_rate_atoms_s = fission_rate_per_s * xenon_yield_fraction
     specific_power_mw_per_t_hm = thermal_power_mw / (heavy_metal_mass_kg / 1000.0) if heavy_metal_mass_kg > 0.0 else 0.0
     cleanup_turnover_hours = cleanup_turnover_days * 24.0
+    depletion_assumptions = build_depletion_assumptions(config)
 
     return {
         "model": "first_order_cleanup_and_poison_proxy",
+        "depletion_chain": depletion_assumptions["chain"],
+        "cleanup_scenario": depletion_assumptions["cleanup_scenario"],
         "fuel_heavy_metal_mass_fraction": _round_float(heavy_metal_mass_fraction),
         "fissile_mass_fraction_of_heavy_metal": _round_float(fissile_mass_fraction),
         "heavy_metal_inventory_kg": _round_float(heavy_metal_mass_kg),
@@ -1858,6 +1862,7 @@ def _build_fuel_cycle_summary(config: Any, bop: dict[str, Any], inventory_summar
         "xenon_yield_fraction": _round_float(xenon_yield_fraction),
         "xenon_generation_rate_atoms_s": _round_float(xenon_generation_rate_atoms_s),
         "xenon_removal_fraction": _round_float(xenon_removal_fraction),
+        "depletion_assumptions": depletion_assumptions,
     }
 
 
