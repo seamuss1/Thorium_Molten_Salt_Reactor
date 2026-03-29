@@ -115,6 +115,7 @@ def test_immersed_pool_reference_primary_system_summary_is_engineering_useful() 
     thermal_profile = primary_system["thermal_profile"]
     inventory = primary_system["inventory"]
     fuel_cycle = primary_system["fuel_cycle"]
+    chemistry = primary_system["chemistry"]
 
     assert primary_system["model"] == "reduced_order_primary_system"
     assert reduced_order["active_channel_selection"] == "all_salt_bearing_channels"
@@ -146,6 +147,12 @@ def test_immersed_pool_reference_primary_system_summary_is_engineering_useful() 
     assert inventory["coolant_salt"]["net_pool_inventory_m3"] > inventory["fuel_salt"]["total_m3"]
     assert fuel_cycle["heavy_metal_inventory_kg"] > fuel_cycle["fissile_inventory_kg"] > 0.0
     assert fuel_cycle["cleanup_turnover_days"] == 10.0
+    assert fuel_cycle["breeding_gain_fraction_per_day"] > 0.0
+    assert fuel_cycle["fissile_burn_fraction_per_day_full_power"] > 0.0
+    assert "net_fissile_change_fraction_per_day" in fuel_cycle
+    assert chemistry["corrosion_index"] >= 0.1
+    assert chemistry["corrosion_risk"] in {"low", "moderate", "high"}
+    assert chemistry["gas_stripping_efficiency"] > 0.0
     check_status = {check["name"]: check["status"] for check in primary_system["checks"]}
     assert check_status["primary_system::loop_reynolds_reasonable"] == "pass"
     assert check_status["primary_system::pump_head_reasonable"] == "pass"

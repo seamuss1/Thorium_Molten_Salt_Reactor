@@ -348,9 +348,24 @@ def test_report_includes_transient_and_depletion_sections() -> None:
                         "xenon_generation_rate_atoms_s": 6.99e14,
                         "xenon_removal_fraction": 0.9,
                         "protactinium_holdup_days": 2.0,
+                        "fissile_burn_fraction_per_day_full_power": 0.0008,
+                        "breeding_gain_fraction_per_day": 0.00055,
+                        "net_fissile_change_fraction_per_day": -0.00037,
+                        "equilibrium_protactinium_inventory_fraction": 0.0011,
                         "depletion_assumptions": {
                             "volatile_removal_efficiency": 0.78,
                         },
+                    },
+                    "chemistry": {
+                        "model": "salt_redox_cleanup_proxy",
+                        "redox_state_ev": -0.02,
+                        "target_redox_state_ev": -0.03,
+                        "redox_deviation_ev": 0.01,
+                        "impurity_fraction": 0.0001,
+                        "corrosion_index": 1.08,
+                        "corrosion_risk": "low",
+                        "gas_stripping_efficiency": 0.88,
+                        "tritium_release_fraction": 0.33,
                     },
                     "transient": {
                         "status": "completed",
@@ -368,6 +383,10 @@ def test_report_includes_transient_and_depletion_sections() -> None:
                         "final_total_reactivity_pcm": -22.0,
                         "depletion_chain": "thorium_u233_cleanup_proxy",
                         "cleanup_scenario": "baseline_online_cleanup",
+                        "final_fissile_inventory_fraction": 0.997,
+                        "peak_protactinium_inventory_fraction": 0.0013,
+                        "final_redox_state_ev": -0.024,
+                        "peak_corrosion_index": 1.12,
                         "history_path": "transient.json",
                     },
                 }
@@ -392,9 +411,67 @@ def test_report_includes_transient_and_depletion_sections() -> None:
         )
 
         assert "## Fuel Cycle Assumptions" in report
+        assert "## Salt Chemistry" in report
         assert "Depletion chain" in report
         assert "## Transient Scenario" in report
         assert "partial_heat_sink_loss" in report
         assert "transient.json" in report
+        assert "Final redox state" in report
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_report_includes_external_integration_section() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-integrations" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "dry-run"},
+                    "metrics": {"keff": 1.01},
+                    "integrations": {
+                        "moose": {
+                            "status": "exported",
+                            "input_path": "moose_input.i",
+                            "handoff_path": "moose_handoff.json",
+                            "application": "app-opt",
+                        },
+                        "scale": {
+                            "status": "exported_missing_runtime",
+                            "input_path": "scale_input.inp",
+                            "handoff_path": "scale_handoff.json",
+                            "sequence": "csas6",
+                            "error": "Executable 'scalerte' was not found on PATH.",
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "immersed_pool_reference",
+            {
+                "reactor": {
+                    "name": "Immersed Pool MSR Reference",
+                    "family": "reference-inspired immersed pool MSR demonstrator",
+                    "stage": "full-core",
+                    "design_power_mwth": 8.0,
+                    "benchmark": "benchmarks/tmsr_lf1/benchmark.yaml",
+                }
+            },
+            summary_path,
+            None,
+            None,
+        )
+
+        assert "## External Integrations" in report
+        assert "`moose` status" in report
+        assert "moose_input.i" in report
+        assert "moose_handoff.json" in report
+        assert "csas6" in report
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)

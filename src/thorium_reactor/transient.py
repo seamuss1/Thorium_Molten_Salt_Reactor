@@ -3,6 +3,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from thorium_reactor.chemistry import (
+    build_chemistry_assumptions,
+    build_steady_state_chemistry_summary,
+    corrosion_index_from_state,
+)
 from thorium_reactor.capabilities import BALANCE_OF_PLANT, THERMAL_NETWORK, validate_case_capability
 
 
@@ -26,6 +31,18 @@ def build_depletion_assumptions(config: Any) -> dict[str, Any]:
         "protactinium_holdup_days": _round_float(
             float(depletion.get("protactinium_holdup_days", reactor.get("protactinium_holdup_days", 2.0)))
         ),
+        "initial_fissile_inventory_fraction": _round_float(
+            float(depletion.get("initial_fissile_inventory_fraction", 1.0))
+        ),
+        "fissile_burn_fraction_per_day_full_power": _round_float(
+            float(depletion.get("fissile_burn_fraction_per_day_full_power", 8.0e-4))
+        ),
+        "breeding_gain_fraction_per_day": _round_float(
+            float(depletion.get("breeding_gain_fraction_per_day", 5.5e-4))
+        ),
+        "minor_actinide_sink_fraction_per_day": _round_float(
+            float(depletion.get("minor_actinide_sink_fraction_per_day", 1.2e-4))
+        ),
     }
 
 
@@ -47,12 +64,14 @@ def run_transient_case(
     baseline = _build_transient_baseline(config, summary)
     model_parameters = _resolve_model_parameters(transient_config)
     depletion = build_depletion_assumptions(config)
+    chemistry = build_chemistry_assumptions(config)
 
     history, metrics = _integrate_transient(
         baseline=baseline,
         scenario=scenario,
         model_parameters=model_parameters,
         depletion=depletion,
+        chemistry=chemistry,
     )
 
     payload = {
@@ -61,6 +80,7 @@ def run_transient_case(
         "scenario": scenario,
         "baseline": baseline,
         "depletion": depletion,
+        "chemistry": chemistry,
         "model_parameters": model_parameters,
         "metrics": metrics,
         "history": history,
@@ -87,11 +107,17 @@ def run_transient_case(
         "final_total_reactivity_pcm": metrics["final_total_reactivity_pcm"],
         "depletion_chain": depletion["chain"],
         "cleanup_scenario": depletion["cleanup_scenario"],
+        "final_fissile_inventory_fraction": metrics["final_fissile_inventory_fraction"],
+        "peak_protactinium_inventory_fraction": metrics["peak_protactinium_inventory_fraction"],
+        "final_redox_state_ev": metrics["final_redox_state_ev"],
+        "peak_corrosion_index": metrics["peak_corrosion_index"],
     }
     summary.setdefault("metrics", {})
     summary["metrics"]["transient_peak_power_fraction"] = metrics["peak_power_fraction"]
     summary["metrics"]["transient_peak_fuel_temperature_c"] = metrics["peak_fuel_temperature_c"]
     summary["metrics"]["transient_final_reactivity_pcm"] = metrics["final_total_reactivity_pcm"]
+    summary["metrics"]["transient_final_redox_state_ev"] = metrics["final_redox_state_ev"]
+    summary["metrics"]["transient_final_fissile_inventory_fraction"] = metrics["final_fissile_inventory_fraction"]
     return payload
 
 
@@ -181,6 +207,14 @@ def _build_transient_baseline(config: Any, summary: dict[str, Any]) -> dict[str,
         0.05,
         0.95,
     )
+    chemistry_summary = summary.get("chemistry", {})
+    if not isinstance(chemistry_summary, dict) or not chemistry_summary:
+        chemistry_summary = build_steady_state_chemistry_summary(
+            config,
+            fuel_salt_volume_m3=total_fuel_volume_m3,
+            bulk_temperature_c=average_temp_c,
+            cleanup_turnover_days=float(fuel_cycle.get("cleanup_turnover_days", config.reactor.get("cleanup_turnover_days", 14.0))),
+        )
     return {
         "thermal_power_mw": _round_float(thermal_power_mw),
         "hot_leg_temp_c": _round_float(hot_leg_temp_c),
@@ -192,6 +226,8 @@ def _build_transient_baseline(config: Any, summary: dict[str, Any]) -> dict[str,
         "cleanup_turnover_s": _round_float(cleanup_turnover_s),
         "cleanup_removal_efficiency": _round_float(cleanup_removal_efficiency),
         "initial_core_precursor_fraction": _round_float(initial_core_precursor_fraction),
+        "chemistry": chemistry_summary,
+        "fuel_cycle": fuel_cycle,
     }
 
 
@@ -218,6 +254,18 @@ def _resolve_model_parameters(transient_config: dict[str, Any]) -> dict[str, flo
         "xenon_worth_pcm_per_fraction": float(
             transient_config.get("xenon_worth_pcm_per_fraction", -120.0)
         ),
+        "depletion_reactivity_worth_pcm_per_fraction": float(
+            transient_config.get("depletion_reactivity_worth_pcm_per_fraction", 320.0)
+        ),
+        "protactinium_penalty_pcm_per_fraction": float(
+            transient_config.get("protactinium_penalty_pcm_per_fraction", -140.0)
+        ),
+        "chemistry_redox_worth_pcm_per_ev": float(
+            transient_config.get("chemistry_redox_worth_pcm_per_ev", -90.0)
+        ),
+        "chemistry_impurity_worth_pcm_per_fraction": float(
+            transient_config.get("chemistry_impurity_worth_pcm_per_fraction", -240.0)
+        ),
         "max_power_fraction": float(transient_config.get("max_power_fraction", 3.0)),
     }
 
@@ -228,6 +276,7 @@ def _integrate_transient(
     scenario: dict[str, Any],
     model_parameters: dict[str, float],
     depletion: dict[str, Any],
+    chemistry: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     dt = max(float(scenario["time_step_s"]), 0.05)
     duration_s = max(float(scenario["duration_s"]), dt)
@@ -238,6 +287,9 @@ def _integrate_transient(
         "heat_sink_fraction": 1.0,
         "cleanup_multiplier": 1.0,
         "sink_temp_offset_c": 0.0,
+        "redox_setpoint_shift_ev": 0.0,
+        "impurity_ingress_multiplier": 1.0,
+        "gas_stripping_efficiency": float(chemistry["gas_stripping_efficiency"]),
     }
     steady_fuel_temp_c = float(baseline["hot_leg_temp_c"])
     steady_graphite_temp_c = float(baseline["average_primary_temp_c"])
@@ -251,6 +303,14 @@ def _integrate_transient(
     precursor_total = 1.0
     core_precursor_fraction = steady_precursor_fraction
     xenon_fraction = 1.0
+    fissile_inventory_fraction = float(depletion["initial_fissile_inventory_fraction"])
+    protactinium_inventory_fraction = 0.0
+    chemistry_baseline = baseline.get("chemistry", {})
+    steady_redox_state_ev = float(chemistry_baseline.get("redox_state_ev", chemistry["initial_redox_state_ev"]))
+    target_redox_state_ev = float(chemistry_baseline.get("target_redox_state_ev", chemistry["target_redox_state_ev"]))
+    redox_state_ev = steady_redox_state_ev
+    impurity_fraction = float(chemistry_baseline.get("impurity_fraction", 0.0))
+    corrosion_index = float(chemistry_baseline.get("corrosion_index", 1.0))
 
     history: list[dict[str, Any]] = []
     peak_power_fraction = power_fraction
@@ -259,10 +319,13 @@ def _integrate_transient(
     peak_coolant_temp_c = coolant_temp_c
     minimum_core_precursor_fraction = core_precursor_fraction
     total_reactivity_pcm = 0.0
+    peak_protactinium_inventory_fraction = protactinium_inventory_fraction
+    peak_corrosion_index = corrosion_index
 
     step_count = int(round(duration_s / dt))
     for step in range(step_count + 1):
         time_s = step * dt
+        dt_days = dt / 86400.0
         while event_index < len(scenario["events"]) and float(scenario["events"][event_index]["time_s"]) <= time_s + 1.0e-9:
             event = scenario["events"][event_index]
             for source_key, target_key in (
@@ -271,6 +334,9 @@ def _integrate_transient(
                 ("heat_sink_fraction", "heat_sink_fraction"),
                 ("cleanup_multiplier", "cleanup_multiplier"),
                 ("secondary_sink_temp_offset_c", "sink_temp_offset_c"),
+                ("redox_setpoint_shift_ev", "redox_setpoint_shift_ev"),
+                ("impurity_ingress_multiplier", "impurity_ingress_multiplier"),
+                ("gas_stripping_efficiency", "gas_stripping_efficiency"),
             ):
                 if source_key in event:
                     controls[target_key] = float(event[source_key])
@@ -287,6 +353,7 @@ def _integrate_transient(
             float(baseline["cleanup_turnover_s"]) * 6.0,
             1.0,
         )
+        gas_stripping_efficiency = _clamp(controls["gas_stripping_efficiency"], 0.0, 1.0)
 
         thermal_load_ratio = power_fraction / max(
             effective_flow_fraction * max(effective_heat_sink_fraction, 0.15),
@@ -349,6 +416,49 @@ def _integrate_transient(
             0.0,
         )
 
+        breeding_gain_fraction_per_day = float(depletion["breeding_gain_fraction_per_day"])
+        fissile_burn_fraction_per_day_full_power = float(depletion["fissile_burn_fraction_per_day_full_power"])
+        minor_actinide_sink_fraction_per_day = float(depletion["minor_actinide_sink_fraction_per_day"])
+        protactinium_holdup_days = max(float(depletion["protactinium_holdup_days"]), 0.05)
+        protactinium_target_fraction = breeding_gain_fraction_per_day * protactinium_holdup_days * power_fraction
+        protactinium_inventory_fraction = _first_order_step(
+            protactinium_inventory_fraction,
+            protactinium_target_fraction,
+            dt,
+            protactinium_holdup_days * 86400.0,
+        )
+        fissile_inventory_fraction += (
+            breeding_gain_fraction_per_day * max(1.0 - protactinium_inventory_fraction, 0.0)
+            - fissile_burn_fraction_per_day_full_power * power_fraction
+            - minor_actinide_sink_fraction_per_day
+        ) * dt_days
+        fissile_inventory_fraction = _clamp(fissile_inventory_fraction, 0.2, 1.5)
+
+        redox_target_ev = target_redox_state_ev + controls["redox_setpoint_shift_ev"]
+        redox_target_ev += impurity_fraction * 0.03
+        redox_state_ev = _first_order_step(
+            redox_state_ev,
+            redox_target_ev,
+            dt,
+            max(float(chemistry["redox_control_time_days"]) * 86400.0, dt),
+        )
+        impurity_ingress_fraction_per_day = float(chemistry["oxidant_ingress_fraction_per_day"]) * _clamp(
+            controls["impurity_ingress_multiplier"],
+            0.0,
+            4.0,
+        )
+        impurity_capture_rate_per_day = (
+            float(chemistry["impurity_capture_efficiency"]) + gas_stripping_efficiency
+        ) / max(float(baseline["fuel_cycle"].get("cleanup_turnover_days", 14.0)), 0.25)
+        impurity_fraction += (impurity_ingress_fraction_per_day - impurity_capture_rate_per_day * impurity_fraction) * dt_days
+        impurity_fraction = _clamp(impurity_fraction, 0.0, 0.05)
+        corrosion_index = corrosion_index_from_state(
+            redox_state_ev=redox_state_ev,
+            target_redox_state_ev=target_redox_state_ev,
+            impurity_fraction=impurity_fraction,
+            corrosion_acceleration_per_ev=float(chemistry["corrosion_acceleration_per_ev"]),
+        )
+
         temperature_feedback_pcm = (
             model_parameters["fuel_temperature_feedback_pcm_per_c"] * (fuel_temp_c - steady_fuel_temp_c)
             + model_parameters["graphite_temperature_feedback_pcm_per_c"] * (graphite_temp_c - steady_graphite_temp_c)
@@ -358,8 +468,21 @@ def _integrate_transient(
             core_precursor_fraction - steady_precursor_fraction
         )
         xenon_feedback_pcm = model_parameters["xenon_worth_pcm_per_fraction"] * (xenon_fraction - 1.0)
+        depletion_feedback_pcm = (
+            model_parameters["depletion_reactivity_worth_pcm_per_fraction"] * (fissile_inventory_fraction - 1.0)
+            + model_parameters["protactinium_penalty_pcm_per_fraction"] * protactinium_inventory_fraction
+        )
+        chemistry_feedback_pcm = (
+            model_parameters["chemistry_redox_worth_pcm_per_ev"] * (redox_state_ev - steady_redox_state_ev)
+            + model_parameters["chemistry_impurity_worth_pcm_per_fraction"] * impurity_fraction
+        )
         total_reactivity_pcm = (
-            controls["reactivity_pcm"] + temperature_feedback_pcm + precursor_feedback_pcm + xenon_feedback_pcm
+            controls["reactivity_pcm"]
+            + temperature_feedback_pcm
+            + precursor_feedback_pcm
+            + xenon_feedback_pcm
+            + depletion_feedback_pcm
+            + chemistry_feedback_pcm
         )
         power_target = _clamp(
             1.0 + (total_reactivity_pcm / max(model_parameters["reactivity_to_power_scale_pcm"], 1.0)),
@@ -378,6 +501,8 @@ def _integrate_transient(
         peak_graphite_temp_c = max(peak_graphite_temp_c, graphite_temp_c)
         peak_coolant_temp_c = max(peak_coolant_temp_c, coolant_temp_c)
         minimum_core_precursor_fraction = min(minimum_core_precursor_fraction, core_precursor_fraction)
+        peak_protactinium_inventory_fraction = max(peak_protactinium_inventory_fraction, protactinium_inventory_fraction)
+        peak_corrosion_index = max(peak_corrosion_index, corrosion_index)
 
         history.append(
             {
@@ -390,8 +515,15 @@ def _integrate_transient(
                 "core_precursor_fraction": _round_float(core_precursor_fraction),
                 "precursor_total_fraction": _round_float(precursor_total),
                 "xenon_fraction": _round_float(xenon_fraction),
+                "fissile_inventory_fraction": _round_float(fissile_inventory_fraction),
+                "protactinium_inventory_fraction": _round_float(protactinium_inventory_fraction),
+                "redox_state_ev": _round_float(redox_state_ev),
+                "impurity_fraction": _round_float(impurity_fraction),
+                "corrosion_index": _round_float(corrosion_index),
                 "total_reactivity_pcm": _round_float(total_reactivity_pcm),
                 "control_reactivity_pcm": _round_float(controls["reactivity_pcm"]),
+                "depletion_reactivity_pcm": _round_float(depletion_feedback_pcm),
+                "chemistry_reactivity_pcm": _round_float(chemistry_feedback_pcm),
                 "flow_fraction": _round_float(effective_flow_fraction),
                 "heat_sink_fraction": _round_float(effective_heat_sink_fraction),
             }
@@ -410,6 +542,10 @@ def _integrate_transient(
         "minimum_precursor_core_fraction": _round_float(minimum_core_precursor_fraction),
         "final_total_reactivity_pcm": _round_float(total_reactivity_pcm),
         "final_xenon_fraction": _round_float(xenon_fraction),
+        "final_fissile_inventory_fraction": _round_float(fissile_inventory_fraction),
+        "peak_protactinium_inventory_fraction": _round_float(peak_protactinium_inventory_fraction),
+        "final_redox_state_ev": _round_float(redox_state_ev),
+        "peak_corrosion_index": _round_float(peak_corrosion_index),
     }
     return history, metrics
 

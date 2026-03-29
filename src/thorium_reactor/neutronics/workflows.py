@@ -213,6 +213,7 @@ def run_case(
                 if primary_system:
                     summary["primary_system"] = primary_system
                     summary["fuel_cycle"] = json.loads(json.dumps(primary_system["fuel_cycle"]))
+                    summary["chemistry"] = json.loads(json.dumps(primary_system["chemistry"]))
                     hydraulics = primary_system["loop_hydraulics"]
                     heat_exchanger = primary_system["heat_exchanger"]
                     summary["metrics"]["primary_total_pressure_drop_kpa"] = hydraulics["total_pressure_drop_kpa"]
@@ -221,6 +222,7 @@ def run_case(
                     summary["metrics"]["fuel_salt_inventory_m3"] = primary_system["inventory"]["fuel_salt"]["total_m3"]
                     summary["metrics"]["coolant_salt_inventory_m3"] = primary_system["inventory"]["coolant_salt"]["net_pool_inventory_m3"]
                     summary["metrics"]["fissile_inventory_kg"] = primary_system["fuel_cycle"]["fissile_inventory_kg"]
+                    summary["metrics"]["chemistry_corrosion_index"] = primary_system["chemistry"]["corrosion_index"]
     if built.manifest.get("benchmark_traceability"):
         summary["benchmark_traceability"] = json.loads(json.dumps(built.manifest["benchmark_traceability"]))
         summary["metrics"]["benchmark_traceability_score"] = built.manifest["benchmark_traceability"]["traceability_score"]

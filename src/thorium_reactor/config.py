@@ -108,6 +108,8 @@ def _validate_case_schema(path: Path, raw: Mapping[str, Any]) -> None:
     _validate_simulation_settings(path, raw.get("simulation"))
     _validate_optional_transient_settings(path, raw.get("transient"))
     _validate_optional_depletion_settings(path, raw.get("depletion"))
+    _validate_optional_chemistry_settings(path, raw.get("chemistry"))
+    _validate_optional_integrations(path, raw.get("integrations"))
 
 
 def _validate_material_properties(path: Path, materials: Any) -> None:
@@ -289,12 +291,52 @@ def _validate_optional_depletion_settings(path: Path, depletion: Any) -> None:
         "volatile_removal_efficiency",
         "xenon_removal_fraction",
         "protactinium_holdup_days",
+        "initial_fissile_inventory_fraction",
+        "fissile_burn_fraction_per_day_full_power",
+        "breeding_gain_fraction_per_day",
+        "minor_actinide_sink_fraction_per_day",
     ):
         if field_name in depletion:
             _require_number(path, f"depletion.{field_name}", depletion[field_name])
+
+
+def _validate_optional_chemistry_settings(path: Path, chemistry: Any) -> None:
+    if chemistry is None:
+        return
+    if not isinstance(chemistry, Mapping):
+        raise ConfigError(f"Case config {path} optional 'chemistry' section must be a mapping.")
+    for field_name in (
+        "target_redox_state_ev",
+        "initial_redox_state_ev",
+        "redox_control_time_days",
+        "oxidant_ingress_fraction_per_day",
+        "impurity_capture_efficiency",
+        "gas_stripping_efficiency",
+        "noble_metal_plateout_fraction",
+        "corrosion_acceleration_per_ev",
+        "tritium_release_fraction",
+    ):
+        if field_name in chemistry:
+            _require_number(path, f"chemistry.{field_name}", chemistry[field_name])
 
 
 def _require_number(path: Path, field_name: str, value: Any) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigError(f"Case config {path} field '{field_name}' must be numeric.")
     return float(value)
+
+
+def _validate_optional_integrations(path: Path, integrations: Any) -> None:
+    if integrations is None:
+        return
+    if not isinstance(integrations, Mapping):
+        raise ConfigError(f"Case config {path} optional 'integrations' section must be a mapping.")
+    for integration_name in ("moose", "scale"):
+        settings = integrations.get(integration_name)
+        if settings is None:
+            continue
+        if not isinstance(settings, Mapping):
+            raise ConfigError(f"Case config {path} integrations.{integration_name} must be a mapping.")
+        args = settings.get("args")
+        if args is not None and not isinstance(args, list):
+            raise ConfigError(f"Case config {path} integrations.{integration_name}.args must be a list.")

@@ -11,6 +11,7 @@ The current workflow combines:
 - a 1D-style primary-loop hydraulic budget,
 - lumped heat-exchanger and thermal-profile calculations,
 - and a reduced-order transient proxy for temperature, reactivity, precursor transport, and cleanup scenarios.
+- a steady-state salt chemistry proxy and transient chemistry/depletion coupling terms.
 
 The relevant implementation lives in:
 
@@ -19,6 +20,8 @@ The relevant implementation lives in:
 - [src/thorium_reactor/flow/primary_system.py](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/src/thorium_reactor/flow/primary_system.py)
 - [src/thorium_reactor/flow/properties.py](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/src/thorium_reactor/flow/properties.py)
 - [src/thorium_reactor/transient.py](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/src/thorium_reactor/transient.py)
+- [src/thorium_reactor/integrations.py](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/src/thorium_reactor/integrations.py)
+- [src/thorium_reactor/chemistry.py](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/src/thorium_reactor/chemistry.py)
 
 ## Input Units
 
@@ -256,7 +259,86 @@ The current implementation records:
 - `xenon_removal_fraction`
 - `protactinium_holdup_days`
 
-These assumptions currently parameterize reduced-order poison and cleanup proxies; they are not full depletion-chain transport calculations.
+These assumptions currently parameterize reduced-order poison, breeding, and cleanup proxies; they are not full depletion-chain transport calculations.
+
+## Salt Chemistry Proxy
+
+The repository now includes a steady-state salt chemistry summary and transient chemistry state variables.
+
+The steady-state chemistry model tracks:
+
+- redox state relative to a target setpoint,
+- oxidant/impurity ingress,
+- impurity capture and gas stripping,
+- a derived corrosion index,
+- noble metal plateout fraction,
+- and tritium release fraction.
+
+The chemistry proxy computes a corrosion indicator of the form:
+
+```text
+corrosion_index =
+  1
+  + max(redox_state - redox_target, 0) * redox_acceleration
+  + C_imp * impurity_fraction
+```
+
+with the current implementation using a simple linear impurity penalty.
+
+## Coupled Depletion And Chemistry Terms In The Transient Proxy
+
+The transient model now also tracks:
+
+- fissile inventory fraction,
+- protactinium inventory fraction,
+- redox state,
+- impurity fraction,
+- and corrosion index.
+
+The depletion proxy evolves fissile inventory with breeding, burnup, and a sink term:
+
+```text
+df_fissile/dt =
+  breeding_gain
+  - burn_rate * power_fraction
+  - minor_actinide_sink
+```
+
+Protactinium inventory relaxes toward a holdup-time target proportional to breeding rate and power.
+
+The transient reactivity balance now includes additional proxy terms:
+
+```text
+rho_total =
+  rho_control
+  + rho_temperature
+  + rho_precursor
+  + rho_xenon
+  + rho_depletion
+  + rho_chemistry
+```
+
+where `rho_depletion` depends on fissile and protactinium inventory fractions, and `rho_chemistry` depends on redox and impurity state.
+
+## MOOSE And SCALE Integration Surface
+
+The repository now exposes two external solver handoff paths:
+
+- `reactor moose <case>`
+- `reactor scale <case>`
+
+The current implementation does three things:
+
+1. ensures a steady-state summary exists for the case,
+2. exports a proxy input deck plus a structured handoff JSON into the result bundle,
+3. optionally tries to execute the external solver if the configured executable is available on `PATH`.
+
+The exported decks are intentionally lightweight:
+
+- the MOOSE deck carries steady-state thermal-hydraulic summary values into a simple input-file scaffold,
+- the SCALE deck carries case identity, sequence choice, particle/batch settings, and material inventory into a simple SCALE-style scaffold.
+
+This is an integration adapter layer, not a validated mesh/material translation or a benchmark-quality external deck generator.
 
 ## Current Boundaries And Limitations
 
@@ -265,5 +347,4 @@ This document describes the implemented reduced-order model only. It does not im
 - transient thermal hydraulics,
 - precursor drift or coupled kinetics,
 - benchmark-grade depletion or online reprocessing,
-- corrosion or redox chemistry,
 - or validated molten-salt-specific closure laws beyond the current first-pass correlations.

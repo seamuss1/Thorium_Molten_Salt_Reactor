@@ -162,5 +162,53 @@ def test_transient_command_produces_configured_history() -> None:
         assert summary["transient"]["peak_fuel_temperature_c"] >= summary["primary_system"]["thermal_profile"]["estimated_hot_leg_temp_c"]
         assert transient["metrics"]["history_points"] > 10
         assert transient["depletion"]["chain"] == "thorium_u233_cleanup_proxy"
+        assert transient["chemistry"]["model"] == "salt_redox_cleanup_proxy"
+        assert transient["metrics"]["final_fissile_inventory_fraction"] > 0.0
+        assert transient["metrics"]["peak_corrosion_index"] >= 0.1
+        first_history = transient["history"][0]
+        assert "redox_state_ev" in first_history
+        assert "fissile_inventory_fraction" in first_history
+        assert "chemistry_reactivity_pcm" in first_history
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_moose_and_scale_commands_export_inputs_and_update_summary() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-external-integrations" / uuid.uuid4().hex
+    case_dir = scratch_root / "configs" / "cases" / "immersed_pool_reference"
+    benchmark_dir = scratch_root / "benchmarks" / "tmsr_lf1"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    benchmark_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml", case_dir / "case.yaml")
+        shutil.copy2(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", benchmark_dir / "benchmark.yaml")
+        config = load_case_config(case_dir / "case.yaml")
+        bundle = create_result_bundle(scratch_root, config.name, "integrations")
+
+        moose_summary = run_case(config, bundle, solver_enabled=False)
+        assert "integrations" not in moose_summary
+
+        moose_exit = main(["--repo-root", str(scratch_root), "moose", "immersed_pool_reference", "--run-id", "integrations"])
+        scale_exit = main(["--repo-root", str(scratch_root), "scale", "immersed_pool_reference", "--run-id", "integrations"])
+
+        assert moose_exit == 0
+        assert scale_exit == 0
+
+        summary = json.loads((bundle.root / "summary.json").read_text(encoding="utf-8"))
+        moose_payload = json.loads((bundle.root / "moose_integration.json").read_text(encoding="utf-8"))
+        scale_payload = json.loads((bundle.root / "scale_integration.json").read_text(encoding="utf-8"))
+        moose_handoff = json.loads((bundle.root / "moose_handoff.json").read_text(encoding="utf-8"))
+        scale_handoff = json.loads((bundle.root / "scale_handoff.json").read_text(encoding="utf-8"))
+
+        assert summary["integrations"]["moose"]["status"] == "exported"
+        assert summary["integrations"]["scale"]["status"] == "exported"
+        assert Path(moose_payload["input_path"]).exists()
+        assert Path(scale_payload["input_path"]).exists()
+        assert Path(moose_payload["handoff_path"]).exists()
+        assert Path(scale_payload["handoff_path"]).exists()
+        assert "Executioner" in Path(moose_payload["input_path"]).read_text(encoding="utf-8")
+        assert "=csas6" in Path(scale_payload["input_path"]).read_text(encoding="utf-8")
+        assert moose_handoff["geometry"]["channel_count"] == summary["metrics"]["channel_count"]
+        assert scale_handoff["materials"]["fuel_salt"]["nuclide_count"] > 0
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)

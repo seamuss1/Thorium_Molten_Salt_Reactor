@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from thorium_reactor.chemistry import build_steady_state_chemistry_summary
 from thorium_reactor.flow.properties import (
     average_primary_temperature_c,
     evaluate_fluid_properties,
@@ -126,6 +127,12 @@ def build_primary_system_summary(
     )
     inventory_summary = _build_inventory_summary(config, geometry_description, reduced_order_flow, primary_loop)
     fuel_cycle_summary = _build_fuel_cycle_summary(config, bop, inventory_summary)
+    chemistry_summary = build_steady_state_chemistry_summary(
+        config,
+        fuel_salt_volume_m3=float(inventory_summary["fuel_salt"]["total_m3"]),
+        bulk_temperature_c=bulk_temperature_c,
+        cleanup_turnover_days=float(fuel_cycle_summary["cleanup_turnover_days"]),
+    )
 
     required_pump_pressure_pa = pressure_budget["required_pump_pressure_pa"]
     pump_head_m = required_pump_pressure_pa / (salt_density_kg_m3 * GRAVITY_M_S2) if salt_density_kg_m3 > 0.0 else 0.0
@@ -171,6 +178,7 @@ def build_primary_system_summary(
         "thermal_profile": thermal_profile,
         "inventory": inventory_summary,
         "fuel_cycle": fuel_cycle_summary,
+        "chemistry": chemistry_summary,
         "checks": _build_primary_system_checks(
             reduced_order_flow,
             segment_summary["max_reynolds_number"],
@@ -1845,9 +1853,25 @@ def _build_fuel_cycle_summary(config: Any, bop: dict[str, Any], inventory_summar
     specific_power_mw_per_t_hm = thermal_power_mw / (heavy_metal_mass_kg / 1000.0) if heavy_metal_mass_kg > 0.0 else 0.0
     cleanup_turnover_hours = cleanup_turnover_days * 24.0
     depletion_assumptions = build_depletion_assumptions(config)
+    fissile_burn_fraction_per_day_full_power = float(
+        depletion_assumptions["fissile_burn_fraction_per_day_full_power"]
+    )
+    breeding_gain_fraction_per_day = float(depletion_assumptions["breeding_gain_fraction_per_day"])
+    minor_actinide_sink_fraction_per_day = float(
+        depletion_assumptions["minor_actinide_sink_fraction_per_day"]
+    )
+    equilibrium_protactinium_inventory_fraction = breeding_gain_fraction_per_day * float(
+        depletion_assumptions["protactinium_holdup_days"]
+    )
+    net_fissile_change_fraction_per_day = (
+        breeding_gain_fraction_per_day
+        - fissile_burn_fraction_per_day_full_power
+        - minor_actinide_sink_fraction_per_day
+    )
 
     return {
         "model": "first_order_cleanup_and_poison_proxy",
+        "depletion_model": "thorium_breeding_proxy",
         "depletion_chain": depletion_assumptions["chain"],
         "cleanup_scenario": depletion_assumptions["cleanup_scenario"],
         "fuel_heavy_metal_mass_fraction": _round_float(heavy_metal_mass_fraction),
@@ -1862,6 +1886,11 @@ def _build_fuel_cycle_summary(config: Any, bop: dict[str, Any], inventory_summar
         "xenon_yield_fraction": _round_float(xenon_yield_fraction),
         "xenon_generation_rate_atoms_s": _round_float(xenon_generation_rate_atoms_s),
         "xenon_removal_fraction": _round_float(xenon_removal_fraction),
+        "fissile_burn_fraction_per_day_full_power": _round_float(fissile_burn_fraction_per_day_full_power),
+        "breeding_gain_fraction_per_day": _round_float(breeding_gain_fraction_per_day),
+        "minor_actinide_sink_fraction_per_day": _round_float(minor_actinide_sink_fraction_per_day),
+        "net_fissile_change_fraction_per_day": _round_float(net_fissile_change_fraction_per_day),
+        "equilibrium_protactinium_inventory_fraction": _round_float(equilibrium_protactinium_inventory_fraction),
         "depletion_assumptions": depletion_assumptions,
     }
 

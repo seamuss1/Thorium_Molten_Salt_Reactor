@@ -192,6 +192,19 @@ def generate_report(
         lines.append(f"- Fuel salt inventory (m3): `{fuel_salt.get('total_m3', 'n/a')}`")
         lines.append(f"- Coolant salt inventory (m3): `{coolant_salt.get('net_pool_inventory_m3', 'n/a')}`")
 
+    chemistry = summary.get("chemistry", {})
+    if chemistry:
+        lines.extend(["", "## Salt Chemistry", ""])
+        lines.append(f"- Model: `{chemistry.get('model', 'n/a')}`")
+        lines.append(f"- Redox state (eV): `{chemistry.get('redox_state_ev', 'n/a')}`")
+        lines.append(f"- Target redox state (eV): `{chemistry.get('target_redox_state_ev', 'n/a')}`")
+        lines.append(f"- Redox deviation (eV): `{chemistry.get('redox_deviation_ev', 'n/a')}`")
+        lines.append(f"- Impurity fraction: `{chemistry.get('impurity_fraction', 'n/a')}`")
+        lines.append(f"- Corrosion index: `{chemistry.get('corrosion_index', 'n/a')}`")
+        lines.append(f"- Corrosion risk: `{chemistry.get('corrosion_risk', 'n/a')}`")
+        lines.append(f"- Gas stripping efficiency: `{chemistry.get('gas_stripping_efficiency', 'n/a')}`")
+        lines.append(f"- Tritium release fraction: `{chemistry.get('tritium_release_fraction', 'n/a')}`")
+
     fuel_cycle = summary.get("fuel_cycle", {})
     if fuel_cycle:
         lines.extend(["", "## Fuel Cycle Assumptions", ""])
@@ -205,6 +218,10 @@ def generate_report(
         lines.append(f"- Xenon generation rate (atoms/s): `{fuel_cycle.get('xenon_generation_rate_atoms_s', 'n/a')}`")
         lines.append(f"- Xenon removal fraction: `{fuel_cycle.get('xenon_removal_fraction', 'n/a')}`")
         lines.append(f"- Protactinium holdup (days): `{fuel_cycle.get('protactinium_holdup_days', 'n/a')}`")
+        lines.append(f"- Fissile burn fraction per day: `{fuel_cycle.get('fissile_burn_fraction_per_day_full_power', 'n/a')}`")
+        lines.append(f"- Breeding gain fraction per day: `{fuel_cycle.get('breeding_gain_fraction_per_day', 'n/a')}`")
+        lines.append(f"- Net fissile change fraction per day: `{fuel_cycle.get('net_fissile_change_fraction_per_day', 'n/a')}`")
+        lines.append(f"- Equilibrium protactinium inventory fraction: `{fuel_cycle.get('equilibrium_protactinium_inventory_fraction', 'n/a')}`")
         depletion_assumptions = fuel_cycle.get("depletion_assumptions", {})
         if depletion_assumptions:
             lines.append(f"- Volatile removal efficiency: `{depletion_assumptions.get('volatile_removal_efficiency', 'n/a')}`")
@@ -227,6 +244,10 @@ def generate_report(
         lines.append(f"- Final total reactivity (pcm): `{transient.get('final_total_reactivity_pcm', 'n/a')}`")
         lines.append(f"- Depletion chain: `{transient.get('depletion_chain', 'n/a')}`")
         lines.append(f"- Cleanup scenario: `{transient.get('cleanup_scenario', 'n/a')}`")
+        lines.append(f"- Final fissile inventory fraction: `{transient.get('final_fissile_inventory_fraction', 'n/a')}`")
+        lines.append(f"- Peak protactinium inventory fraction: `{transient.get('peak_protactinium_inventory_fraction', 'n/a')}`")
+        lines.append(f"- Final redox state (eV): `{transient.get('final_redox_state_ev', 'n/a')}`")
+        lines.append(f"- Peak corrosion index: `{transient.get('peak_corrosion_index', 'n/a')}`")
         lines.append(f"- Transient history: `{transient.get('history_path', 'n/a')}`")
 
     if validation:
@@ -236,6 +257,24 @@ def generate_report(
                 f"- {check['name']}: `{check['status']}`"
                 + (f" ({check['message']})" if check.get("message") else "")
             )
+
+    integrations = summary.get("integrations", {})
+    if integrations:
+        lines.extend(["", "## External Integrations", ""])
+        for name in sorted(integrations):
+            item = integrations[name]
+            lines.append(f"- `{name}` status: `{item.get('status', 'n/a')}`")
+            lines.append(f"- `{name}` input path: `{item.get('input_path', 'n/a')}`")
+            if item.get("handoff_path"):
+                lines.append(f"- `{name}` handoff path: `{item.get('handoff_path', 'n/a')}`")
+            if item.get("application"):
+                lines.append(f"- `{name}` application: `{item.get('application', 'n/a')}`")
+            if item.get("sequence"):
+                lines.append(f"- `{name}` sequence: `{item.get('sequence', 'n/a')}`")
+            if item.get("command"):
+                lines.append(f"- `{name}` command: `{item.get('command')}`")
+            if item.get("error"):
+                lines.append(f"- `{name}` note: {item.get('error')}")
 
     if benchmark.get("evidence"):
         lines.extend(["", "## Evidence Trail", ""])

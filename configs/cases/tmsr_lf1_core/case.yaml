@@ -147,6 +147,30 @@ depletion:
   volatile_removal_efficiency: 0.75
   xenon_removal_fraction: 0.9
   protactinium_holdup_days: 2.0
+  initial_fissile_inventory_fraction: 1.0
+  fissile_burn_fraction_per_day_full_power: 0.00095
+  breeding_gain_fraction_per_day: 0.0006
+  minor_actinide_sink_fraction_per_day: 0.00014
+chemistry:
+  model: salt_redox_cleanup_proxy
+  target_redox_state_ev: -0.025
+  initial_redox_state_ev: -0.018
+  redox_control_time_days: 2.5
+  oxidant_ingress_fraction_per_day: 0.00022
+  impurity_capture_efficiency: 0.62
+  gas_stripping_efficiency: 0.86
+  noble_metal_plateout_fraction: 0.1
+  corrosion_acceleration_per_ev: 4.3
+  tritium_release_fraction: 0.32
+integrations:
+  moose:
+    application: app-opt
+    executioner: Steady
+    end_time: 20.0
+    dt: 1.0
+  scale:
+    sequence: csas6
+    executable: scalerte
 validation_targets:
   expected_cells:
     metric: expected_cells

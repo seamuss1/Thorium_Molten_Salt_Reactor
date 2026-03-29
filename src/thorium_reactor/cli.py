@@ -9,6 +9,7 @@ from thorium_reactor.benchmarking import run_solver_backed_benchmark
 from thorium_reactor.bundle_inputs import ensure_bundle_inputs, load_bundle_inputs
 from thorium_reactor.config import load_case_config
 from thorium_reactor.geometry.exporters import export_geometry
+from thorium_reactor.integrations import persist_integration_result, run_moose_integration, run_scale_integration
 from thorium_reactor.neutronics.openmc_compat import openmc
 from thorium_reactor.neutronics.workflows import build_case, run_case, validate_case
 from thorium_reactor.paths import ResultBundle, case_config_path, create_result_bundle, discover_repo_root, latest_result_bundle
@@ -22,7 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo-root", type=Path, default=None, help="Override the repository root.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    for command_name in ("build", "run", "validate", "report", "render", "benchmark", "transient"):
+    for command_name in ("build", "run", "validate", "report", "render", "benchmark", "transient", "moose", "scale"):
         command = subparsers.add_parser(command_name, help=f"{command_name.capitalize()} a reactor case")
         command.add_argument("case", help="Case name under configs/cases")
         command.add_argument("--run-id", default=None, help="Reuse or create a specific results run id")
@@ -30,6 +31,8 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--no-solver", action="store_true", help="Skip calling the OpenMC solver")
         if command_name == "transient":
             command.add_argument("--scenario", default=None, help="Named transient scenario from the case config.")
+        if command_name in {"moose", "scale"}:
+            command.add_argument("--run-external", action="store_true", help="Attempt to execute the external code after exporting the input deck.")
         if command_name == "benchmark":
             command.add_argument(
                 "--docker-openmc",
@@ -46,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = args.repo_root.resolve() if args.repo_root else discover_repo_root()
     config = load_case_config(case_config_path(repo_root, args.case))
 
-    if args.command in {"build", "run", "benchmark", "transient"}:
+    if args.command in {"build", "run", "benchmark", "transient", "moose", "scale"}:
         bundle = create_result_bundle(repo_root, config.name, args.run_id)
         inputs = ensure_bundle_inputs(repo_root, bundle, config)
     else:
@@ -104,6 +107,36 @@ def main(argv: list[str] | None = None) -> int:
         generate_summary_plots(bundle, summary)
         print(bundle.root)
         print(transient["metrics"]["peak_power_fraction"])
+        return 0
+
+    if args.command == "moose":
+        result = run_moose_integration(
+            config,
+            bundle,
+            benchmark=benchmark,
+            provenance=provenance,
+            execute=args.run_external,
+        )
+        summary_path = bundle.root / "summary.json"
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        persist_integration_result(bundle, summary, "moose", result)
+        print(bundle.root)
+        print(result["status"])
+        return 0
+
+    if args.command == "scale":
+        result = run_scale_integration(
+            config,
+            bundle,
+            benchmark=benchmark,
+            provenance=provenance,
+            execute=args.run_external,
+        )
+        summary_path = bundle.root / "summary.json"
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        persist_integration_result(bundle, summary, "scale", result)
+        print(bundle.root)
+        print(result["status"])
         return 0
 
     if args.command == "validate":
