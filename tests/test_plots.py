@@ -134,3 +134,51 @@ def test_generate_summary_plots_emits_transient_plots_when_history_exists() -> N
     assert "transient_fuel_temperature" in assets
     assert Path(assets["transient_power"]).exists()
     assert Path(assets["transient_fuel_temperature"]).exists()
+
+
+def test_generate_summary_plots_emits_transient_sweep_envelopes_when_history_exists() -> None:
+    bundle = create_result_bundle(REPO_ROOT / ".tmp" / "plot-transient-sweep-test", "plot_case", "run")
+    transient_sweep_path = bundle.write_json(
+        "transient_sweep.json",
+        {
+            "history": [
+                {
+                    "time_s": 0.0,
+                    "power_fraction_p05": 0.98,
+                    "power_fraction_p50": 1.0,
+                    "power_fraction_p95": 1.03,
+                    "fuel_temp_c_p05": 685.0,
+                    "fuel_temp_c_p50": 690.0,
+                    "fuel_temp_c_p95": 696.0,
+                },
+                {
+                    "time_s": 10.0,
+                    "power_fraction_p05": 1.02,
+                    "power_fraction_p50": 1.08,
+                    "power_fraction_p95": 1.16,
+                    "fuel_temp_c_p05": 692.0,
+                    "fuel_temp_c_p50": 701.0,
+                    "fuel_temp_c_p95": 714.0,
+                },
+            ]
+        },
+    )
+    summary = {
+        "case": "plot_case",
+        "metrics": {
+            "channel_count": 91,
+        },
+        "transient_sweep": {
+            "history_path": str(transient_sweep_path),
+        },
+        "neutronics": {
+            "status": "completed",
+        },
+    }
+
+    assets = generate_summary_plots(bundle, summary)
+
+    assert "transient_sweep_power_envelope" in assets
+    assert "transient_sweep_fuel_temperature_envelope" in assets
+    assert Path(assets["transient_sweep_power_envelope"]).exists()
+    assert Path(assets["transient_sweep_fuel_temperature_envelope"]).exists()

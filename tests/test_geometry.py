@@ -29,10 +29,24 @@ def test_detailed_core_export_emits_png_asset() -> None:
     assets = export_geometry(built.geometry_description, output_dir)
 
     assert "png" in assets
+    assert "hero_cutaway" in assets
+    assert "annotated_cutaway" in assets
+    assert "physics_overlay" in assets
     assert "stl" in assets
+    assert "gltf" in assets
+    assert "gltf_bin" in assets
+    assert "blender_gpu_script" in assets
     assert Path(assets["png"]).exists()
+    assert Path(assets["hero_cutaway"]).exists()
+    assert Path(assets["annotated_cutaway"]).exists()
+    assert Path(assets["physics_overlay"]).exists()
     assert Path(assets["stl"]).exists()
+    assert Path(assets["gltf"]).exists()
+    assert Path(assets["gltf_bin"]).exists()
+    assert Path(assets["blender_gpu_script"]).exists()
     assert Path(assets["stl"]).read_text(encoding="utf-8").startswith("solid procedural_reactor_geometry")
+    assert '"version": "2.0"' in Path(assets["gltf"]).read_text(encoding="utf-8")
+    assert "import_scene.gltf" in Path(assets["blender_gpu_script"]).read_text(encoding="utf-8")
 
 
 def test_immersed_pool_reference_export_supports_box_and_horizontal_primitives() -> None:
@@ -45,9 +59,15 @@ def test_immersed_pool_reference_export_supports_box_and_horizontal_primitives()
     obj_text = Path(assets["obj"]).read_text(encoding="utf-8")
 
     assert Path(assets["png"]).exists()
+    assert Path(assets["hero_cutaway"]).exists()
+    assert Path(assets["annotated_cutaway"]).exists()
+    assert Path(assets["physics_overlay"]).exists()
     assert Path(assets["obj"]).exists()
     assert Path(assets["gif"]).exists()
     assert Path(assets["mesh_validation"]).exists()
+    assert Path(assets["gltf"]).exists()
+    assert Path(assets["gltf_bin"]).exists()
+    assert Path(assets["blender_gpu_script"]).exists()
     if shutil.which("ffmpeg") is not None:
         assert Path(assets["mp4"]).exists()
     assert not list(output_dir.glob(".*-frames*"))

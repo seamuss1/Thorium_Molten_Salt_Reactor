@@ -21,12 +21,15 @@ def generate_report(
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     validation = {}
     benchmark = benchmark or {}
-    benchmark_traceability = assess_benchmark_traceability(config, benchmark) if benchmark else {}
+    benchmark_traceability = summary.get("benchmark_traceability") or (assess_benchmark_traceability(config, benchmark) if benchmark else {})
     if validation_path and validation_path.exists():
         try:
             validation = json.loads(validation_path.read_text(encoding="utf-8"))
         except JSONDecodeError:
             validation = {"checks": [], "passed": False}
+    model_representation = summary.get("model_representation", config.get("model_representation", {}))
+    model_validity = summary.get("model_validity", {})
+    validation_maturity = summary.get("validation_maturity") or benchmark_traceability.get("validation_maturity", {})
 
     lines = [
         f"# {config['reactor']['name']}",
@@ -44,6 +47,15 @@ def generate_report(
         "",
     ]
 
+    if model_validity:
+        lines.extend(
+            [
+                f"> Model validity: `{model_validity.get('status', 'unknown')}`",
+                f"> Failed checks: `{model_validity.get('failed_count', 0)}`",
+                "",
+            ]
+        )
+
     if provenance:
         case_provenance = provenance.get("case", {})
         benchmark_provenance = provenance.get("benchmark", {})
@@ -55,6 +67,17 @@ def generate_report(
                 f"- Case origin path: `{case_provenance.get('origin_path', 'n/a')}`",
                 f"- Benchmark metadata: `{benchmark_provenance.get('source', 'unknown')}`",
                 f"- Benchmark origin path: `{benchmark_provenance.get('origin_path', 'n/a')}`",
+                "",
+            ]
+        )
+
+    if model_representation:
+        lines.extend(
+            [
+                "## Model Representation",
+                "",
+                f"- Materials mode: `{model_representation.get('materials', 'n/a')}`",
+                f"- Fuel-cycle mode: `{model_representation.get('fuel_cycle', 'n/a')}`",
                 "",
             ]
         )
@@ -100,7 +123,20 @@ def generate_report(
             ]
         )
         for gap in benchmark_traceability.get("gaps", []):
-            lines.append(f"- Gap: {gap}")
+            lines.append(f"- Traceability gap: {gap}")
+        if validation_maturity:
+            lines.append(f"- Validation maturity score: `{validation_maturity.get('validation_maturity_score', 'n/a')}`")
+            lines.append(f"- Validation maturity stage: `{validation_maturity.get('validation_maturity_stage', 'n/a')}`")
+            lines.append(
+                f"- Operating-point source: `{validation_maturity.get('operating_point_source', {}).get('status', 'n/a')}`"
+            )
+            lines.append(
+                f"- Uncertainty coverage: `{validation_maturity.get('uncertainty_coverage', {}).get('status', 'n/a')}`"
+            )
+            cross_code_checks = validation_maturity.get("cross_code_checks", [])
+            lines.append(f"- Cross-code checks declared: `{len(cross_code_checks)}`")
+            for gap in validation_maturity.get("gaps", []):
+                lines.append(f"- Validation gap: {gap}")
 
     lines.extend(
         [
@@ -250,8 +286,33 @@ def generate_report(
         lines.append(f"- Peak corrosion index: `{transient.get('peak_corrosion_index', 'n/a')}`")
         lines.append(f"- Transient history: `{transient.get('history_path', 'n/a')}`")
 
+    transient_sweep = summary.get("transient_sweep", {})
+    if transient_sweep:
+        lines.extend(["", "## Transient Sweep", ""])
+        lines.append(f"- Model: `{transient_sweep.get('model', 'n/a')}`")
+        lines.append(f"- Status: `{transient_sweep.get('status', 'n/a')}`")
+        lines.append(f"- Scenario: `{transient_sweep.get('scenario_name', 'n/a')}`")
+        lines.append(f"- Backend: `{transient_sweep.get('backend', 'n/a')}`")
+        lines.append(f"- Samples: `{transient_sweep.get('samples', 'n/a')}`")
+        lines.append(f"- Seed: `{transient_sweep.get('seed', 'n/a')}`")
+        lines.append(f"- Duration (s): `{transient_sweep.get('duration_s', 'n/a')}`")
+        lines.append(f"- Time step (s): `{transient_sweep.get('time_step_s', 'n/a')}`")
+        lines.append(f"- Event count: `{transient_sweep.get('event_count', 'n/a')}`")
+        lines.append(f"- Peak power fraction p95: `{transient_sweep.get('peak_power_fraction_p95', 'n/a')}`")
+        lines.append(f"- Peak power fraction max: `{transient_sweep.get('peak_power_fraction_max', 'n/a')}`")
+        lines.append(f"- Peak fuel temperature p95 (C): `{transient_sweep.get('peak_fuel_temperature_c_p95', 'n/a')}`")
+        lines.append(f"- Peak fuel temperature max (C): `{transient_sweep.get('peak_fuel_temperature_c_max', 'n/a')}`")
+        lines.append(f"- Final power fraction p50: `{transient_sweep.get('final_power_fraction_p50', 'n/a')}`")
+        lines.append(f"- Final power fraction p95: `{transient_sweep.get('final_power_fraction_p95', 'n/a')}`")
+        lines.append(f"- Final total reactivity p50 (pcm): `{transient_sweep.get('final_total_reactivity_pcm_p50', 'n/a')}`")
+        lines.append(f"- Final total reactivity p95 (pcm): `{transient_sweep.get('final_total_reactivity_pcm_p95', 'n/a')}`")
+        lines.append(f"- Peak corrosion index p95: `{transient_sweep.get('peak_corrosion_index_p95', 'n/a')}`")
+        lines.append(f"- Sweep history: `{transient_sweep.get('history_path', 'n/a')}`")
+
     if validation:
         lines.extend(["", "## Validation", ""])
+        if model_validity:
+            lines.append(f"- Model validity: `{model_validity.get('status', 'unknown')}`")
         for check in validation.get("checks", []):
             lines.append(
                 f"- {check['name']}: `{check['status']}`"
@@ -264,6 +325,8 @@ def generate_report(
         for name in sorted(integrations):
             item = integrations[name]
             lines.append(f"- `{name}` status: `{item.get('status', 'n/a')}`")
+            if item.get("execution_mode"):
+                lines.append(f"- `{name}` execution mode: `{item.get('execution_mode', 'n/a')}`")
             lines.append(f"- `{name}` input path: `{item.get('input_path', 'n/a')}`")
             if item.get("handoff_path"):
                 lines.append(f"- `{name}` handoff path: `{item.get('handoff_path', 'n/a')}`")

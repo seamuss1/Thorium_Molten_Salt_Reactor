@@ -38,6 +38,11 @@ def test_core_case_manifest_has_expected_channel_count() -> None:
     assert built.geometry_description["type"] == "detailed_molten_salt_reactor"
     assert built.manifest["benchmark_traceability"]["traceability_score"] >= 80.0
     assert built.manifest["benchmark_traceability"]["maturity_stage"] == "traceable_surrogate"
+    assert built.manifest["validation_maturity"]["validation_maturity_score"] < 40.0
+    assert built.manifest["model_representation"] == {
+        "materials": "isotopic_explicit",
+        "fuel_cycle": "proxy_breeding",
+    }
     assert built.manifest["simulation"] == {
         "mode": "eigenvalue",
         "particles": 100000,
@@ -142,11 +147,30 @@ def test_immersed_pool_reference_case_builds_with_reference_render_layout() -> N
         if item["name"].startswith("physics::")
     }
     assert physics_checks == {
-        "physics::delta_t_reasonable": True,
+        "physics::primary_delta_t_reasonable": True,
         "physics::active_channel_velocity_reasonable": True,
         "physics::loop_pipe_velocity_reasonable": True,
         "physics::pool_circulation_velocity_reasonable": True,
     }
+
+
+def test_isotopically_explicit_thorium_case_requires_th232_in_fuel_salt() -> None:
+    config = _load_case("tmsr_lf1_core")
+    config.data = yaml.safe_load(yaml.safe_dump(config.data, sort_keys=False))
+    config.data["materials"]["fuel_salt"]["nuclides"] = [
+        nuclide
+        for nuclide in config.data["materials"]["fuel_salt"]["nuclides"]
+        if nuclide["name"] != "Th232"
+    ]
+
+    built = build_case(config)
+
+    thorium_check = next(
+        item
+        for item in built.manifest["invariants"]
+        if item["name"] == "model_representation::fuel_salt_contains_thorium"
+    )
+    assert thorium_check["passed"] is False
 
 
 def test_example_pin_case_builds_without_solver() -> None:

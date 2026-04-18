@@ -81,3 +81,17 @@ targets:
     confidence: low
     evidence_refs: [openmsr-msre, openmsr-archive]
     note: Tighten this band against a benchmarked reference model once solver-backed cross-checking is in place.
+validation:
+  operating_point_source:
+    status: surrogate
+    note: Operating-point values remain openly documented surrogate bands until a citation-backed LF1 source set is extracted.
+  cross_code_checks:
+    - name: openmc_reference_model
+      status: planned
+      note: Compare keff and reaction-rate bands against an independently prepared reference model.
+    - name: reduced_order_hydraulics_cross_check
+      status: planned
+      note: Cross-check reduced-order core hydraulics against a homogenized or external thermal-hydraulics model.
+  uncertainty_coverage:
+    status: missing
+    note: No quantified uncertainty bands are published for this scaffold benchmark yet.

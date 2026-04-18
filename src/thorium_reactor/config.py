@@ -6,6 +6,12 @@ from typing import Any, Mapping
 
 import yaml
 
+from thorium_reactor.modeling import (
+    CORE_MODEL_KINDS,
+    FUEL_CYCLE_REPRESENTATIONS,
+    MODEL_MATERIAL_REPRESENTATIONS,
+)
+
 
 REQUIRED_CASE_KEYS = (
     "reactor",
@@ -66,6 +72,10 @@ class CaseConfig:
         return self.data.get("flow", {})
 
     @property
+    def model_representation(self) -> dict[str, Any]:
+        return self.data.get("model_representation", {})
+
+    @property
     def validation_targets(self) -> dict[str, Any]:
         return self.data["validation_targets"]
 
@@ -109,6 +119,8 @@ def _validate_case_schema(path: Path, raw: Mapping[str, Any]) -> None:
     _validate_optional_transient_settings(path, raw.get("transient"))
     _validate_optional_depletion_settings(path, raw.get("depletion"))
     _validate_optional_chemistry_settings(path, raw.get("chemistry"))
+    _validate_optional_flow_settings(path, raw.get("flow"))
+    _validate_optional_model_representation(path, raw.get("model_representation"))
     _validate_optional_integrations(path, raw.get("integrations"))
 
 
@@ -318,6 +330,56 @@ def _validate_optional_chemistry_settings(path: Path, chemistry: Any) -> None:
     ):
         if field_name in chemistry:
             _require_number(path, f"chemistry.{field_name}", chemistry[field_name])
+
+
+def _validate_optional_flow_settings(path: Path, flow: Any) -> None:
+    if flow is None:
+        return
+    if not isinstance(flow, Mapping):
+        raise ConfigError(f"Case config {path} optional 'flow' section must be a mapping.")
+    core_model = flow.get("core_model")
+    if core_model is None:
+        return
+    if not isinstance(core_model, Mapping):
+        raise ConfigError(f"Case config {path} flow.core_model must be a mapping.")
+    kind = str(core_model.get("kind", "channelized_from_geometry"))
+    if kind not in CORE_MODEL_KINDS:
+        supported = ", ".join(sorted(CORE_MODEL_KINDS))
+        raise ConfigError(
+            f"Case config {path} flow.core_model.kind '{kind}' is unsupported. Supported values: {supported}."
+        )
+    if kind == "channelized_from_geometry":
+        for field_name in ("active_variants", "stagnant_variants"):
+            if field_name in core_model and not isinstance(core_model[field_name], list):
+                raise ConfigError(f"Case config {path} flow.core_model.{field_name} must be a list.")
+        family_split_weights = core_model.get("family_split_weights")
+        if family_split_weights is not None and not isinstance(family_split_weights, Mapping):
+            raise ConfigError(f"Case config {path} flow.core_model.family_split_weights must be a mapping.")
+        if isinstance(family_split_weights, Mapping):
+            for key, value in family_split_weights.items():
+                _require_number(path, f"flow.core_model.family_split_weights.{key}", value)
+        return
+    for field_name in ("effective_flow_area_cm2", "active_salt_volume_cm3", "hydraulic_diameter_cm"):
+        _require_number(path, f"flow.core_model.{field_name}", core_model.get(field_name))
+
+
+def _validate_optional_model_representation(path: Path, model_representation: Any) -> None:
+    if model_representation is None:
+        return
+    if not isinstance(model_representation, Mapping):
+        raise ConfigError(f"Case config {path} optional 'model_representation' section must be a mapping.")
+    materials = model_representation.get("materials")
+    if materials is not None and materials not in MODEL_MATERIAL_REPRESENTATIONS:
+        supported = ", ".join(sorted(MODEL_MATERIAL_REPRESENTATIONS))
+        raise ConfigError(
+            f"Case config {path} model_representation.materials '{materials}' is unsupported. Supported values: {supported}."
+        )
+    fuel_cycle = model_representation.get("fuel_cycle")
+    if fuel_cycle is not None and fuel_cycle not in FUEL_CYCLE_REPRESENTATIONS:
+        supported = ", ".join(sorted(FUEL_CYCLE_REPRESENTATIONS))
+        raise ConfigError(
+            f"Case config {path} model_representation.fuel_cycle '{fuel_cycle}' is unsupported. Supported values: {supported}."
+        )
 
 
 def _require_number(path: Path, field_name: str, value: Any) -> float:

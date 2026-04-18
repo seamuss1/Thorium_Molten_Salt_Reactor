@@ -6,6 +6,7 @@ import math
 from typing import Any
 
 from thorium_reactor.flow.properties import average_primary_temperature_c, evaluate_fluid_properties, evaluate_primary_coolant_properties, primary_coolant_cp_kj_kgk
+from thorium_reactor.modeling import get_core_model
 
 
 CHANNEL_RADIUS_TOLERANCE = 1.0e-3
@@ -797,18 +798,17 @@ def _estimate_animation_physics(
     primary_mass_flow_kg_s = thermal_power_mw * 1000.0 / (primary_cp_kj_kgk * delta_t)
 
     flow_summary = build_msr_flow_summary(config, resolved)
-    interface_metrics = flow_summary["interface_metrics"]
-    reduced_order_config = config.flow.get("reduced_order", {})
-    active_channel_selection = reduced_order_config.get(
-        "active_channel_selection",
-        "plenum_connected_salt_bearing_channels",
-    )
-    if active_channel_selection == "all_salt_bearing_channels":
-        active_flow_area_cm2 = float(interface_metrics["plenum_connected_salt_area_cm2"]) + float(
-            interface_metrics["reflector_backed_salt_area_cm2"]
-        )
+    core_model = get_core_model(config)
+    if core_model["kind"] == "homogenized_core":
+        active_flow_area_cm2 = float(core_model["effective_flow_area_cm2"])
     else:
-        active_flow_area_cm2 = float(interface_metrics["plenum_connected_salt_area_cm2"])
+        active_variants = set(core_model["active_variants"])
+        active_flow_area_cm2 = sum(
+            float(channel["salt_cross_section_area_cm2"])
+            for channel in flow_summary["channels"]
+            if float(channel.get("salt_cross_section_area_cm2", 0.0)) > 0.0
+            and str(channel.get("variant")) in active_variants
+        )
     bulk_temperature_c = average_primary_temperature_c(config.reactor)
     salt_density_kg_m3 = float(evaluate_primary_coolant_properties(config, temperature_c=bulk_temperature_c)["density_kg_m3"])
     coolant_density_kg_m3 = float(
@@ -978,42 +978,53 @@ def _build_render_physics_invariants(
     config: Any,
     resolved: ResolvedMSRGeometry,
 ) -> list[dict[str, Any]]:
+    delta_t = float(config.reactor.get("hot_leg_temp_c", 700.0)) - float(config.reactor.get("cold_leg_temp_c", 560.0))
+    checks = [
+        (
+            "physics::primary_delta_t_reasonable",
+            60.0 <= delta_t <= 180.0,
+            f"Primary salt delta-T is {delta_t:.1f} C.",
+            "Primary salt delta-T should stay in a representative MSR design band.",
+        ),
+    ]
     render_layout = config.geometry.get("render_layout") or {}
     if render_layout.get("type") != "immersed_pool_reference":
-        return []
+        return [
+            {
+                "name": name,
+                "passed": passed,
+                "message": success if passed else failure,
+            }
+            for name, passed, success, failure in checks
+        ]
 
-    delta_t = float(config.reactor.get("hot_leg_temp_c", 700.0)) - float(config.reactor.get("cold_leg_temp_c", 560.0))
     physics = _estimate_animation_physics(config, resolved, render_layout)
     active_velocity = float(physics["active_channel_velocity_m_s"])
     loop_velocity = float(physics["loop_pipe_velocity_m_s"])
     pool_velocity = float(physics["pool_circulation_velocity_m_s"])
 
-    checks = [
-        (
-            "physics::delta_t_reasonable",
-            60.0 <= delta_t <= 180.0,
-            f"Primary salt delta-T is {delta_t:.1f} C.",
-            "Primary salt delta-T should stay in a representative MSR design band.",
-        ),
-        (
+    checks.extend(
+        [
+            (
             "physics::active_channel_velocity_reasonable",
             1.0 <= active_velocity <= 12.0,
             f"Representative active-channel velocity is {active_velocity:.2f} m/s.",
             "Representative active-channel velocity should remain between 1 and 12 m/s.",
-        ),
-        (
+            ),
+            (
             "physics::loop_pipe_velocity_reasonable",
             1.0 <= loop_velocity <= 10.0,
             f"Limiting primary-loop pipe velocity is {loop_velocity:.2f} m/s.",
             "Limiting primary-loop pipe velocity should remain between 1 and 10 m/s.",
-        ),
-        (
+            ),
+            (
             "physics::pool_circulation_velocity_reasonable",
             0.02 <= pool_velocity <= 1.5,
             f"Representative pool recirculation velocity is {pool_velocity:.3f} m/s.",
             "Representative pool recirculation velocity should remain between 0.02 and 1.5 m/s.",
-        ),
-    ]
+            ),
+        ]
+    )
 
     return [
         {

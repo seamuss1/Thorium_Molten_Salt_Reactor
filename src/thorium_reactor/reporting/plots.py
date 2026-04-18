@@ -99,6 +99,71 @@ def generate_summary_plots(bundle, summary: dict[str, Any]) -> dict[str, str]:
                 )
                 assets["transient_fuel_temperature"] = str(fuel_path)
 
+    transient_sweep = summary.get("transient_sweep", {})
+    transient_sweep_path = _resolve_transient_sweep_path(bundle, transient_sweep)
+    if transient_sweep_path is not None:
+        try:
+            transient_sweep_payload = json.loads(transient_sweep_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            transient_sweep_payload = {}
+        sweep_history = transient_sweep_payload.get("history", [])
+        if isinstance(sweep_history, list) and sweep_history:
+            power_low = [
+                (float(item["time_s"]), float(item["power_fraction_p05"]))
+                for item in sweep_history
+                if isinstance(item, dict) and "time_s" in item and "power_fraction_p05" in item
+            ]
+            power_mid = [
+                (float(item["time_s"]), float(item["power_fraction_p50"]))
+                for item in sweep_history
+                if isinstance(item, dict) and "time_s" in item and "power_fraction_p50" in item
+            ]
+            power_high = [
+                (float(item["time_s"]), float(item["power_fraction_p95"]))
+                for item in sweep_history
+                if isinstance(item, dict) and "time_s" in item and "power_fraction_p95" in item
+            ]
+            if power_low and power_mid and power_high:
+                power_envelope_path = bundle.plots_dir / "transient_sweep_power_envelope.svg"
+                _write_uncertainty_band_chart_svg(
+                    lower_points=power_low,
+                    median_points=power_mid,
+                    upper_points=power_high,
+                    output_path=power_envelope_path,
+                    title=f"{summary['case']} transient sweep power envelope",
+                    x_label="Time (s)",
+                    y_label="Power fraction",
+                )
+                assets["transient_sweep_power_envelope"] = str(power_envelope_path)
+
+            fuel_low = [
+                (float(item["time_s"]), float(item["fuel_temp_c_p05"]))
+                for item in sweep_history
+                if isinstance(item, dict) and "time_s" in item and "fuel_temp_c_p05" in item
+            ]
+            fuel_mid = [
+                (float(item["time_s"]), float(item["fuel_temp_c_p50"]))
+                for item in sweep_history
+                if isinstance(item, dict) and "time_s" in item and "fuel_temp_c_p50" in item
+            ]
+            fuel_high = [
+                (float(item["time_s"]), float(item["fuel_temp_c_p95"]))
+                for item in sweep_history
+                if isinstance(item, dict) and "time_s" in item and "fuel_temp_c_p95" in item
+            ]
+            if fuel_low and fuel_mid and fuel_high:
+                fuel_envelope_path = bundle.plots_dir / "transient_sweep_fuel_temperature_envelope.svg"
+                _write_uncertainty_band_chart_svg(
+                    lower_points=fuel_low,
+                    median_points=fuel_mid,
+                    upper_points=fuel_high,
+                    output_path=fuel_envelope_path,
+                    title=f"{summary['case']} transient sweep fuel temperature envelope",
+                    x_label="Time (s)",
+                    y_label="Fuel temperature (C)",
+                )
+                assets["transient_sweep_fuel_temperature_envelope"] = str(fuel_envelope_path)
+
     return _update_plot_manifest(bundle.root / "plots_manifest.json", assets)
 
 
@@ -168,6 +233,18 @@ def _resolve_transient_path(bundle, transient: dict[str, Any]) -> Path | None:
     history_path = transient.get("history_path")
     if not isinstance(history_path, str):
         candidate = bundle.root / "transient.json"
+        return candidate if candidate.exists() else None
+    path = Path(history_path)
+    if path.exists():
+        return path
+    candidate = bundle.root / path.name
+    return candidate if candidate.exists() else None
+
+
+def _resolve_transient_sweep_path(bundle, transient_sweep: dict[str, Any]) -> Path | None:
+    history_path = transient_sweep.get("history_path")
+    if not isinstance(history_path, str):
+        candidate = bundle.root / "transient_sweep.json"
         return candidate if candidate.exists() else None
     path = Path(history_path)
     if path.exists():
@@ -333,6 +410,90 @@ def _write_xy_line_chart_svg(
   <line x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" stroke="#475569" stroke-width="1.5" />
   {''.join(grid_lines)}
   <polyline fill="none" stroke="#1d4ed8" stroke-width="3" points="{polyline_points}" />
+  <text x="{width / 2:.2f}" y="{height - 26}" text-anchor="middle" font-size="13" fill="#334155">{escape(x_label)}</text>
+  <text x="24" y="{height / 2:.2f}" text-anchor="middle" font-size="13" fill="#334155" transform="rotate(-90 24 {height / 2:.2f})">{escape(y_label)}</text>
+</svg>
+"""
+    output_path.write_text(svg, encoding="utf-8")
+
+
+def _write_uncertainty_band_chart_svg(
+    *,
+    lower_points: list[tuple[float, float]],
+    median_points: list[tuple[float, float]],
+    upper_points: list[tuple[float, float]],
+    output_path: Path,
+    title: str,
+    x_label: str,
+    y_label: str,
+) -> None:
+    if not lower_points or not median_points or not upper_points:
+        return
+
+    width = 960
+    height = 540
+    left = 90
+    right = 30
+    top = 70
+    bottom = 90
+    chart_width = width - left - right
+    chart_height = height - top - bottom
+
+    x_values = [point[0] for point in median_points]
+    y_values = [point[1] for point in lower_points + upper_points]
+    min_x = min(x_values)
+    max_x = max(x_values)
+    if math.isclose(min_x, max_x):
+        max_x = min_x + 1.0
+    x_span = max_x - min_x
+
+    min_value = min(y_values)
+    max_value = max(y_values)
+    if math.isclose(min_value, max_value):
+        if math.isclose(max_value, 0.0):
+            max_value = 1.0
+        else:
+            min_value = max_value - 0.01
+            max_value = max_value + 0.01
+    span = max_value - min_value
+
+    def value_to_y(value: float) -> float:
+        return top + ((max_value - value) / span) * chart_height
+
+    def value_to_x(value: float) -> float:
+        return left + ((value - min_x) / x_span) * chart_width
+
+    lower_polyline = " ".join(f"{value_to_x(x_value):.2f},{value_to_y(y_value):.2f}" for x_value, y_value in lower_points)
+    median_polyline = " ".join(f"{value_to_x(x_value):.2f},{value_to_y(y_value):.2f}" for x_value, y_value in median_points)
+    upper_polyline = " ".join(f"{value_to_x(x_value):.2f},{value_to_y(y_value):.2f}" for x_value, y_value in upper_points)
+    band_polygon = " ".join(
+        [
+            *(f"{value_to_x(x_value):.2f},{value_to_y(y_value):.2f}" for x_value, y_value in upper_points),
+            *(f"{value_to_x(x_value):.2f},{value_to_y(y_value):.2f}" for x_value, y_value in reversed(lower_points)),
+        ]
+    )
+
+    grid_lines: list[str] = []
+    for index in range(5):
+        grid_value = min_value + (span * index / 4.0)
+        grid_y = value_to_y(grid_value)
+        grid_lines.append(
+            f'<line x1="{left}" y1="{grid_y:.2f}" x2="{width - right}" y2="{grid_y:.2f}" stroke="#d7dce2" stroke-width="1" />'
+        )
+        grid_lines.append(
+            f'<text x="{left - 12}" y="{grid_y + 4:.2f}" text-anchor="end" font-size="12" fill="#5c6670">{_format_value(grid_value)}</text>'
+        )
+
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
+  <rect width="{width}" height="{height}" fill="#f8fafc" />
+  <text x="{left}" y="38" font-size="24" font-weight="700" fill="#0f172a">{escape(title)}</text>
+  <line x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" stroke="#475569" stroke-width="1.5" />
+  <line x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" stroke="#475569" stroke-width="1.5" />
+  {''.join(grid_lines)}
+  <polygon points="{band_polygon}" fill="#93c5fd" fill-opacity="0.42" />
+  <polyline fill="none" stroke="#60a5fa" stroke-width="2" points="{lower_polyline}" />
+  <polyline fill="none" stroke="#1d4ed8" stroke-width="3" points="{median_polyline}" />
+  <polyline fill="none" stroke="#60a5fa" stroke-width="2" points="{upper_polyline}" />
   <text x="{width / 2:.2f}" y="{height - 26}" text-anchor="middle" font-size="13" fill="#334155">{escape(x_label)}</text>
   <text x="24" y="{height / 2:.2f}" text-anchor="middle" font-size="13" fill="#334155" transform="rotate(-90 24 {height / 2:.2f})">{escape(y_label)}</text>
 </svg>

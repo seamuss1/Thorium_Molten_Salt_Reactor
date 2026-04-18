@@ -55,6 +55,7 @@ reactor validate example_pin
 reactor report example_pin
 reactor render tmsr_lf1_core
 reactor transient immersed_pool_reference --scenario partial_heat_sink_loss
+reactor transient-sweep immersed_pool_reference --scenario partial_heat_sink_loss --samples 2048 --prefer-gpu
 reactor moose immersed_pool_reference
 reactor scale tmsr_lf1_core
 ```
@@ -67,6 +68,7 @@ Command behavior:
 - `reactor report <case>` generates `report.md` from the latest or specified run bundle, including benchmark traceability scorecards when benchmark metadata is present.
 - `reactor render <case>` writes procedural geometry exports for visualization workflows, including OBJ, STL, watertight mesh validation JSON, a rendered PNG, animated GIF flow output, and MP4 video output when a case defines flow-animation paths and `ffmpeg` is available.
 - `reactor transient <case>` runs a reduced-order nodal transient proxy from the steady-state summary, writes `transient.json`, updates `summary.json`, and emits transient plots when the case defines transient scenarios.
+- `reactor transient-sweep <case>` runs an uncertainty ensemble around the reduced-order transient model, writes `transient_sweep.json`, updates `summary.json` with p50/p95 envelope metrics, and uses CuPy automatically when `--prefer-gpu` is supplied and a CUDA device is available.
 - `reactor moose <case>` exports a MOOSE/Cardinal-oriented proxy input deck from the current case and summary, and can optionally attempt execution with `--run-external`.
 - `reactor scale <case>` exports a SCALE-oriented proxy input deck from the current case and summary, and can optionally attempt execution with `--run-external`.
 
@@ -79,9 +81,10 @@ Each active run is written to `results/<case>/<run_id>/` and is expected to cont
 - `metrics.csv`
 - `validation.json` after validation
 - `report.md` after report generation
+- `transient.json` and/or `transient_sweep.json` when transient studies are run
 - benchmark traceability in `build_manifest.json` and `summary.json` when a case is linked to benchmark metadata
 - `openmc/` for solver XML and statepoints
-- `geometry/exports/` for SVG, OBJ, STL, watertight mesh validation, rendered PNG, and optional animated GIF or MP4 geometry exports
+- `geometry/exports/` for SVG, OBJ, STL, watertight mesh validation, GPU-friendly glTF + binary buffers, a Blender Cycles GPU script, rendered PNG, and optional animated GIF or MP4 geometry exports
 
 ## Validation Status
 
@@ -101,3 +104,13 @@ The repository now includes pragmatic integration hooks for MOOSE/Cardinal and S
 - generated reports surface those integration artifacts under an external integrations section.
 
 These hooks are export/runtime adapters, not full validated model translations. They are meant to give this repo a clean handoff path into external toolchains.
+
+## GPU Workflow
+
+The repository can now hand off both numerics and visualization to GPU-capable local tools without changing the core case format.
+
+- `reactor transient-sweep immersed_pool_reference --scenario partial_heat_sink_loss --samples 2048 --prefer-gpu` runs an uncertainty ensemble of reduced-order transients. It falls back to NumPy automatically when CuPy or a CUDA device is not available.
+- `reactor render immersed_pool_reference` now writes `*.gltf`, `*.bin`, and a `*_blender_gpu.py` helper script under `results/<case>/<run_id>/geometry/exports/`.
+- Run the generated Blender helper with `blender --background --python results/<case>/<run_id>/geometry/exports/<case>_blender_gpu.py` to get a Cycles render that prefers GPU backends such as OptiX, CUDA, HIP, Metal, or oneAPI when Blender exposes them.
+
+This GPU path accelerates the reduced-order transient ensemble and the final photorealistic render. The OpenMC solver path remains a separate runtime concern and can still be handed off through the existing Docker or external-code integrations.

@@ -6,12 +6,13 @@ from dataclasses import dataclass
 from math import cos, pi, sin
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 import time
 from typing import Any
 
-from PIL import Image, ImageColor, ImageDraw, ImageFilter
+from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageFont
 
 
 SVG_COLORS = {
@@ -38,6 +39,91 @@ MATERIAL_STYLES = {
     "void": {"fill": "#f6f7fb", "edge": "#f6f7fb", "glow": "#ffffff"},
 }
 
+GLTF_MATERIALS = {
+    "default": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.67, 0.73, 0.80, 1.0],
+            "metallicFactor": 0.18,
+            "roughnessFactor": 0.52,
+        },
+        "name": "default",
+    },
+    "fuel_salt": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.956, 0.635, 0.349, 0.82],
+            "metallicFactor": 0.02,
+            "roughnessFactor": 0.18,
+        },
+        "emissiveFactor": [0.56, 0.21, 0.05],
+        "alphaMode": "BLEND",
+        "doubleSided": True,
+        "name": "fuel_salt",
+    },
+    "coolant_salt": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.31, 0.47, 0.77, 0.56],
+            "metallicFactor": 0.02,
+            "roughnessFactor": 0.14,
+        },
+        "emissiveFactor": [0.03, 0.09, 0.20],
+        "alphaMode": "BLEND",
+        "doubleSided": True,
+        "name": "coolant_salt",
+    },
+    "graphite": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.16, 0.18, 0.22, 1.0],
+            "metallicFactor": 0.02,
+            "roughnessFactor": 0.86,
+        },
+        "name": "graphite",
+    },
+    "graphite_shell": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.23, 0.27, 0.33, 1.0],
+            "metallicFactor": 0.02,
+            "roughnessFactor": 0.82,
+        },
+        "name": "graphite_shell",
+    },
+    "pipe": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.57, 0.64, 0.73, 1.0],
+            "metallicFactor": 0.58,
+            "roughnessFactor": 0.26,
+        },
+        "name": "pipe",
+    },
+    "insulation": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.95, 0.96, 0.98, 1.0],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.88,
+        },
+        "name": "insulation",
+    },
+    "air": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.73, 0.90, 0.98, 0.09],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.04,
+        },
+        "alphaMode": "BLEND",
+        "doubleSided": True,
+        "name": "air",
+    },
+    "void": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [1.0, 1.0, 1.0, 0.03],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.02,
+        },
+        "alphaMode": "BLEND",
+        "doubleSided": True,
+        "name": "void",
+    },
+}
+
 CUTAWAY_START = pi / 7.0
 CUTAWAY_STOP = 2.0 * pi - pi / 5.0
 RENDER_SIZE = (1800, 1400)
@@ -51,15 +137,26 @@ class SolidMesh:
     faces: list[tuple[int, int, int]]
 
 
-def export_geometry(description: dict[str, Any], output_dir: Path) -> dict[str, str]:
+def export_geometry(
+    description: dict[str, Any],
+    output_dir: Path,
+    *,
+    summary: dict[str, Any] | None = None,
+    validation: dict[str, Any] | None = None,
+) -> dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=True)
     svg_path = output_dir / f"{description['name']}.svg"
     obj_path = output_dir / f"{description['name']}.obj"
     stl_path = output_dir / f"{description['name']}.stl"
+    gltf_path = output_dir / f"{description['name']}.gltf"
     png_path = output_dir / f"{description['name']}.png"
+    hero_cutaway_path = output_dir / f"{description['name']}_hero_cutaway.png"
+    annotated_cutaway_path = output_dir / f"{description['name']}_annotated_cutaway.png"
+    physics_overlay_path = output_dir / f"{description['name']}_physics_overlay.png"
     mesh_validation_path = output_dir / f"{description['name']}_mesh_validation.json"
     gif_path = output_dir / f"{description['name']}.gif"
     mp4_path = output_dir / f"{description['name']}.mp4"
+    blender_script_path = output_dir / f"{description['name']}_blender_gpu.py"
 
     svg_path.write_text(render_svg(description), encoding="utf-8")
     obj_path.write_text(render_obj(description), encoding="utf-8")
@@ -75,9 +172,26 @@ def export_geometry(description: dict[str, Any], output_dir: Path) -> dict[str, 
         "stl": str(stl_path),
         "mesh_validation": str(mesh_validation_path),
     }
+    rendered_gltf = render_gltf(description, gltf_path)
+    if rendered_gltf is not None:
+        assets["gltf"] = str(rendered_gltf)
+        gltf_bin_path = rendered_gltf.with_suffix(".bin")
+        if gltf_bin_path.exists():
+            assets["gltf_bin"] = str(gltf_bin_path)
+        blender_script = render_blender_gpu_script(description, rendered_gltf, blender_script_path)
+        if blender_script is not None:
+            assets["blender_gpu_script"] = str(blender_script)
     rendered_png = render_png(description, png_path)
     if rendered_png is not None:
         assets["png"] = str(rendered_png)
+        with Image.open(rendered_png) as base_image:
+            hero_image = base_image.convert("RGB")
+        hero_image.save(hero_cutaway_path)
+        assets["hero_cutaway"] = str(hero_cutaway_path)
+        _render_annotated_cutaway(hero_image.copy(), annotated_cutaway_path, summary or {}, validation or {})
+        _render_physics_overlay(hero_image.copy(), physics_overlay_path, summary or {}, validation or {})
+        assets["annotated_cutaway"] = str(annotated_cutaway_path)
+        assets["physics_overlay"] = str(physics_overlay_path)
     rendered_gif = render_gif(description, gif_path)
     if rendered_gif is not None:
         assets["gif"] = str(rendered_gif)
@@ -206,6 +320,122 @@ def render_mp4(description: dict[str, Any], output_path: Path) -> Path | None:
     finally:
         _cleanup_directory(frames_root)
     return None
+
+
+def _render_annotated_cutaway(
+    image: Image.Image,
+    output_path: Path,
+    summary: dict[str, Any],
+    validation: dict[str, Any],
+) -> None:
+    lines = _build_annotation_lines(summary, validation)
+    _draw_information_panel(
+        image,
+        title="Annotated cutaway",
+        subtitle="State-linked reactor overview",
+        lines=lines,
+        accent="#f4a259",
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(output_path)
+
+
+def _render_physics_overlay(
+    image: Image.Image,
+    output_path: Path,
+    summary: dict[str, Any],
+    validation: dict[str, Any],
+) -> None:
+    lines = _build_physics_overlay_lines(summary, validation)
+    _draw_information_panel(
+        image,
+        title="Physics overlay",
+        subtitle="Summary, validity, and benchmark state",
+        lines=lines,
+        accent="#4f78c4",
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(output_path)
+
+
+def _build_annotation_lines(summary: dict[str, Any], validation: dict[str, Any]) -> list[str]:
+    validity = summary.get("model_validity", {})
+    reduced_order = summary.get("flow", {}).get("reduced_order", {})
+    active_flow = reduced_order.get("active_flow", {})
+    lines = [
+        f"Case: {summary.get('case', 'unknown')}",
+        f"Validity: {validity.get('status', 'unknown')}",
+        f"Active flow area: {active_flow.get('total_flow_area_cm2', 'n/a')} cm2",
+        f"Velocity: {active_flow.get('representative_velocity_m_s', 'n/a')} m/s",
+        f"Residence time: {active_flow.get('representative_residence_time_s', 'n/a')} s",
+        f"Traceability: {summary.get('benchmark_traceability', {}).get('traceability_score', 'n/a')}",
+        f"Validation maturity: {summary.get('validation_maturity', {}).get('validation_maturity_score', 'n/a')}",
+    ]
+    failed_names = [check.get("name", "") for check in validation.get("checks", []) if check.get("status") == "fail"]
+    if failed_names:
+        lines.append("Failed checks:")
+        lines.extend(f"- {name}" for name in failed_names[:4])
+    return lines
+
+
+def _build_physics_overlay_lines(summary: dict[str, Any], validation: dict[str, Any]) -> list[str]:
+    bop = summary.get("bop", {})
+    reduced_order = summary.get("flow", {}).get("reduced_order", {})
+    active_flow = reduced_order.get("active_flow", {})
+    primary_system = summary.get("primary_system", {})
+    hydraulics = primary_system.get("loop_hydraulics", {})
+    checks = validation.get("checks", [])
+    pass_count = sum(1 for check in checks if check.get("status") == "pass")
+    fail_count = sum(1 for check in checks if check.get("status") == "fail")
+    lines = [
+        f"Primary mass flow: {bop.get('primary_mass_flow_kg_s', 'n/a')} kg/s",
+        f"Primary delta-T: {bop.get('primary_delta_t_c', 'n/a')} C",
+        f"Active channels: {active_flow.get('channel_count', 'n/a')}",
+        f"Stagnant channels: {reduced_order.get('stagnant_inventory', {}).get('channel_count', 'n/a')}",
+        f"Pump head: {hydraulics.get('pump_head_m', 'n/a')} m",
+        f"HX area: {primary_system.get('heat_exchanger', {}).get('required_area_m2', 'n/a')} m2",
+        f"Validation pass/fail: {pass_count}/{fail_count}",
+    ]
+    failed_messages = summary.get("model_validity", {}).get("failed_messages", [])
+    if failed_messages:
+        lines.append("Model limits:")
+        lines.extend(f"- {message}" for message in failed_messages[:3])
+    return lines
+
+
+def _draw_information_panel(
+    image: Image.Image,
+    *,
+    title: str,
+    subtitle: str,
+    lines: list[str],
+    accent: str,
+) -> None:
+    draw = ImageDraw.Draw(image, "RGBA")
+    font = ImageFont.load_default()
+    x0 = int(image.width * 0.62)
+    y0 = int(image.height * 0.08)
+    x1 = image.width - 40
+    y1 = image.height - 40
+    draw.rounded_rectangle(
+        (x0, y0, x1, y1),
+        radius=26,
+        fill=(16, 20, 27, 208),
+        outline=ImageColor.getrgb(accent),
+        width=3,
+    )
+    draw.rectangle((x0, y0, x1, y0 + 12), fill=ImageColor.getrgb(accent))
+    draw.text((x0 + 24, y0 + 28), title, fill="#ffffff", font=font)
+    draw.text((x0 + 24, y0 + 52), subtitle, fill="#cbd5e1", font=font)
+
+    cursor_y = y0 + 96
+    line_height = 22
+    for line in lines[:18]:
+        if line.startswith("- "):
+            draw.text((x0 + 38, cursor_y), line, fill="#f8fafc", font=font)
+        else:
+            draw.text((x0 + 24, cursor_y), line, fill="#f8fafc", font=font)
+        cursor_y += line_height
 
 
 def _resolve_ffmpeg_binary() -> str | None:
@@ -1190,3 +1420,414 @@ def _maybe_glow(hex_color: str, material: str, alpha: int) -> tuple[int, int, in
         return None
     red, green, blue = ImageColor.getrgb(hex_color)
     return (red, green, blue, alpha)
+
+
+def render_gltf(description: dict[str, Any], output_path: Path) -> Path | None:
+    solids = _collect_export_solids(description)
+    if not solids:
+        return None
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sides = 64 if description.get("type") == "detailed_molten_salt_reactor" else 40
+    materials, material_lookup = _build_gltf_materials()
+
+    binary = bytearray()
+    buffer_views: list[dict[str, Any]] = []
+    accessors: list[dict[str, Any]] = []
+    meshes: list[dict[str, Any]] = []
+    nodes: list[dict[str, Any]] = []
+
+    for solid in solids:
+        material_name = str(solid.get("material") or "default")
+        mesh = _build_solid_mesh(solid, sides=sides)
+        if mesh is None:
+            continue
+        primitive = _build_gltf_primitive(binary, buffer_views, accessors, mesh)
+        primitive["material"] = material_lookup.get(material_name, material_lookup["default"])
+        meshes.append({"name": mesh.name, "primitives": [primitive]})
+        nodes.append({"name": mesh.name, "mesh": len(meshes) - 1})
+
+    if not meshes:
+        return None
+
+    _pad_binary(binary)
+    binary_path = output_path.with_suffix(".bin")
+    binary_path.write_bytes(bytes(binary))
+
+    scene_extras = _build_gltf_scene_extras(description, solids)
+    payload = {
+        "asset": {
+            "version": "2.0",
+            "generator": "thorium-reactor procedural exporter",
+        },
+        "scene": 0,
+        "scenes": [
+            {
+                "name": str(description.get("name", "reactor_scene")),
+                "nodes": list(range(len(nodes))),
+                "extras": scene_extras,
+            }
+        ],
+        "nodes": nodes,
+        "meshes": meshes,
+        "materials": materials,
+        "buffers": [
+            {
+                "byteLength": len(binary),
+                "uri": binary_path.name,
+            }
+        ],
+        "bufferViews": buffer_views,
+        "accessors": accessors,
+    }
+    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return output_path
+
+
+def render_blender_gpu_script(
+    description: dict[str, Any],
+    gltf_path: Path,
+    output_path: Path,
+) -> Path | None:
+    if not gltf_path.exists():
+        return None
+
+    case_name = str(description.get("name", "reactor_scene"))
+    script = f'''# Auto-generated by thorium-reactor.
+# Run with: blender --background --python "{output_path.name}"
+
+import bpy
+from mathutils import Vector
+from pathlib import Path
+
+CASE_NAME = {case_name!r}
+EXPORTS_DIR = Path(__file__).resolve().parent
+GLTF_PATH = EXPORTS_DIR / {gltf_path.name!r}
+OUTPUT_PATH = EXPORTS_DIR / {case_name + '_cycles.png'!r}
+
+
+def clear_scene() -> None:
+    bpy.ops.object.select_all(action="SELECT")
+    bpy.ops.object.delete(use_global=False)
+    for datablocks in (bpy.data.meshes, bpy.data.materials, bpy.data.images, bpy.data.cameras, bpy.data.lights):
+        for block in list(datablocks):
+            if block.users == 0:
+                datablocks.remove(block)
+
+
+def enable_gpu() -> str:
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = 256
+    scene.cycles.use_adaptive_sampling = True
+    scene.cycles.use_denoising = True
+    scene.cycles.device = "CPU"
+
+    try:
+        prefs = bpy.context.preferences.addons["cycles"].preferences
+        prefs.get_devices()
+        for compute_type in ("OPTIX", "CUDA", "HIP", "METAL", "ONEAPI"):
+            try:
+                prefs.compute_device_type = compute_type
+                prefs.get_devices()
+                accelerated = False
+                for device in getattr(prefs, "devices", []):
+                    device.use = True
+                    if getattr(device, "type", "CPU") != "CPU":
+                        accelerated = True
+                if accelerated:
+                    scene.cycles.device = "GPU"
+                    return compute_type
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return "CPU"
+
+
+def set_world() -> None:
+    world = bpy.data.worlds.get("World")
+    if world is None:
+        world = bpy.data.worlds.new("World")
+    bpy.context.scene.world = world
+    world.use_nodes = True
+    background = world.node_tree.nodes.get("Background")
+    if background is not None:
+        background.inputs[0].default_value = (0.012, 0.020, 0.030, 1.0)
+        background.inputs[1].default_value = 0.75
+
+
+def scene_bounds() -> tuple[Vector, Vector]:
+    mesh_objects = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
+    if not mesh_objects:
+        return Vector((-1.0, -1.0, -1.0)), Vector((1.0, 1.0, 1.0))
+    coords = []
+    for obj in mesh_objects:
+        for corner in obj.bound_box:
+            coords.append(obj.matrix_world @ Vector(corner))
+    min_corner = Vector((min(p.x for p in coords), min(p.y for p in coords), min(p.z for p in coords)))
+    max_corner = Vector((max(p.x for p in coords), max(p.y for p in coords), max(p.z for p in coords)))
+    return min_corner, max_corner
+
+
+def look_at(obj, target: Vector) -> None:
+    direction = target - obj.location
+    if direction.length == 0:
+        return
+    obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+
+
+def add_area_light(name: str, location: Vector, target: Vector, *, energy: float, size: float) -> None:
+    light_data = bpy.data.lights.new(name=name, type="AREA")
+    light_data.energy = energy
+    light_data.shape = "DISK"
+    light_data.size = size
+    light_object = bpy.data.objects.new(name, light_data)
+    bpy.context.collection.objects.link(light_object)
+    light_object.location = location
+    look_at(light_object, target)
+
+
+def setup_camera_and_lights() -> None:
+    min_corner, max_corner = scene_bounds()
+    center = (min_corner + max_corner) * 0.5
+    extent = max((max_corner - min_corner).length, 1.0)
+
+    bpy.ops.object.camera_add(location=(center.x + extent * 1.45, center.y - extent * 1.2, center.z + extent * 0.72))
+    camera = bpy.context.object
+    camera.data.lens = 46
+    camera.data.dof.use_dof = True
+    camera.data.dof.focus_distance = max((center - camera.location).length, 0.1)
+    look_at(camera, center)
+    bpy.context.scene.camera = camera
+
+    add_area_light(
+        "KeyLight",
+        Vector((center.x + extent * 1.6, center.y - extent * 1.8, center.z + extent * 1.2)),
+        center,
+        energy=7000.0,
+        size=extent * 0.45,
+    )
+    add_area_light(
+        "FillLight",
+        Vector((center.x - extent * 1.1, center.y + extent * 0.7, center.z + extent * 0.8)),
+        center,
+        energy=2600.0,
+        size=extent * 0.7,
+    )
+    add_area_light(
+        "RimLight",
+        Vector((center.x - extent * 0.4, center.y - extent * 1.6, center.z + extent * 1.5)),
+        center,
+        energy=1900.0,
+        size=extent * 0.55,
+    )
+
+
+def configure_render() -> None:
+    scene = bpy.context.scene
+    scene.render.resolution_x = 1920
+    scene.render.resolution_y = 1080
+    scene.render.film_transparent = False
+    scene.cycles.max_bounces = 10
+    scene.cycles.diffuse_bounces = 4
+    scene.cycles.glossy_bounces = 4
+    scene.cycles.transparent_max_bounces = 10
+    scene.render.filepath = str(OUTPUT_PATH)
+
+
+clear_scene()
+set_world()
+bpy.ops.import_scene.gltf(filepath=str(GLTF_PATH))
+backend = enable_gpu()
+setup_camera_and_lights()
+configure_render()
+print(f"Rendering {{CASE_NAME}} with backend: {{backend}}")
+bpy.ops.render.render(write_still=True)
+print(f"Saved render to {{OUTPUT_PATH}}")
+'''
+    output_path.write_text(script, encoding="utf-8")
+    return output_path
+
+
+def _build_gltf_materials() -> tuple[list[dict[str, Any]], dict[str, int]]:
+    materials: list[dict[str, Any]] = []
+    lookup: dict[str, int] = {}
+    for material_name, payload in GLTF_MATERIALS.items():
+        lookup[material_name] = len(materials)
+        materials.append(json.loads(json.dumps(payload)))
+    return materials, lookup
+
+
+def _build_gltf_primitive(
+    binary: bytearray,
+    buffer_views: list[dict[str, Any]],
+    accessors: list[dict[str, Any]],
+    mesh: SolidMesh,
+) -> dict[str, Any]:
+    positions, normals, indices, minima, maxima = _flatten_mesh_for_gltf(mesh)
+    position_accessor = _append_float_accessor(
+        binary,
+        buffer_views,
+        accessors,
+        positions,
+        accessor_type="VEC3",
+        minima=minima,
+        maxima=maxima,
+    )
+    normal_accessor = _append_float_accessor(
+        binary,
+        buffer_views,
+        accessors,
+        normals,
+        accessor_type="VEC3",
+    )
+    index_accessor = _append_uint_accessor(
+        binary,
+        buffer_views,
+        accessors,
+        indices,
+    )
+    return {
+        "attributes": {
+            "POSITION": position_accessor,
+            "NORMAL": normal_accessor,
+        },
+        "indices": index_accessor,
+        "mode": 4,
+    }
+
+
+def _flatten_mesh_for_gltf(
+    mesh: SolidMesh,
+) -> tuple[list[float], list[float], list[int], list[float], list[float]]:
+    positions: list[float] = []
+    normals: list[float] = []
+    indices: list[int] = []
+    minima = [float("inf"), float("inf"), float("inf")]
+    maxima = [float("-inf"), float("-inf"), float("-inf")]
+    vertex_index = 0
+
+    for a_index, b_index, c_index in mesh.faces:
+        source_a = mesh.vertices[a_index]
+        source_b = mesh.vertices[b_index]
+        source_c = mesh.vertices[c_index]
+        vertices = [
+            _to_gltf_coords(source_a),
+            _to_gltf_coords(source_b),
+            _to_gltf_coords(source_c),
+        ]
+        normal = _to_gltf_normal(_triangle_normal(source_a, source_b, source_c))
+        for vertex in vertices:
+            positions.extend(vertex)
+            for axis, value in enumerate(vertex):
+                minima[axis] = min(minima[axis], value)
+                maxima[axis] = max(maxima[axis], value)
+        normals.extend((*normal, *normal, *normal))
+        indices.extend((vertex_index, vertex_index + 1, vertex_index + 2))
+        vertex_index += 3
+
+    return positions, normals, indices, minima, maxima
+
+
+def _append_float_accessor(
+    binary: bytearray,
+    buffer_views: list[dict[str, Any]],
+    accessors: list[dict[str, Any]],
+    values: list[float],
+    *,
+    accessor_type: str,
+    minima: list[float] | None = None,
+    maxima: list[float] | None = None,
+) -> int:
+    _pad_binary(binary)
+    byte_offset = len(binary)
+    binary.extend(struct.pack(f"<{len(values)}f", *values))
+    buffer_view_index = len(buffer_views)
+    buffer_views.append(
+        {
+            "buffer": 0,
+            "byteOffset": byte_offset,
+            "byteLength": len(binary) - byte_offset,
+        }
+    )
+    accessor_index = len(accessors)
+    accessor: dict[str, Any] = {
+        "bufferView": buffer_view_index,
+        "componentType": 5126,
+        "count": len(values) // _accessor_width(accessor_type),
+        "type": accessor_type,
+    }
+    if minima is not None:
+        accessor["min"] = minima
+    if maxima is not None:
+        accessor["max"] = maxima
+    accessors.append(accessor)
+    return accessor_index
+
+
+def _append_uint_accessor(
+    binary: bytearray,
+    buffer_views: list[dict[str, Any]],
+    accessors: list[dict[str, Any]],
+    values: list[int],
+) -> int:
+    _pad_binary(binary)
+    byte_offset = len(binary)
+    binary.extend(struct.pack(f"<{len(values)}I", *values))
+    buffer_view_index = len(buffer_views)
+    buffer_views.append(
+        {
+            "buffer": 0,
+            "byteOffset": byte_offset,
+            "byteLength": len(binary) - byte_offset,
+        }
+    )
+    accessor_index = len(accessors)
+    accessors.append(
+        {
+            "bufferView": buffer_view_index,
+            "componentType": 5125,
+            "count": len(values),
+            "type": "SCALAR",
+        }
+    )
+    return accessor_index
+
+
+def _accessor_width(accessor_type: str) -> int:
+    return {
+        "SCALAR": 1,
+        "VEC2": 2,
+        "VEC3": 3,
+        "VEC4": 4,
+    }.get(accessor_type, 1)
+
+
+def _pad_binary(binary: bytearray) -> None:
+    while len(binary) % 4:
+        binary.append(0)
+
+
+def _to_gltf_coords(vertex: tuple[float, float, float]) -> tuple[float, float, float]:
+    x_value, y_value, z_value = vertex
+    return (x_value * 0.01, z_value * 0.01, -y_value * 0.01)
+
+
+def _to_gltf_normal(normal: tuple[float, float, float]) -> tuple[float, float, float]:
+    x_value, y_value, z_value = normal
+    return (x_value, z_value, -y_value)
+
+
+def _build_gltf_scene_extras(description: dict[str, Any], solids: list[dict[str, Any]]) -> dict[str, Any]:
+    bounds = _compute_scene_bounds(solids)
+    animation = description.get("animation")
+    animation_path_count = 0
+    if isinstance(animation, dict):
+        animation_path_count = len(animation.get("paths", []))
+    return {
+        "source_type": str(description.get("type", "unknown")),
+        "render_layout": description.get("render_layout"),
+        "animation_path_count": animation_path_count,
+        "bounds_cm": {key: round(float(value), 6) for key, value in bounds.items()},
+    }

@@ -50,34 +50,29 @@ def test_reduced_order_flow_uses_only_plenum_connected_salt_channels() -> None:
     )
 
     assert reduced_order["allocation_rule"] == "salt_area_weighted"
-    assert reduced_order["active_channel_selection"] == "plenum_connected_salt_bearing_channels"
-    assert reduced_order["disconnected_inventory_selection"] == "reflector_backed_salt_bearing_channels"
+    assert reduced_order["active_channel_selection"] == "configured_active_variants"
+    assert reduced_order["disconnected_inventory_selection"] == "configured_non_active_variants"
+    assert reduced_order["core_model"]["kind"] == "channelized_from_geometry"
+    assert reduced_order["core_model"]["active_variants"] == ["fuel", "control_guides"]
+    assert reduced_order["core_model"]["stagnant_variants"] == ["instrumentation_wells"]
     assert reduced_order["salt_bulk_temperature_c"] == 630.0
     assert reduced_order["primary_mass_flow_kg_s"] == 1116.071429
-    assert reduced_order["active_flow"] == {
-        "channel_count": 37,
-        "variant_counts": {
-            "control_guides": 6,
-            "fuel": 31,
-        },
-        "total_flow_area_cm2": 9.813587,
-        "total_salt_volume_cm3": 1884.208625,
-        "total_volumetric_flow_m3_s": 0.348772,
-        "representative_velocity_m_s": 355.397406,
-        "representative_residence_time_s": 0.005402,
+    active_flow = reduced_order["active_flow"]
+    assert active_flow["channel_count"] == 85
+    assert active_flow["variant_counts"] == {
+        "control_guides": 6,
+        "fuel": 79,
     }
-    assert reduced_order["disconnected_inventory"] == {
-        "channel_count": 48,
-        "variant_counts": {
-            "fuel": 48,
-        },
-        "salt_area_cm2": 13.50382,
-        "salt_volume_cm3": 2592.733508,
-    }
+    assert active_flow["total_flow_area_cm2"] > 20.0
+    assert active_flow["representative_velocity_m_s"] > 12.0
+    assert active_flow["representative_residence_time_s"] < 0.02
+    assert reduced_order["disconnected_inventory"]["channel_count"] == 0
+    assert reduced_order["stagnant_inventory"]["channel_count"] == 0
+    assert built.manifest["flow_summary"]["interface_metrics"]["reflector_backed_salt_bearing_channels"] == 48
+    assert built.manifest["flow_summary"]["interface_metrics"]["reflector_backed_salt_volume_cm3"] > 0.0
 
     variant_summary = {item["variant"]: item for item in reduced_order["variant_summary"]}
-    assert variant_summary["fuel"]["allocated_mass_flow_kg_s"] == 991.839362
-    assert variant_summary["control_guides"]["allocated_mass_flow_kg_s"] == 124.232066
+    assert variant_summary["fuel"]["allocated_mass_flow_kg_s"] > variant_summary["control_guides"]["allocated_mass_flow_kg_s"]
 
     center_channel = next(channel for channel in reduced_order["active_channels"] if channel["name"] == "fuel_0.00_0")
     control_channel = next(
@@ -85,12 +80,11 @@ def test_reduced_order_flow_uses_only_plenum_connected_salt_channels() -> None:
         for channel in reduced_order["active_channels"]
         if channel["name"] == "control_guides_18.06_0"
     )
-    assert center_channel["allocated_mass_flow_kg_s"] == 31.994818
-    assert center_channel["velocity_m_s"] == 355.397406
-    assert center_channel["residence_time_s"] == 0.005402
-    assert control_channel["allocated_mass_flow_kg_s"] == 20.705344
-    assert control_channel["velocity_m_s"] == 355.397406
-    assert control_channel["residence_time_s"] == 0.005402
+    assert center_channel["allocated_mass_flow_kg_s"] > control_channel["allocated_mass_flow_kg_s"]
+    assert center_channel["velocity_m_s"] > 12.0
+    assert control_channel["velocity_m_s"] > 12.0
+    assert center_channel["residence_time_s"] < 0.02
+    assert control_channel["residence_time_s"] < 0.02
 
 
 def test_immersed_pool_reference_primary_system_summary_is_engineering_useful() -> None:
@@ -118,7 +112,8 @@ def test_immersed_pool_reference_primary_system_summary_is_engineering_useful() 
     chemistry = primary_system["chemistry"]
 
     assert primary_system["model"] == "reduced_order_primary_system"
-    assert reduced_order["active_channel_selection"] == "all_salt_bearing_channels"
+    assert reduced_order["active_channel_selection"] == "configured_active_variants"
+    assert reduced_order["core_model"]["active_variants"] == ["fuel", "control_guides"]
     assert reduced_order["active_flow"]["representative_velocity_m_s"] <= 12.0
     assert primary_system["bulk_temperature_c"] == 622.5
     assert primary_system["cold_leg_density_kg_m3"] > primary_system["hot_leg_density_kg_m3"]

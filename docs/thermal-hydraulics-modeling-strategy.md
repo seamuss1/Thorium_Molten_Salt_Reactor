@@ -13,8 +13,8 @@ This note defines a practical analysis ladder for this repository's molten-salt 
 
 The repository already contains two useful first-pass pieces:
 
-- a reduced-order whole-loop hydraulic summary in [src/thorium_reactor/flow/primary_system.py](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/src/thorium_reactor/flow/primary_system.py),
-- and a reduced-order channel allocation model in [src/thorium_reactor/flow/reduced_order.py](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/src/thorium_reactor/flow/reduced_order.py).
+- a reduced-order whole-loop hydraulic summary in [src/thorium_reactor/flow/primary_system.py](../src/thorium_reactor/flow/primary_system.py),
+- and a reduced-order channel allocation model in [src/thorium_reactor/flow/reduced_order.py](../src/thorium_reactor/flow/reduced_order.py).
 
 Those models are appropriate for early budgeting of:
 
@@ -25,6 +25,12 @@ Those models are appropriate for early budgeting of:
 - and inventory estimates.
 
 They should be treated as the first rung in the stack, not the final thermal-hydraulics architecture.
+
+The current repo now makes a clearer split between:
+
+- rendered geometry and inventory classification,
+- channelized screening hydraulics driven by explicit `flow.core_model` membership,
+- and future homogenized-core inputs for cases where source-backed porous/LTNE data is available.
 
 ## Fluid Governing Equations
 

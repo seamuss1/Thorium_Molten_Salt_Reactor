@@ -31,6 +31,11 @@ from thorium_reactor.geometry.molten_salt_reactor import (
     build_msr_invariants,
     resolve_msr_geometry,
 )
+from thorium_reactor.modeling import (
+    case_uses_thorium_fuel,
+    fuel_salt_has_thorium,
+    get_model_representation,
+)
 from thorium_reactor.neutronics.openmc_compat import openmc
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot
 
@@ -41,6 +46,151 @@ class BuiltCase:
     geometry_description: dict[str, Any]
     model: Any | None
     benchmark: dict[str, Any]
+
+
+def _json_copy(payload: Any) -> Any:
+    return json.loads(json.dumps(payload))
+
+
+def _invariant_checks_to_status_checks(invariants: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": str(item["name"]),
+            "status": "pass" if item.get("passed") else "fail",
+            "message": str(item.get("message", "")),
+        }
+        for item in invariants
+    ]
+
+
+def _merge_checks(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    positions: dict[str, int] = {}
+    for group in groups:
+        for check in group:
+            name = str(check["name"])
+            normalized = {
+                "name": name,
+                "status": str(check.get("status", "pending")),
+                "message": str(check.get("message", "")),
+            }
+            if name in positions:
+                merged[positions[name]] = normalized
+            else:
+                positions[name] = len(merged)
+                merged.append(normalized)
+    return merged
+
+
+def _summarize_model_validity(checks: list[dict[str, Any]]) -> dict[str, Any]:
+    passed_count = sum(1 for check in checks if check["status"] == "pass")
+    failed = [check for check in checks if check["status"] == "fail"]
+    pending_count = sum(1 for check in checks if check["status"] == "pending")
+    return {
+        "status": "valid" if not failed else "invalid",
+        "passed": not failed,
+        "check_count": len(checks),
+        "passed_count": passed_count,
+        "failed_count": len(failed),
+        "pending_count": pending_count,
+        "failed_check_names": [check["name"] for check in failed],
+        "failed_messages": [check["message"] for check in failed if check.get("message")],
+        "checks": checks,
+    }
+
+
+def _build_core_screening_checks(config: CaseConfig, reduced_order_flow: dict[str, Any]) -> list[dict[str, Any]]:
+    active_flow = reduced_order_flow.get("active_flow", {})
+    active_area_cm2 = float(active_flow.get("total_flow_area_cm2", 0.0))
+    representative_velocity_m_s = float(active_flow.get("representative_velocity_m_s", 0.0))
+    representative_residence_time_s = float(active_flow.get("representative_residence_time_s", 0.0))
+    return [
+        {
+            "name": "physics::active_flow_area_positive",
+            "status": "pass" if active_area_cm2 > 0.0 else "fail",
+            "message": (
+                f"Active flow area is {active_area_cm2:.6f} cm2."
+                if active_area_cm2 > 0.0
+                else "Active flow area must remain positive."
+            ),
+        },
+        {
+            "name": "physics::active_channel_velocity_reasonable",
+            "status": "pass" if 1.0 <= representative_velocity_m_s <= 12.0 else "fail",
+            "message": (
+                f"Representative active-channel velocity is {representative_velocity_m_s:.2f} m/s."
+                if 1.0 <= representative_velocity_m_s <= 12.0
+                else "Representative active-channel velocity should stay between 1 and 12 m/s for this screening model."
+            ),
+        },
+        {
+            "name": "physics::active_channel_residence_time_reasonable",
+            "status": "pass" if 0.02 <= representative_residence_time_s <= 60.0 else "fail",
+            "message": (
+                f"Representative active-channel residence time is {representative_residence_time_s:.6f} s."
+                if 0.02 <= representative_residence_time_s <= 60.0
+                else "Representative active-channel residence time should stay between 0.02 and 60 s for this screening model."
+            ),
+        },
+    ]
+
+
+def _build_validation_result(
+    config: CaseConfig,
+    manifest: dict[str, Any],
+    summary: dict[str, Any],
+    benchmark: dict[str, Any] | None = None,
+    provenance: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+    metrics = summary.get("metrics", {})
+    for name, target in config.validation_targets.items():
+        checks.append(_evaluate_target(name, target, metrics, manifest))
+    checks = _merge_checks(
+        checks,
+        manifest.get("model_validity", {}).get("checks", []),
+        summary.get("model_validity", {}).get("checks", []),
+    )
+    if benchmark:
+        checks = _merge_checks(
+            checks,
+            [
+                {
+                    "name": "benchmark_metadata_loaded",
+                    "status": "pass",
+                    "message": benchmark.get("title", "Loaded benchmark metadata"),
+                }
+            ],
+        )
+    result = {
+        "case": config.name,
+        "checks": checks,
+        "passed": all(check["status"] == "pass" for check in checks),
+    }
+    if provenance:
+        result["provenance"] = _json_copy(provenance)
+    return result
+
+
+def _build_visualization_state(bundle, *, assets: dict[str, str] | None = None) -> dict[str, Any]:
+    geometry_description_path = bundle.root / "geometry_description.json"
+    render_assets_path = bundle.root / "render_assets.json"
+    summary_path = bundle.root / "summary.json"
+    validation_path = bundle.root / "validation.json"
+    state = {
+        "geometry_description_path": str(geometry_description_path),
+        "summary_path": str(summary_path),
+        "validation_path": str(validation_path),
+        "render_assets_path": str(render_assets_path),
+        "has_geometry_description": geometry_description_path.exists(),
+        "has_summary": summary_path.exists(),
+        "has_validation": validation_path.exists(),
+        "has_render_assets": render_assets_path.exists(),
+        "available_views": ["hero_cutaway", "annotated_cutaway", "physics_overlay"],
+    }
+    if assets:
+        state["assets"] = _json_copy(assets)
+    return state
 
 
 def build_case(
@@ -99,6 +249,20 @@ def material_sanity_checks(config: CaseConfig) -> list[dict[str, Any]]:
                 ),
             }
         )
+    model_representation = get_model_representation(config)
+    if model_representation["materials"] == "isotopic_explicit" and case_uses_thorium_fuel(config):
+        contains_thorium = fuel_salt_has_thorium(config)
+        checks.append(
+            {
+                "name": "model_representation::fuel_salt_contains_thorium",
+                "passed": contains_thorium,
+                "message": (
+                    "Fuel salt composition includes Th232 for an isotopically explicit thorium-fueled case."
+                    if contains_thorium
+                    else "Isotopically explicit thorium-fueled cases must include Th232 in materials.fuel_salt.nuclides."
+                ),
+            }
+        )
     return checks
 
 
@@ -111,17 +275,18 @@ def run_case(
 ) -> dict[str, Any]:
     built = build_case(config, bundle.openmc_dir, benchmark=benchmark)
     capabilities = get_case_capabilities(config)
-    geometry_assets = export_geometry(built.geometry_description, bundle.geometry_exports_dir)
+    bundle.write_json("geometry_description.json", built.geometry_description)
     build_manifest = dict(built.manifest)
-    build_manifest["geometry_assets"] = geometry_assets
     build_manifest["workflow_capabilities"] = sorted(capabilities)
+    build_manifest["visualization_state"] = _build_visualization_state(bundle)
     if provenance:
-        build_manifest["input_provenance"] = json.loads(json.dumps(provenance))
-    bundle.write_json("build_manifest.json", build_manifest)
+        build_manifest["input_provenance"] = _json_copy(provenance)
 
     summary: dict[str, Any] = {
         "case": config.name,
         "result_dir": str(bundle.root),
+        "model_representation": _json_copy(build_manifest.get("model_representation", get_model_representation(config))),
+        "validation_maturity": _json_copy(build_manifest.get("validation_maturity", {})),
         "neutronics": {
             "status": "dry-run",
             "openmc_available": openmc is not None,
@@ -137,7 +302,7 @@ def run_case(
     if "channel_count" in built.manifest:
         summary["metrics"]["channel_count"] = built.manifest["channel_count"]
     if "flow_summary" in built.manifest:
-        summary["flow"] = json.loads(json.dumps(built.manifest["flow_summary"]))
+        summary["flow"] = _json_copy(built.manifest["flow_summary"])
 
     if openmc is not None and solver_enabled and built.model is not None:
         built.model.export_to_xml(directory=str(bundle.openmc_dir))
@@ -173,6 +338,7 @@ def run_case(
             built.model.export_to_xml(directory=str(bundle.openmc_dir))
         summary["neutronics"]["status"] = "skipped_missing_solver" if openmc is None else "dry-run"
 
+    dynamic_validity_checks: list[dict[str, Any]] = []
     if BALANCE_OF_PLANT in capabilities:
         validate_case_capability(config, BALANCE_OF_PLANT)
         bop_inputs = BOPInputs(
@@ -197,11 +363,13 @@ def run_case(
                 float(summary["bop"]["primary_mass_flow_kg_s"]),
             )
             summary["flow"]["reduced_order"] = reduced_order_flow
+            dynamic_validity_checks = _build_core_screening_checks(config, reduced_order_flow)
             summary["metrics"]["active_flow_channel_count"] = reduced_order_flow["active_flow"]["channel_count"]
             summary["metrics"]["active_flow_area_cm2"] = reduced_order_flow["active_flow"]["total_flow_area_cm2"]
             summary["metrics"]["active_flow_velocity_m_s"] = reduced_order_flow["active_flow"]["representative_velocity_m_s"]
             summary["metrics"]["active_flow_residence_time_s"] = reduced_order_flow["active_flow"]["representative_residence_time_s"]
             summary["metrics"]["disconnected_flow_inventory_channels"] = reduced_order_flow["disconnected_inventory"]["channel_count"]
+            summary["metrics"]["stagnant_flow_inventory_channels"] = reduced_order_flow["stagnant_inventory"]["channel_count"]
             if MSR_PRIMARY_SYSTEM in capabilities:
                 validate_case_capability(config, MSR_PRIMARY_SYSTEM)
                 primary_system = build_primary_system_summary(
@@ -212,8 +380,8 @@ def run_case(
                 )
                 if primary_system:
                     summary["primary_system"] = primary_system
-                    summary["fuel_cycle"] = json.loads(json.dumps(primary_system["fuel_cycle"]))
-                    summary["chemistry"] = json.loads(json.dumps(primary_system["chemistry"]))
+                    summary["fuel_cycle"] = _json_copy(primary_system["fuel_cycle"])
+                    summary["chemistry"] = _json_copy(primary_system["chemistry"])
                     hydraulics = primary_system["loop_hydraulics"]
                     heat_exchanger = primary_system["heat_exchanger"]
                     summary["metrics"]["primary_total_pressure_drop_kpa"] = hydraulics["total_pressure_drop_kpa"]
@@ -224,12 +392,33 @@ def run_case(
                     summary["metrics"]["fissile_inventory_kg"] = primary_system["fuel_cycle"]["fissile_inventory_kg"]
                     summary["metrics"]["chemistry_corrosion_index"] = primary_system["chemistry"]["corrosion_index"]
     if built.manifest.get("benchmark_traceability"):
-        summary["benchmark_traceability"] = json.loads(json.dumps(built.manifest["benchmark_traceability"]))
+        summary["benchmark_traceability"] = _json_copy(built.manifest["benchmark_traceability"])
         summary["metrics"]["benchmark_traceability_score"] = built.manifest["benchmark_traceability"]["traceability_score"]
+        summary["metrics"]["validation_maturity_score"] = built.manifest.get("validation_maturity", {}).get("validation_maturity_score", 0.0)
+    summary["model_validity"] = _summarize_model_validity(
+        _merge_checks(
+            build_manifest.get("model_validity", {}).get("checks", []),
+            dynamic_validity_checks,
+            summary.get("primary_system", {}).get("checks", []),
+        )
+    )
     if provenance:
-        summary["input_provenance"] = json.loads(json.dumps(provenance))
+        summary["input_provenance"] = _json_copy(provenance)
 
+    validation_result = _build_validation_result(
+        config,
+        build_manifest,
+        summary,
+        benchmark=built.benchmark,
+        provenance=provenance,
+    )
+    bundle.write_json("validation.json", validation_result)
+    generate_validation_plot(bundle, validation_result)
     bundle.write_json("summary.json", summary)
+    summary["visualization_state"] = _build_visualization_state(bundle)
+    build_manifest["visualization_state"] = _build_visualization_state(bundle)
+    bundle.write_json("summary.json", summary)
+    bundle.write_json("build_manifest.json", build_manifest)
     if "flow" in summary:
         bundle.write_json("flow_summary.json", summary["flow"])
     bundle.write_metrics(summary["metrics"])
@@ -249,41 +438,13 @@ def validate_case(
     if summary is None:
         summary_path = bundle.root / "summary.json"
         summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {}
-
-    checks: list[dict[str, Any]] = []
-    metrics = summary.get("metrics", {})
-
-    for name, target in config.validation_targets.items():
-        checks.append(_evaluate_target(name, target, metrics, built.manifest))
-
-    for invariant in built.manifest.get("invariants", []):
-        checks.append(
-            {
-                "name": invariant["name"],
-                "status": "pass" if invariant["passed"] else "fail",
-                "message": invariant["message"],
-            }
-        )
-
-    for check in summary.get("primary_system", {}).get("checks", []):
-        checks.append(dict(check))
-
-    if benchmark:
-        checks.append(
-            {
-                "name": "benchmark_metadata_loaded",
-                "status": "pass",
-                "message": benchmark.get("title", "Loaded benchmark metadata"),
-            }
-        )
-
-    result = {
-        "case": config.name,
-        "checks": checks,
-        "passed": all(check["status"] == "pass" for check in checks),
-    }
-    if provenance:
-        result["provenance"] = json.loads(json.dumps(provenance))
+    result = _build_validation_result(
+        config,
+        built.manifest,
+        summary,
+        benchmark=benchmark,
+        provenance=provenance,
+    )
     bundle.write_json("validation.json", result)
     generate_validation_plot(bundle, result)
     return result
@@ -334,6 +495,8 @@ def _build_pin_case(config: CaseConfig, benchmark: dict[str, Any]) -> BuiltCase:
     material_inventory = sorted({layer["material"] for layer in layers if layer.get("material")} | {geometry["background_material"]})
     invariants.extend(material_sanity_checks(config))
     benchmark_traceability = assess_benchmark_traceability(config, benchmark) if benchmark else {}
+    model_representation = get_model_representation(config)
+    model_validity = _summarize_model_validity(_invariant_checks_to_status_checks(invariants))
 
     model = _create_openmc_pin_model(config) if openmc is not None else None
 
@@ -344,7 +507,10 @@ def _build_pin_case(config: CaseConfig, benchmark: dict[str, Any]) -> BuiltCase:
             "geometry_kind": geometry["kind"],
             "material_inventory": material_inventory,
             "invariants": invariants,
+            "model_representation": model_representation,
+            "model_validity": model_validity,
             "benchmark_traceability": benchmark_traceability,
+            "validation_maturity": benchmark_traceability.get("validation_maturity", {}),
             "simulation": describe_simulation_settings(config),
         },
         geometry_description={
@@ -367,6 +533,7 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
         flow_summary = build_msr_flow_summary(config, resolved)
         geometry_description = build_msr_geometry_description(config, resolved)
         benchmark_traceability = assess_benchmark_traceability(config, benchmark) if benchmark else {}
+        model_representation = get_model_representation(config)
         model = _create_openmc_detailed_msr_model(config, resolved) if openmc is not None else None
         material_inventory = {
             geometry["matrix_material"],
@@ -382,6 +549,7 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
             if solid.get("material"):
                 material_inventory.add(str(solid["material"]))
         invariants.extend(material_sanity_checks(config))
+        model_validity = _summarize_model_validity(_invariant_checks_to_status_checks(invariants))
         channel_cell_count = sum(len(channel["layers"]) for channel in resolved.channels)
         static_cell_count = 13
         return BuiltCase(
@@ -395,7 +563,10 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
                 "flow_summary": flow_summary,
                 "material_inventory": sorted(material_inventory),
                 "invariants": invariants,
+                "model_representation": model_representation,
+                "model_validity": model_validity,
                 "benchmark_traceability": benchmark_traceability,
+                "validation_maturity": benchmark_traceability.get("validation_maturity", {}),
                 "simulation": describe_simulation_settings(config),
             },
             geometry_description=geometry_description,
@@ -448,6 +619,8 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
     )
     invariants.extend(material_sanity_checks(config))
     benchmark_traceability = assess_benchmark_traceability(config, benchmark) if benchmark else {}
+    model_representation = get_model_representation(config)
+    model_validity = _summarize_model_validity(_invariant_checks_to_status_checks(invariants))
     return BuiltCase(
         manifest={
             "case": config.name,
@@ -456,7 +629,10 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
             "geometry_kind": geometry["kind"],
             "material_inventory": material_inventory,
             "invariants": invariants,
+            "model_representation": model_representation,
+            "model_validity": model_validity,
             "benchmark_traceability": benchmark_traceability,
+            "validation_maturity": benchmark_traceability.get("validation_maturity", {}),
             "simulation": describe_simulation_settings(config),
         },
         geometry_description={

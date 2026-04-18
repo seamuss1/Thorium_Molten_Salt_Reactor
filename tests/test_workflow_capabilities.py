@@ -42,12 +42,15 @@ def test_example_pin_run_no_solver_succeeds_end_to_end() -> None:
 
         assert exit_code == 0
         summary = json.loads((scratch_root / "results" / "example_pin" / "smoke" / "summary.json").read_text(encoding="utf-8"))
+        validation = json.loads((scratch_root / "results" / "example_pin" / "smoke" / "validation.json").read_text(encoding="utf-8"))
         assert summary["neutronics"]["status"] in {"dry-run", "skipped_missing_solver"}
         assert summary["workflow_capabilities"] == [NEUTRONICS_ONLY]
         assert "bop" not in summary
         assert "primary_system" not in summary
         assert "flow" not in summary
         assert "transient" not in summary
+        assert isinstance(validation["checks"], list)
+        assert not (scratch_root / "results" / "example_pin" / "smoke" / "render_assets.json").exists()
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
@@ -69,6 +72,9 @@ def test_msr_run_still_produces_primary_system_summary() -> None:
         assert "flow" in summary
         assert "primary_system" in summary
         assert summary["primary_system"]["model"] == "reduced_order_primary_system"
+        assert (bundle.root / "validation.json").exists()
+        assert not (bundle.root / "render_assets.json").exists()
+        assert not any(bundle.geometry_exports_dir.iterdir())
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
@@ -200,8 +206,8 @@ def test_moose_and_scale_commands_export_inputs_and_update_summary() -> None:
         moose_handoff = json.loads((bundle.root / "moose_handoff.json").read_text(encoding="utf-8"))
         scale_handoff = json.loads((bundle.root / "scale_handoff.json").read_text(encoding="utf-8"))
 
-        assert summary["integrations"]["moose"]["status"] == "exported"
-        assert summary["integrations"]["scale"]["status"] == "exported"
+        assert summary["integrations"]["moose"]["status"] == "input_deck_exported"
+        assert summary["integrations"]["scale"]["status"] == "input_deck_exported"
         assert Path(moose_payload["input_path"]).exists()
         assert Path(scale_payload["input_path"]).exists()
         assert Path(moose_payload["handoff_path"]).exists()
@@ -210,5 +216,37 @@ def test_moose_and_scale_commands_export_inputs_and_update_summary() -> None:
         assert "=csas6" in Path(scale_payload["input_path"]).read_text(encoding="utf-8")
         assert moose_handoff["geometry"]["channel_count"] == summary["metrics"]["channel_count"]
         assert scale_handoff["materials"]["fuel_salt"]["nuclide_count"] > 0
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_render_command_uses_existing_run_state_and_emits_visual_assets() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-render-command" / uuid.uuid4().hex
+    case_dir = scratch_root / "configs" / "cases" / "immersed_pool_reference"
+    benchmark_dir = scratch_root / "benchmarks" / "tmsr_lf1"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    benchmark_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml", case_dir / "case.yaml")
+        shutil.copy2(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", benchmark_dir / "benchmark.yaml")
+
+        run_exit = main(["--repo-root", str(scratch_root), "run", "immersed_pool_reference", "--run-id", "render-smoke", "--no-solver"])
+        assert run_exit == 0
+
+        render_assets_path = scratch_root / "results" / "immersed_pool_reference" / "render-smoke" / "render_assets.json"
+        assert not render_assets_path.exists()
+
+        render_exit = main(["--repo-root", str(scratch_root), "render", "immersed_pool_reference", "--run-id", "render-smoke"])
+        assert render_exit == 0
+
+        assets = json.loads(render_assets_path.read_text(encoding="utf-8"))
+        summary = json.loads(
+            (scratch_root / "results" / "immersed_pool_reference" / "render-smoke" / "summary.json").read_text(encoding="utf-8")
+        )
+        assert Path(assets["hero_cutaway"]).exists()
+        assert Path(assets["annotated_cutaway"]).exists()
+        assert Path(assets["physics_overlay"]).exists()
+        assert summary["visualization_state"]["has_render_assets"] is True
+        assert "hero_cutaway" in summary["visualization_state"]["assets"]
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)

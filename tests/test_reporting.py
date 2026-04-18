@@ -475,3 +475,143 @@ def test_report_includes_external_integration_section() -> None:
         assert "csas6" in report
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_report_includes_transient_sweep_section() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-transient-sweep" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "dry-run"},
+                    "metrics": {"transient_sweep_peak_power_fraction_p95": 1.14},
+                    "transient_sweep": {
+                        "status": "completed",
+                        "model": "reduced_order_transient_proxy_ensemble",
+                        "scenario_name": "partial_heat_sink_loss",
+                        "backend": "numpy",
+                        "samples": 512,
+                        "seed": 42,
+                        "duration_s": 120.0,
+                        "time_step_s": 1.0,
+                        "event_count": 1,
+                        "peak_power_fraction_p95": 1.14,
+                        "peak_power_fraction_max": 1.28,
+                        "peak_fuel_temperature_c_p95": 715.0,
+                        "peak_fuel_temperature_c_max": 732.0,
+                        "final_power_fraction_p50": 1.02,
+                        "final_power_fraction_p95": 1.09,
+                        "final_total_reactivity_pcm_p50": 18.4,
+                        "final_total_reactivity_pcm_p95": 44.1,
+                        "peak_corrosion_index_p95": 1.31,
+                        "history_path": "transient_sweep.json",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "immersed_pool_reference",
+            {
+                "reactor": {
+                    "name": "Immersed Pool MSR Reference",
+                    "family": "reference-inspired immersed pool MSR demonstrator",
+                    "stage": "full-core",
+                    "design_power_mwth": 8.0,
+                    "benchmark": "benchmarks/tmsr_lf1/benchmark.yaml",
+                }
+            },
+            summary_path,
+            None,
+            None,
+        )
+
+        assert "## Transient Sweep" in report
+        assert "partial_heat_sink_loss" in report
+        assert "512" in report
+        assert "1.14" in report
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_report_surfaces_model_validity_and_validation_maturity() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-validity" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "case": "tmsr_lf1_core",
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "dry-run"},
+                    "metrics": {"benchmark_traceability_score": 100.0, "validation_maturity_score": 8.8},
+                    "model_representation": {
+                        "materials": "isotopic_explicit",
+                        "fuel_cycle": "proxy_breeding",
+                    },
+                    "model_validity": {
+                        "status": "invalid",
+                        "failed_count": 2,
+                        "checks": [],
+                    },
+                    "validation_maturity": {
+                        "validation_maturity_score": 8.8,
+                        "validation_maturity_stage": "surrogate_only",
+                        "operating_point_source": {"status": "surrogate"},
+                        "uncertainty_coverage": {"status": "missing"},
+                        "cross_code_checks": [],
+                        "gaps": ["Benchmark uncertainty coverage is missing."],
+                    },
+                    "benchmark_traceability": {
+                        "traceability_score": 100.0,
+                        "maturity_stage": "traceable_surrogate",
+                        "coverage": {
+                            "evidence_records_complete": {"linked": 1, "total": 1},
+                            "assumptions_structured": {"linked": 1, "total": 1},
+                            "assumptions_with_evidence": {"linked": 1, "total": 1},
+                            "targets_structured": {"linked": 1, "total": 1},
+                            "targets_with_evidence": {"linked": 1, "total": 1},
+                            "reactor_parameters_linked": {"linked": 1, "total": 1},
+                            "physics_validation_targets_linked": {"linked": 1, "total": 1},
+                        },
+                        "confidence_summary": {"high": 0, "medium": 1, "low": 0, "unspecified": 0},
+                        "status_summary": {"surrogate_targets": 1, "literature_backed_targets": 0},
+                        "gaps": ["1 benchmark target(s) are still marked surrogate."],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        validation_path = scratch_root / "validation.json"
+        validation_path.write_text(
+            json.dumps({"checks": [{"name": "physics::active_channel_velocity_reasonable", "status": "fail", "message": "Too high."}]}),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "tmsr_lf1_core",
+            {
+                "reactor": {
+                    "name": "TMSR-LF1-Inspired Core",
+                    "family": "TMSR-LF1-inspired MSR",
+                    "stage": "full-core",
+                    "design_power_mwth": 250.0,
+                    "benchmark": "benchmarks/tmsr_lf1/benchmark.yaml",
+                }
+            },
+            summary_path,
+            validation_path,
+            None,
+        )
+
+        assert "> Model validity" in report
+        assert "## Model Representation" in report
+        assert "Validation maturity score" in report
+        assert "Validation gap" in report
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)

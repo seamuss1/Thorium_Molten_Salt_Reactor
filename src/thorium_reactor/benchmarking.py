@@ -15,6 +15,8 @@ REACTOR_TARGET_LINKS = (
     ("hot_leg_temp_c", "nominal_hot_leg_temp_c", "hot-leg temperature"),
     ("cold_leg_temp_c", "nominal_cold_leg_temp_c", "cold-leg temperature"),
 )
+OPERATING_POINT_STATUSES = {"literature-backed", "cross-code-backed", "surrogate"}
+UNCERTAINTY_COVERAGE_STATUSES = {"quantified", "qualitative", "missing"}
 
 
 def assess_benchmark_traceability(
@@ -136,6 +138,7 @@ def assess_benchmark_traceability(
             + ", ".join(missing_validation_links)
             + "."
         )
+    validation_maturity = _assess_validation_maturity(benchmark, targets)
 
     return {
         "traceability_score": traceability_score,
@@ -178,6 +181,7 @@ def assess_benchmark_traceability(
         "reactor_parameter_links": reactor_parameter_links,
         "physics_validation_links": physics_validation_links,
         "gaps": gaps,
+        "validation_maturity": validation_maturity,
         "assumptions": assumptions,
         "targets": targets,
         "evidence": evidence,
@@ -335,3 +339,109 @@ def _ratio(numerator: int, denominator: int) -> float:
     if denominator <= 0:
         return 1.0
     return numerator / denominator
+
+
+def _assess_validation_maturity(benchmark: dict[str, Any], targets: list[dict[str, Any]]) -> dict[str, Any]:
+    validation = benchmark.get("validation", {})
+    if not isinstance(validation, dict):
+        validation = {}
+
+    operating_point_source = validation.get("operating_point_source", {})
+    if not isinstance(operating_point_source, dict):
+        operating_point_source = {"status": str(operating_point_source)} if operating_point_source else {}
+    operating_point_status = str(operating_point_source.get("status", "missing")).lower()
+    if operating_point_status not in OPERATING_POINT_STATUSES:
+        operating_point_status = "missing"
+
+    cross_code_checks_raw = validation.get("cross_code_checks", [])
+    if not isinstance(cross_code_checks_raw, list):
+        cross_code_checks_raw = []
+    cross_code_checks = [_normalize_cross_code_check(index, item) for index, item in enumerate(cross_code_checks_raw, start=1)]
+    completed_cross_code = sum(1 for item in cross_code_checks if item["status"] == "completed")
+
+    uncertainty_coverage = validation.get("uncertainty_coverage", {})
+    if not isinstance(uncertainty_coverage, dict):
+        uncertainty_coverage = {"status": str(uncertainty_coverage)} if uncertainty_coverage else {}
+    uncertainty_status = str(uncertainty_coverage.get("status", "missing")).lower()
+    if uncertainty_status not in UNCERTAINTY_COVERAGE_STATUSES:
+        uncertainty_status = "missing"
+
+    literature_target_fraction = _ratio(
+        sum(1 for item in targets if item["status"] == "literature-backed"),
+        len(targets),
+    )
+    operating_point_score = {
+        "cross-code-backed": 1.0,
+        "literature-backed": 1.0,
+        "surrogate": 0.25,
+        "missing": 0.0,
+    }[operating_point_status]
+    uncertainty_score = {
+        "quantified": 1.0,
+        "qualitative": 0.5,
+        "missing": 0.0,
+    }[uncertainty_status]
+    cross_code_score = _ratio(completed_cross_code, len(cross_code_checks)) if cross_code_checks else 0.0
+
+    validation_maturity_score = round(
+        100.0
+        * (
+            0.35 * operating_point_score
+            + 0.25 * cross_code_score
+            + 0.20 * uncertainty_score
+            + 0.20 * literature_target_fraction
+        ),
+        1,
+    )
+    stage = "surrogate_only"
+    if validation_maturity_score >= 40.0:
+        stage = "screening_backed"
+    if validation_maturity_score >= 75.0:
+        stage = "benchmark_ready"
+
+    gaps: list[str] = []
+    if operating_point_status in {"missing", "surrogate"}:
+        gaps.append("Benchmark operating point is not yet literature-backed.")
+    if not cross_code_checks:
+        gaps.append("No cross-code validation checks are declared.")
+    elif completed_cross_code < len(cross_code_checks):
+        gaps.append("Some cross-code validation checks are still pending.")
+    if uncertainty_status == "missing":
+        gaps.append("Benchmark uncertainty coverage is missing.")
+    elif uncertainty_status == "qualitative":
+        gaps.append("Benchmark uncertainty coverage is qualitative rather than quantified.")
+    surrogate_target_count = sum(1 for item in targets if item["status"] == "surrogate")
+    if surrogate_target_count:
+        gaps.append(f"{surrogate_target_count} validation target(s) still depend on surrogate values.")
+
+    return {
+        "validation_maturity_score": validation_maturity_score,
+        "validation_maturity_stage": stage,
+        "operating_point_source": {
+            "status": operating_point_status,
+            "note": operating_point_source.get("note"),
+        },
+        "cross_code_checks": cross_code_checks,
+        "uncertainty_coverage": {
+            "status": uncertainty_status,
+            "note": uncertainty_coverage.get("note"),
+        },
+        "gaps": gaps,
+    }
+
+
+def _normalize_cross_code_check(index: int, item: Any) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        return {
+            "name": f"cross_code_check_{index}",
+            "status": "missing",
+            "note": str(item),
+        }
+    status = str(item.get("status", "missing")).lower()
+    if status not in {"planned", "completed", "missing"}:
+        status = "missing"
+    return {
+        "name": str(item.get("name", f"cross_code_check_{index}")),
+        "status": status,
+        "note": item.get("note"),
+    }

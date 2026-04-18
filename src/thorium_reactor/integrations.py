@@ -30,7 +30,7 @@ def run_moose_integration(
 
     result = {
         "tool": "moose",
-        "status": "exported",
+        "status": "input_deck_exported",
         "input_path": str(input_path),
         "handoff_path": str(handoff_path),
         "execution_mode": "export_only",
@@ -64,7 +64,7 @@ def run_scale_integration(
 
     result = {
         "tool": "scale",
-        "status": "exported",
+        "status": "input_deck_exported",
         "input_path": str(input_path),
         "handoff_path": str(handoff_path),
         "execution_mode": "export_only",
@@ -127,7 +127,7 @@ def _run_external_command(command: list[str], *, repo_root: Path, runtime_label:
     executable = shutil.which(command[0])
     if executable is None:
         return {
-            "status": "exported_missing_runtime",
+            "status": "input_deck_exported_missing_runtime",
             "execution_mode": "requested_but_unavailable",
             "runtime": runtime_label,
             "command": command,

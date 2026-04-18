@@ -37,3 +37,25 @@ def test_cli_registers_moose_and_scale_commands() -> None:
     assert moose.run_external is True
     assert scale.command == "scale"
     assert scale.run_external is False
+
+
+def test_cli_registers_transient_sweep_command() -> None:
+    parser = build_parser()
+    namespace = parser.parse_args([
+        "transient-sweep",
+        "immersed_pool_reference",
+        "--scenario",
+        "partial_heat_sink_loss",
+        "--samples",
+        "1024",
+        "--seed",
+        "7",
+        "--prefer-gpu",
+    ])
+
+    assert namespace.command == "transient-sweep"
+    assert namespace.case == "immersed_pool_reference"
+    assert namespace.scenario == "partial_heat_sink_loss"
+    assert namespace.samples == 1024
+    assert namespace.seed == 7
+    assert namespace.prefer_gpu is True

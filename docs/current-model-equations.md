@@ -15,13 +15,13 @@ The current workflow combines:
 
 The relevant implementation lives in:
 
-- [src/thorium_reactor/neutronics/workflows.py](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/src/thorium_reactor/neutronics/workflows.py)
-- [src/thorium_reactor/flow/reduced_order.py](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/src/thorium_reactor/flow/reduced_order.py)
-- [src/thorium_reactor/flow/primary_system.py](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/src/thorium_reactor/flow/primary_system.py)
-- [src/thorium_reactor/flow/properties.py](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/src/thorium_reactor/flow/properties.py)
-- [src/thorium_reactor/transient.py](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/src/thorium_reactor/transient.py)
-- [src/thorium_reactor/integrations.py](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/src/thorium_reactor/integrations.py)
-- [src/thorium_reactor/chemistry.py](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/src/thorium_reactor/chemistry.py)
+- [src/thorium_reactor/neutronics/workflows.py](../src/thorium_reactor/neutronics/workflows.py)
+- [src/thorium_reactor/flow/reduced_order.py](../src/thorium_reactor/flow/reduced_order.py)
+- [src/thorium_reactor/flow/primary_system.py](../src/thorium_reactor/flow/primary_system.py)
+- [src/thorium_reactor/flow/properties.py](../src/thorium_reactor/flow/properties.py)
+- [src/thorium_reactor/transient.py](../src/thorium_reactor/transient.py)
+- [src/thorium_reactor/integrations.py](../src/thorium_reactor/integrations.py)
+- [src/thorium_reactor/chemistry.py](../src/thorium_reactor/chemistry.py)
 
 ## Input Units
 

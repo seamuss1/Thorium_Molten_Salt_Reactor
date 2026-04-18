@@ -18,13 +18,14 @@ materials:
     density: { units: g/cm3, value: 3.2 }
     nuclides:
       - { name: Li7, ao: 0.325 }
-      - { name: F19, ao: 0.5663333333 }
+      - { name: F19, ao: 0.5648333333 }
       - { name: Be9, ao: 0.0966666667 }
       - { name: Zr90, ao: 0.005145 }
       - { name: Zr91, ao: 0.001122 }
       - { name: Zr92, ao: 0.001715 }
       - { name: Zr94, ao: 0.001738 }
       - { name: Zr96, ao: 0.000280 }
+      - { name: Th232, ao: 0.001500 }
       - { name: U233, ao: 0.000100 }
       - { name: U238, ao: 0.001900 }
   graphite:
@@ -117,8 +118,18 @@ reporting:
     - name: tmsr_lf1_core_cross_section
       kind: svg
 flow:
+  core_model:
+    kind: channelized_from_geometry
+    active_variants: [fuel, control_guides]
+    stagnant_variants: [instrumentation_wells]
+    family_split_weights:
+      fuel: 1.0
+      control_guides: 1.0
   reduced_order:
     allocation_rule: salt_area_weighted
+model_representation:
+  materials: isotopic_explicit
+  fuel_cycle: proxy_breeding
 transient:
   duration_s: 100.0
   time_step_s: 1.0
