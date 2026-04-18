@@ -193,12 +193,14 @@ def run_solver_backed_benchmark(
     case_name: str,
     run_id: str,
 ) -> dict[str, Any]:
-    docker_executable = shutil.which("docker")
-    if docker_executable is None:
+    docker_status = get_docker_runtime_status()
+    if not docker_status["cli_available"]:
         raise RuntimeError(
             "Solver-backed benchmark runs require Docker on this host. "
             "Install Docker Desktop or use a supported OpenMC runtime."
         )
+    if not docker_status["daemon_available"]:
+        raise RuntimeError(str(docker_status["message"]))
 
     command = build_docker_openmc_command(case_name, run_id)
     completed = subprocess.run(
@@ -224,6 +226,40 @@ def run_solver_backed_benchmark(
     }
 
 
+def get_docker_runtime_status() -> dict[str, Any]:
+    docker_executable = shutil.which("docker")
+    if docker_executable is None:
+        return {
+            "cli_available": False,
+            "daemon_available": False,
+            "message": "Docker CLI is not installed on this host.",
+        }
+
+    completed = subprocess.run(
+        ["docker", "version", "--format", "{{.Server.Version}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0 or not completed.stdout.strip():
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        message = "Docker is installed but the Docker daemon is not reachable. Start Docker Desktop and retry."
+        if detail:
+            message = f"{message} Details: {detail}"
+        return {
+            "cli_available": True,
+            "daemon_available": False,
+            "message": message,
+        }
+
+    return {
+        "cli_available": True,
+        "daemon_available": True,
+        "server_version": completed.stdout.strip(),
+        "message": None,
+    }
+
+
 def build_docker_openmc_command(case_name: str, run_id: str) -> list[str]:
     return [
         "docker",
@@ -231,6 +267,7 @@ def build_docker_openmc_command(case_name: str, run_id: str) -> list[str]:
         "-f",
         "docker-compose.openmc.yml",
         "run",
+        "--build",
         "--rm",
         "openmc",
         "python",

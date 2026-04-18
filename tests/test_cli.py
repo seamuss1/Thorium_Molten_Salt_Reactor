@@ -1,4 +1,4 @@
-from thorium_reactor.cli import build_parser
+from thorium_reactor.cli import build_parser, resolve_benchmark_runtime
 
 
 def test_cli_registers_all_commands() -> None:
@@ -17,6 +17,30 @@ def test_cli_registers_benchmark_command() -> None:
     assert namespace.command == "benchmark"
     assert namespace.case == "tmsr_lf1_core"
     assert namespace.docker_openmc is True
+
+
+def test_benchmark_runtime_falls_back_to_docker_when_local_openmc_is_missing() -> None:
+    runtime, message = resolve_benchmark_runtime(
+        docker_requested=False,
+        local_openmc_available=False,
+        docker_status={"daemon_available": True, "message": None},
+    )
+
+    assert runtime == "docker"
+    assert message is None
+
+
+def test_benchmark_runtime_returns_guidance_when_no_solver_runtime_is_available() -> None:
+    runtime, message = resolve_benchmark_runtime(
+        docker_requested=False,
+        local_openmc_available=False,
+        docker_status={"daemon_available": False, "message": "Docker daemon unavailable."},
+    )
+
+    assert runtime == "error"
+    assert message is not None
+    assert "environment-openmc-linux.yml" in message
+    assert "Docker daemon unavailable." in message
 
 
 def test_cli_registers_transient_command() -> None:

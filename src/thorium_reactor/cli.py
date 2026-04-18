@@ -6,12 +6,12 @@ from json import JSONDecodeError
 from pathlib import Path
 
 from thorium_reactor.capabilities import get_case_capabilities
-from thorium_reactor.benchmarking import run_solver_backed_benchmark
+from thorium_reactor.benchmarking import get_docker_runtime_status, run_solver_backed_benchmark
 from thorium_reactor.bundle_inputs import ensure_bundle_inputs, load_bundle_inputs
 from thorium_reactor.config import load_case_config
 from thorium_reactor.geometry.exporters import export_geometry
 from thorium_reactor.integrations import persist_integration_result, run_moose_integration, run_scale_integration
-from thorium_reactor.neutronics.openmc_compat import openmc
+from thorium_reactor.neutronics.openmc_compat import missing_openmc_runtime_message, openmc
 from thorium_reactor.neutronics.workflows import _build_visualization_state, build_case, run_case, validate_case
 from thorium_reactor.paths import ResultBundle, case_config_path, create_result_bundle, discover_repo_root, latest_result_bundle
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot, load_plot_manifest
@@ -47,6 +47,28 @@ def build_parser() -> argparse.ArgumentParser:
                 help="Run the benchmark case through docker-compose.openmc.yml instead of the local runtime",
             )
     return parser
+
+
+def resolve_benchmark_runtime(
+    *,
+    docker_requested: bool,
+    local_openmc_available: bool,
+    docker_status: dict[str, object] | None = None,
+) -> tuple[str, str | None]:
+    if docker_requested:
+        return "docker", None
+    if local_openmc_available:
+        return "local", None
+
+    docker_status = docker_status or {}
+    if docker_status.get("daemon_available"):
+        return "docker", None
+
+    message = missing_openmc_runtime_message(command_name="benchmark")
+    docker_message = docker_status.get("message")
+    if isinstance(docker_message, str) and docker_message:
+        message = f"{message} {docker_message}"
+    return "error", message
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -90,6 +112,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(bundle.root)
         print(summary["neutronics"]["status"])
+        if summary["neutronics"].get("message"):
+            print(summary["neutronics"]["message"])
         return 0
 
     if args.command == "transient":
@@ -266,15 +290,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "benchmark":
-        if args.docker_openmc:
+        docker_status = get_docker_runtime_status() if (args.docker_openmc or openmc is None) else None
+        runtime, error_message = resolve_benchmark_runtime(
+            docker_requested=args.docker_openmc,
+            local_openmc_available=openmc is not None,
+            docker_status=docker_status,
+        )
+        if runtime == "docker":
             execution = run_solver_backed_benchmark(repo_root, config.name, bundle.run_id)
             bundle.write_json("benchmark_execution.json", execution)
-        else:
-            if openmc is None:
-                raise RuntimeError(
-                    "Benchmark runs require a solver-backed OpenMC runtime. "
-                    "Use `reactor benchmark <case> --docker-openmc` or run on a supported host."
-                )
+        elif runtime == "local":
             summary = run_case(
                 config,
                 bundle,
@@ -289,6 +314,8 @@ def main(argv: list[str] | None = None) -> int:
                     "summary_status": summary.get("neutronics", {}).get("status"),
                 },
             )
+        else:
+            raise RuntimeError(error_message or missing_openmc_runtime_message(command_name="benchmark"))
 
         summary_path = bundle.root / "summary.json"
         if not summary_path.exists():

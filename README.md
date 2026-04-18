@@ -51,6 +51,7 @@ docker compose -f docker-compose.openmc.yml run --rm openmc python -m thorium_re
 ```bash
 reactor build example_pin
 reactor run example_pin
+reactor benchmark tmsr_lf1_core
 reactor validate example_pin
 reactor report example_pin
 reactor render tmsr_lf1_core
@@ -62,8 +63,9 @@ reactor scale tmsr_lf1_core
 
 Command behavior:
 
-- `reactor build <case>` creates a new result bundle, emits a build manifest, geometry exports, and OpenMC XML if OpenMC is installed.
-- `reactor run <case>` performs the build, runs OpenMC when available, computes steady-state BOP outputs, and writes `summary.json` plus `metrics.csv`.
+- `reactor build <case>` creates a new result bundle, emits a build manifest plus geometry description JSON, and exports OpenMC XML when OpenMC is installed.
+- `reactor run <case>` performs the build, computes steady-state BOP outputs, and writes `summary.json` plus `metrics.csv`. With `--no-solver`, the run is an explicit `dry-run`. Without `--no-solver`, the run uses OpenMC when available and otherwise completes as `skipped_missing_solver`.
+- `reactor benchmark <case>` requires a solver-backed runtime. It uses the local OpenMC runtime when present, otherwise falls back to the Docker OpenMC runner when Docker is available.
 - `reactor validate <case>` checks geometry/material invariants and compares available metrics to configured acceptance bands.
 - `reactor report <case>` generates `report.md` from the latest or specified run bundle, including benchmark traceability scorecards when benchmark metadata is present.
 - `reactor render <case>` writes procedural geometry exports for visualization workflows, including OBJ, STL, watertight mesh validation JSON, a rendered PNG, animated GIF flow output, and MP4 video output when a case defines flow-animation paths and `ffmpeg` is available.
@@ -92,8 +94,8 @@ The benchmark folder now supports structured evidence, assumptions, target confi
 
 ## Modeling Strategy Notes
 
-- [docs/thermal-hydraulics-modeling-strategy.md](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/docs/thermal-hydraulics-modeling-strategy.md) describes the recommended analysis ladder for this repo: whole-loop reduced-order thermal-hydraulics first, porous or homogenized core models second, and local 3D CFD only where geometry controls the answer. It also lays out the additional precursor-transport and neutronics coupling needed for liquid-fueled MSR studies.
-- [docs/current-model-equations.md](/C:/Users/Admin/Documents/GitHub/Thorium_Molten_Salt_Reactor/docs/current-model-equations.md) documents the equations, correlations, supported property units, and OpenMC input assumptions used by the current reduced-order implementation.
+- [docs/thermal-hydraulics-modeling-strategy.md](docs/thermal-hydraulics-modeling-strategy.md) describes the recommended analysis ladder for this repo: whole-loop reduced-order thermal-hydraulics first, porous or homogenized core models second, and local 3D CFD only where geometry controls the answer. It also lays out the additional precursor-transport and neutronics coupling needed for liquid-fueled MSR studies.
+- [docs/current-model-equations.md](docs/current-model-equations.md) documents the equations, correlations, supported property units, and OpenMC input assumptions used by the current reduced-order implementation.
 
 ## External Solver Hooks
 

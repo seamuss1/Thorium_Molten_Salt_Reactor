@@ -36,7 +36,7 @@ from thorium_reactor.modeling import (
     fuel_salt_has_thorium,
     get_model_representation,
 )
-from thorium_reactor.neutronics.openmc_compat import openmc
+from thorium_reactor.neutronics.openmc_compat import missing_openmc_runtime_message, openmc
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot
 
 
@@ -336,7 +336,15 @@ def run_case(
     else:
         if built.model is not None and openmc is not None:
             built.model.export_to_xml(directory=str(bundle.openmc_dir))
-        summary["neutronics"]["status"] = "skipped_missing_solver" if openmc is None else "dry-run"
+        if not solver_enabled:
+            summary["neutronics"]["status"] = "dry-run"
+            summary["neutronics"]["message"] = "Solver execution was disabled for this run."
+        elif openmc is None:
+            summary["neutronics"]["status"] = "skipped_missing_solver"
+            summary["neutronics"]["message"] = missing_openmc_runtime_message(command_name="run")
+        else:
+            summary["neutronics"]["status"] = "dry-run"
+            summary["neutronics"]["message"] = "OpenMC input XML was exported, but solver execution was not requested."
 
     dynamic_validity_checks: list[dict[str, Any]] = []
     if BALANCE_OF_PLANT in capabilities:

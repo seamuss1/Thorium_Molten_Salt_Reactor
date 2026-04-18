@@ -43,7 +43,8 @@ def test_example_pin_run_no_solver_succeeds_end_to_end() -> None:
         assert exit_code == 0
         summary = json.loads((scratch_root / "results" / "example_pin" / "smoke" / "summary.json").read_text(encoding="utf-8"))
         validation = json.loads((scratch_root / "results" / "example_pin" / "smoke" / "validation.json").read_text(encoding="utf-8"))
-        assert summary["neutronics"]["status"] in {"dry-run", "skipped_missing_solver"}
+        assert summary["neutronics"]["status"] == "dry-run"
+        assert summary["neutronics"]["message"] == "Solver execution was disabled for this run."
         assert summary["workflow_capabilities"] == [NEUTRONICS_ONLY]
         assert "bop" not in summary
         assert "primary_system" not in summary
@@ -51,6 +52,22 @@ def test_example_pin_run_no_solver_succeeds_end_to_end() -> None:
         assert "transient" not in summary
         assert isinstance(validation["checks"], list)
         assert not (scratch_root / "results" / "example_pin" / "smoke" / "render_assets.json").exists()
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_solver_enabled_without_openmc_reports_missing_solver_status() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-example-pin-missing-solver" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        config = _load_case("example_pin")
+        bundle = create_result_bundle(scratch_root, config.name, "missing-solver")
+
+        summary = run_case(config, bundle, solver_enabled=True)
+
+        assert summary["neutronics"]["status"] in {"completed", "completed_without_statepoint", "failed", "skipped_missing_solver"}
+        if summary["neutronics"]["status"] == "skipped_missing_solver":
+            assert "environment-openmc-linux.yml" in summary["neutronics"]["message"]
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 

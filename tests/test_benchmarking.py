@@ -33,6 +33,7 @@ def test_build_docker_openmc_command_targets_repo_compose_runtime() -> None:
         "-f",
         "docker-compose.openmc.yml",
         "run",
+        "--build",
         "--rm",
         "openmc",
         "python",
