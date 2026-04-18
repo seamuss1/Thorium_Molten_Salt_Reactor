@@ -1,0 +1,80 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/app-runner.Dockerfile
+    image: thorium-reactor-app:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    environment:
+      PYTHONPATH: /workspace/src
+      THORIUM_REACTOR_RUNTIME_SERVICE: app
+      THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-app:latest
+      THORIUM_REACTOR_TOOL_RUNTIME: python
+      THORIUM_REACTOR_TOOL_VERSION: python-container
+    command: ["python", "-m", "thorium_reactor.cli", "--help"]
+
+  openmc:
+    build:
+      context: .
+      dockerfile: docker/openmc-runner.Dockerfile
+    image: thorium-reactor-openmc:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    environment:
+      PYTHONPATH: /workspace/src
+      THORIUM_REACTOR_RUNTIME_SERVICE: openmc
+      THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-openmc:latest
+      THORIUM_REACTOR_TOOL_RUNTIME: openmc
+      THORIUM_REACTOR_TOOL_VERSION: openmc-container
+    command: ["python", "-m", "thorium_reactor.cli", "--help"]
+
+  thermochimica:
+    build:
+      context: .
+      dockerfile: docker/thermochimica-runner.Dockerfile
+    image: thorium-reactor-thermochimica:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    environment:
+      PYTHONPATH: /workspace/src
+      THORIUM_REACTOR_RUNTIME_SERVICE: thermochimica
+      THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-thermochimica:latest
+      THORIUM_REACTOR_TOOL_RUNTIME: thermochimica
+      THORIUM_REACTOR_TOOL_VERSION: thermochimica-container
+    command: ["python", "-m", "thorium_reactor.cli", "--help"]
+
+  saltproc:
+    build:
+      context: .
+      dockerfile: docker/saltproc-runner.Dockerfile
+    image: thorium-reactor-saltproc:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    environment:
+      PYTHONPATH: /workspace/src
+      THORIUM_REACTOR_RUNTIME_SERVICE: saltproc
+      THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-saltproc:latest
+      THORIUM_REACTOR_TOOL_RUNTIME: saltproc
+      THORIUM_REACTOR_TOOL_VERSION: saltproc-container
+    command: ["python", "-m", "thorium_reactor.cli", "--help"]
+
+  moltres:
+    build:
+      context: .
+      dockerfile: docker/moltres-runner.Dockerfile
+    image: thorium-reactor-moltres:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    environment:
+      PYTHONPATH: /workspace/src
+      THORIUM_REACTOR_RUNTIME_SERVICE: moltres
+      THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-moltres:latest
+      THORIUM_REACTOR_TOOL_RUNTIME: moltres
+      THORIUM_REACTOR_TOOL_VERSION: moltres-container
+    command: ["python", "-m", "thorium_reactor.cli", "--help"]

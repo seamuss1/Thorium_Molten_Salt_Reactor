@@ -477,6 +477,66 @@ def test_report_includes_external_integration_section() -> None:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
 
+def test_report_includes_runtime_context_and_benchmark_residuals() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-runtime-context" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "dry-run"},
+                    "metrics": {"keff": 1.01},
+                    "runtime_context": {
+                        "service": "app",
+                        "image": "thorium-reactor-app:latest",
+                        "tool_runtime": None,
+                        "git_branch": "main",
+                        "git_commit": "deadbeef",
+                    },
+                    "benchmark_residuals": {
+                        "item_count": 1,
+                        "dataset_count": 1,
+                        "items": [
+                            {
+                                "name": "keff_band",
+                                "metric": "keff",
+                                "status": "pass",
+                                "residual": 0.0,
+                            }
+                        ],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "msre_first_criticality",
+            {
+                "reactor": {
+                    "name": "MSRE First Criticality Harness",
+                    "family": "MSRE-inspired historical benchmark",
+                    "stage": "benchmark",
+                    "mode": "historic_benchmark",
+                    "design_power_mwth": 8.0,
+                    "benchmark": "benchmarks/msre_first_criticality/benchmark.yaml",
+                }
+            },
+            summary_path,
+            None,
+            None,
+        )
+
+        assert "## Runtime Context" in report
+        assert "thorium-reactor-app:latest" in report
+        assert "## Benchmark Residuals" in report
+        assert "keff_band" in report
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
 def test_report_includes_transient_sweep_section() -> None:
     scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-transient-sweep" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)

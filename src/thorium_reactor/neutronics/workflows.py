@@ -14,6 +14,7 @@ from thorium_reactor.capabilities import (
     validate_case_capability,
 )
 from thorium_reactor.benchmarking import assess_benchmark_traceability
+from thorium_reactor.benchmarking import build_benchmark_residuals
 from thorium_reactor.bop.steady_state import BOPInputs, run_steady_state_bop
 from thorium_reactor.config import CaseConfig, load_yaml
 from thorium_reactor.flow.properties import (
@@ -37,7 +38,10 @@ from thorium_reactor.modeling import (
     get_model_representation,
 )
 from thorium_reactor.neutronics.openmc_compat import missing_openmc_runtime_message, openmc
+from thorium_reactor.property_audit import build_property_audit
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot
+from thorium_reactor.runtime_context import build_runtime_context
+from thorium_reactor.state_store import build_state_store
 
 
 @dataclass(slots=True)
@@ -274,11 +278,15 @@ def run_case(
     provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     built = build_case(config, bundle.openmc_dir, benchmark=benchmark)
+    runtime_context = build_runtime_context(command=["run", config.name])
+    property_audit = build_property_audit(config)
     capabilities = get_case_capabilities(config)
     bundle.write_json("geometry_description.json", built.geometry_description)
     build_manifest = dict(built.manifest)
     build_manifest["workflow_capabilities"] = sorted(capabilities)
     build_manifest["visualization_state"] = _build_visualization_state(bundle)
+    build_manifest["runtime_context"] = _json_copy(runtime_context)
+    build_manifest["property_audit"] = _json_copy(property_audit)
     if provenance:
         build_manifest["input_provenance"] = _json_copy(provenance)
 
@@ -298,6 +306,7 @@ def run_case(
             "geometry_kind": config.geometry["kind"],
         },
         "workflow_capabilities": sorted(capabilities),
+        "runtime_context": _json_copy(runtime_context),
     }
     if "channel_count" in built.manifest:
         summary["metrics"]["channel_count"] = built.manifest["channel_count"]
@@ -403,6 +412,8 @@ def run_case(
         summary["benchmark_traceability"] = _json_copy(built.manifest["benchmark_traceability"])
         summary["metrics"]["benchmark_traceability_score"] = built.manifest["benchmark_traceability"]["traceability_score"]
         summary["metrics"]["validation_maturity_score"] = built.manifest.get("validation_maturity", {}).get("validation_maturity_score", 0.0)
+    benchmark_residuals = build_benchmark_residuals(config, summary, built.benchmark)
+    summary["benchmark_residuals"] = _json_copy(benchmark_residuals)
     summary["model_validity"] = _summarize_model_validity(
         _merge_checks(
             build_manifest.get("model_validity", {}).get("checks", []),
@@ -422,6 +433,19 @@ def run_case(
     )
     bundle.write_json("validation.json", validation_result)
     generate_validation_plot(bundle, validation_result)
+    bundle.write_json("runtime_context.json", runtime_context)
+    bundle.write_json("property_audit.json", property_audit)
+    bundle.write_json("benchmark_residuals.json", benchmark_residuals)
+    state_store = build_state_store(
+        config,
+        summary,
+        benchmark=built.benchmark,
+        provenance=provenance,
+        runtime_context=runtime_context,
+        property_audit=property_audit,
+        benchmark_residuals=benchmark_residuals,
+    )
+    bundle.write_json("state_store.json", state_store)
     bundle.write_json("summary.json", summary)
     summary["visualization_state"] = _build_visualization_state(bundle)
     build_manifest["visualization_state"] = _build_visualization_state(bundle)

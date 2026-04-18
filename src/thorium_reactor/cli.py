@@ -10,14 +10,23 @@ from thorium_reactor.benchmarking import get_docker_runtime_status, run_solver_b
 from thorium_reactor.bundle_inputs import ensure_bundle_inputs, load_bundle_inputs
 from thorium_reactor.config import load_case_config
 from thorium_reactor.geometry.exporters import export_geometry
-from thorium_reactor.integrations import persist_integration_result, run_moose_integration, run_scale_integration
+from thorium_reactor.integrations import (
+    persist_integration_result,
+    run_moose_integration,
+    run_moltres_integration,
+    run_named_integration,
+    run_saltproc_integration,
+    run_scale_integration,
+    run_thermochimica_integration,
+)
 from thorium_reactor.neutronics.openmc_compat import missing_openmc_runtime_message, openmc
 from thorium_reactor.neutronics.workflows import _build_visualization_state, build_case, run_case, validate_case
 from thorium_reactor.paths import ResultBundle, case_config_path, create_result_bundle, discover_repo_root, latest_result_bundle
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot, load_plot_manifest
 from thorium_reactor.reporting.reports import generate_report
-from thorium_reactor.transient import run_transient_case
-from thorium_reactor.transient_sweep import run_transient_sweep_case
+
+
+INTEGRATION_COMMANDS = ("moose", "scale", "thermochimica", "saltproc", "moltres")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo-root", type=Path, default=None, help="Override the repository root.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    for command_name in ("build", "run", "validate", "report", "render", "benchmark", "transient", "transient-sweep", "moose", "scale"):
+    for command_name in ("build", "run", "validate", "report", "render", "benchmark", "transient", "transient-sweep", *INTEGRATION_COMMANDS):
         command = subparsers.add_parser(command_name, help=f"{command_name.capitalize()} a reactor case")
         command.add_argument("case", help="Case name under configs/cases")
         command.add_argument("--run-id", default=None, help="Reuse or create a specific results run id")
@@ -38,13 +47,13 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--samples", type=int, default=512, help="Number of ensemble trajectories to evaluate.")
             command.add_argument("--seed", type=int, default=42, help="Random seed for the ensemble perturbations.")
             command.add_argument("--prefer-gpu", action="store_true", help="Use CuPy when available for batched transient integration.")
-        if command_name in {"moose", "scale"}:
+        if command_name in INTEGRATION_COMMANDS:
             command.add_argument("--run-external", action="store_true", help="Attempt to execute the external code after exporting the input deck.")
         if command_name == "benchmark":
             command.add_argument(
                 "--docker-openmc",
                 action="store_true",
-                help="Run the benchmark case through docker-compose.openmc.yml instead of the local runtime",
+                help="Run the benchmark case through the Docker Compose openmc service instead of the local runtime",
             )
     return parser
 
@@ -78,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = args.repo_root.resolve() if args.repo_root else discover_repo_root()
     config = load_case_config(case_config_path(repo_root, args.case))
 
-    if args.command in {"build", "run", "benchmark", "transient", "transient-sweep", "moose", "scale"}:
+    if args.command in {"build", "run", "benchmark", "transient", "transient-sweep", *INTEGRATION_COMMANDS}:
         bundle = create_result_bundle(repo_root, config.name, args.run_id)
         inputs = ensure_bundle_inputs(repo_root, bundle, config)
     else:
@@ -117,6 +126,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "transient":
+        from thorium_reactor.transient import run_transient_case
+
         summary_path = bundle.root / "summary.json"
         if summary_path.exists():
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -142,6 +153,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "transient-sweep":
+        from thorium_reactor.transient_sweep import run_transient_sweep_case
+
         summary_path = bundle.root / "summary.json"
         if summary_path.exists():
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -196,6 +209,51 @@ def main(argv: list[str] | None = None) -> int:
         summary_path = bundle.root / "summary.json"
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         persist_integration_result(bundle, summary, "scale", result)
+        print(bundle.root)
+        print(result["status"])
+        return 0
+
+    if args.command == "thermochimica":
+        result = run_thermochimica_integration(
+            config,
+            bundle,
+            benchmark=benchmark,
+            provenance=provenance,
+            execute=args.run_external,
+        )
+        summary_path = bundle.root / "summary.json"
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        persist_integration_result(bundle, summary, "thermochimica", result)
+        print(bundle.root)
+        print(result["status"])
+        return 0
+
+    if args.command == "saltproc":
+        result = run_saltproc_integration(
+            config,
+            bundle,
+            benchmark=benchmark,
+            provenance=provenance,
+            execute=args.run_external,
+        )
+        summary_path = bundle.root / "summary.json"
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        persist_integration_result(bundle, summary, "saltproc", result)
+        print(bundle.root)
+        print(result["status"])
+        return 0
+
+    if args.command == "moltres":
+        result = run_moltres_integration(
+            config,
+            bundle,
+            benchmark=benchmark,
+            provenance=provenance,
+            execute=args.run_external,
+        )
+        summary_path = bundle.root / "summary.json"
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        persist_integration_result(bundle, summary, "moltres", result)
         print(bundle.root)
         print(result["status"])
         return 0

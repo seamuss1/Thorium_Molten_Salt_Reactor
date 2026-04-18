@@ -8,7 +8,7 @@ from thorium_reactor.transient_sweep import run_transient_sweep_case
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_run_transient_sweep_case_produces_numpy_backed_bundle() -> None:
+def test_run_transient_sweep_case_produces_cpu_backed_bundle() -> None:
     config = load_case_config(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml")
     bundle = create_result_bundle(REPO_ROOT / ".tmp" / "transient-sweep-test", config.name, "run")
     summary = {
@@ -50,12 +50,12 @@ def test_run_transient_sweep_case_produces_numpy_backed_bundle() -> None:
         prefer_gpu=True,
     )
 
-    assert payload["backend"] == "numpy"
+    assert payload["backend"] in {"python", "numpy"}
     assert payload["samples"] == 128
     assert len(payload["history"]) >= 100
     assert payload["metrics"]["peak_power_fraction_p95"] >= 1.0
     assert summary["transient_sweep"]["samples"] == 128
-    assert summary["transient_sweep"]["backend"] == "numpy"
+    assert summary["transient_sweep"]["backend"] in {"python", "numpy"}
     assert (bundle.root / "transient_sweep.json").exists()
 
 

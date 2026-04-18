@@ -35,6 +35,9 @@ PROPERTY_MODEL_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
 }
 SUPPORTED_BOUNDARY_TYPES = {"reflective", "vacuum", "periodic", "transmission", "white"}
 SUPPORTED_SOURCE_TYPES = {"point"}
+SUPPORTED_REACTOR_MODES = {"historic_benchmark", "modern_test_reactor", "aspirational_breeder"}
+SUPPORTED_PROPERTY_PROVIDERS = {"legacy_correlation", "evaluated_table", "thermochemical_equilibrium"}
+SUPPORTED_INTEGRATIONS = ("moose", "scale", "thermochimica", "saltproc", "moltres")
 
 
 class ConfigError(ValueError):
@@ -114,14 +117,29 @@ def resolve_benchmark_path(repo_root: Path, data: Mapping[str, Any]) -> Path | N
 
 def _validate_case_schema(path: Path, raw: Mapping[str, Any]) -> None:
     _validate_material_properties(path, raw.get("materials"))
+    _validate_reactor_settings(path, raw.get("reactor"))
     _validate_geometry_settings(path, raw.get("geometry"))
     _validate_simulation_settings(path, raw.get("simulation"))
     _validate_optional_transient_settings(path, raw.get("transient"))
     _validate_optional_depletion_settings(path, raw.get("depletion"))
     _validate_optional_chemistry_settings(path, raw.get("chemistry"))
+    _validate_optional_properties_settings(path, raw.get("properties"))
+    _validate_optional_loop_segments(path, raw.get("loop_segments"))
+    _validate_validation_targets_settings(path, raw.get("validation_targets"))
     _validate_optional_flow_settings(path, raw.get("flow"))
     _validate_optional_model_representation(path, raw.get("model_representation"))
     _validate_optional_integrations(path, raw.get("integrations"))
+
+
+def _validate_reactor_settings(path: Path, reactor: Any) -> None:
+    if not isinstance(reactor, Mapping):
+        raise ConfigError(f"Case config {path} has invalid 'reactor'; expected a mapping.")
+    mode = reactor.get("mode")
+    if mode is not None and mode not in SUPPORTED_REACTOR_MODES:
+        supported = ", ".join(sorted(SUPPORTED_REACTOR_MODES))
+        raise ConfigError(
+            f"Case config {path} reactor.mode '{mode}' is unsupported. Supported values: {supported}."
+        )
 
 
 def _validate_material_properties(path: Path, materials: Any) -> None:
@@ -145,6 +163,35 @@ def _validate_material_properties(path: Path, materials: Any) -> None:
                     f"Case config {path} material '{material_name}' property '{quantity}' has unsupported units "
                     f"'{units}'. Supported units: {supported}."
                 )
+            provider = str(property_spec.get("provider", "legacy_correlation"))
+            if provider not in SUPPORTED_PROPERTY_PROVIDERS:
+                supported = ", ".join(sorted(SUPPORTED_PROPERTY_PROVIDERS))
+                raise ConfigError(
+                    f"Case config {path} material '{material_name}' property '{quantity}' has unsupported provider "
+                    f"'{provider}'. Supported values: {supported}."
+                )
+            if provider == "evaluated_table":
+                temperatures = property_spec.get("temperatures_c")
+                values = property_spec.get("values")
+                if "table_path" not in property_spec and (
+                    not isinstance(temperatures, list)
+                    or not isinstance(values, list)
+                    or len(temperatures) != len(values)
+                    or len(temperatures) < 2
+                ):
+                    raise ConfigError(
+                        f"Case config {path} material '{material_name}' property '{quantity}' must provide either "
+                        "table_path or matching temperatures_c and values arrays with at least two points."
+                    )
+                continue
+            if provider == "thermochemical_equilibrium":
+                if not any(field in property_spec for field in ("fallback_value", "reference_value", "value")):
+                    raise ConfigError(
+                        f"Case config {path} material '{material_name}' property '{quantity}' must declare "
+                        "fallback_value, reference_value, or value for thermochemical_equilibrium mode."
+                    )
+                continue
+
             model = str(property_spec.get("model", "constant"))
             required_fields = PROPERTY_MODEL_REQUIRED_FIELDS.get(model)
             if required_fields is None:
@@ -332,6 +379,53 @@ def _validate_optional_chemistry_settings(path: Path, chemistry: Any) -> None:
             _require_number(path, f"chemistry.{field_name}", chemistry[field_name])
 
 
+def _validate_optional_properties_settings(path: Path, properties: Any) -> None:
+    if properties is None:
+        return
+    if not isinstance(properties, Mapping):
+        raise ConfigError(f"Case config {path} optional 'properties' section must be a mapping.")
+    provider = properties.get("provider")
+    if provider is not None and provider not in SUPPORTED_PROPERTY_PROVIDERS:
+        supported = ", ".join(sorted(SUPPORTED_PROPERTY_PROVIDERS))
+        raise ConfigError(
+            f"Case config {path} properties.provider '{provider}' is unsupported. Supported values: {supported}."
+        )
+
+
+def _validate_optional_loop_segments(path: Path, loop_segments: Any) -> None:
+    if loop_segments is None:
+        return
+    if not isinstance(loop_segments, list):
+        raise ConfigError(f"Case config {path} optional 'loop_segments' section must be a list.")
+    for index, segment in enumerate(loop_segments, start=1):
+        if not isinstance(segment, Mapping):
+            raise ConfigError(f"Case config {path} loop_segments[{index}] must be a mapping.")
+        if not segment.get("id"):
+            raise ConfigError(f"Case config {path} loop_segments[{index}] must define an id.")
+        for field_name in ("residence_fraction", "volume_fraction", "decay_heat_fraction"):
+            if field_name in segment:
+                _require_number(path, f"loop_segments[{index}].{field_name}", segment[field_name])
+
+
+def _validate_validation_targets_settings(path: Path, validation_targets: Any) -> None:
+    if not isinstance(validation_targets, Mapping):
+        raise ConfigError(f"Case config {path} has invalid 'validation_targets'; expected a mapping.")
+    for name, target in validation_targets.items():
+        if not isinstance(target, Mapping):
+            raise ConfigError(f"Case config {path} validation_targets.{name} must be a mapping.")
+        benchmark_target_ids = target.get("benchmark_target_ids")
+        if benchmark_target_ids is not None and not isinstance(benchmark_target_ids, list):
+            raise ConfigError(
+                f"Case config {path} validation_targets.{name}.benchmark_target_ids must be a list."
+            )
+        if isinstance(benchmark_target_ids, list):
+            for index, value in enumerate(benchmark_target_ids, start=1):
+                if not str(value).strip():
+                    raise ConfigError(
+                        f"Case config {path} validation_targets.{name}.benchmark_target_ids[{index}] must be a non-empty string."
+                    )
+
+
 def _validate_optional_flow_settings(path: Path, flow: Any) -> None:
     if flow is None:
         return
@@ -393,7 +487,7 @@ def _validate_optional_integrations(path: Path, integrations: Any) -> None:
         return
     if not isinstance(integrations, Mapping):
         raise ConfigError(f"Case config {path} optional 'integrations' section must be a mapping.")
-    for integration_name in ("moose", "scale"):
+    for integration_name in SUPPORTED_INTEGRATIONS:
         settings = integrations.get(integration_name)
         if settings is None:
             continue

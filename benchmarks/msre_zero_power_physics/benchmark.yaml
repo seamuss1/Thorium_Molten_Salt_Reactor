@@ -1,0 +1,33 @@
+title: MSRE zero-power physics reference benchmark
+references:
+  - The zero-power physics program is the next validation rung after simple criticality for rod worth and feedback studies.
+datasets:
+  - id: msre_zero_power_physics
+    phenomenon: zero_power_physics
+    status: numerical_validation
+    confidence: medium
+    source: https://www.osti.gov/servlets/purl/4558029
+    observables:
+      - id: expected_keff_band
+        min: 0.98
+        max: 1.02
+        units: delta-k/k
+        status: literature-backed
+        confidence: medium
+      - id: control_worth_screen
+        min: 0.0
+        max: 1.0
+        units: arbitrary
+        status: surrogate
+        confidence: low
+        note: Placeholder observable until control-worth outputs are added to the open workflow.
+validation:
+  operating_point_source:
+    status: literature-backed
+  cross_code_checks:
+    - name: openmc_zero_power_check
+      status: planned
+      note: Cross-check zero-power observables against an independent model.
+  uncertainty_coverage:
+    status: qualitative
+    note: Zero-power physics observables use qualitative uncertainty until explicit residual datasets are added.

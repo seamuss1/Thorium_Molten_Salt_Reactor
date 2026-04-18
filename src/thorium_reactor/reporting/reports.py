@@ -37,6 +37,7 @@ def generate_report(
         f"- Case: `{case_name}`",
         f"- Family: `{config['reactor']['family']}`",
         f"- Stage: `{config['reactor']['stage']}`",
+        f"- Mode: `{config['reactor'].get('mode', 'modern_test_reactor')}`",
         f"- Result bundle: `{summary.get('result_dir', '')}`",
         f"- Neutronics status: `{summary.get('neutronics', {}).get('status', 'unknown')}`",
         "",
@@ -67,6 +68,21 @@ def generate_report(
                 f"- Case origin path: `{case_provenance.get('origin_path', 'n/a')}`",
                 f"- Benchmark metadata: `{benchmark_provenance.get('source', 'unknown')}`",
                 f"- Benchmark origin path: `{benchmark_provenance.get('origin_path', 'n/a')}`",
+                "",
+            ]
+        )
+
+    runtime_context = summary.get("runtime_context", {})
+    if runtime_context:
+        lines.extend(
+            [
+                "## Runtime Context",
+                "",
+                f"- Service: `{runtime_context.get('service', 'host')}`",
+                f"- Image: `{runtime_context.get('image', 'n/a')}`",
+                f"- Tool runtime: `{runtime_context.get('tool_runtime', 'n/a')}`",
+                f"- Git branch: `{runtime_context.get('git_branch', 'n/a')}`",
+                f"- Git commit: `{runtime_context.get('git_commit', 'n/a')}`",
                 "",
             ]
         )
@@ -122,6 +138,16 @@ def generate_report(
                 f"- Literature-backed targets: `{status_summary['literature_backed_targets']}`",
             ]
         )
+        datasets = benchmark_traceability.get("datasets", [])
+        if datasets:
+            lines.append(f"- Dataset count: `{len(datasets)}`")
+            for dataset in datasets:
+                lines.append(
+                    f"- Dataset `{dataset.get('id', 'dataset')}`: "
+                    f"status=`{dataset.get('status', 'planned')}`, "
+                    f"phenomenon=`{dataset.get('phenomenon', 'n/a')}`, "
+                    f"observables=`{dataset.get('observable_count', 0)}`"
+                )
         for gap in benchmark_traceability.get("gaps", []):
             lines.append(f"- Traceability gap: {gap}")
         if validation_maturity:
@@ -308,6 +334,19 @@ def generate_report(
         lines.append(f"- Final total reactivity p95 (pcm): `{transient_sweep.get('final_total_reactivity_pcm_p95', 'n/a')}`")
         lines.append(f"- Peak corrosion index p95: `{transient_sweep.get('peak_corrosion_index_p95', 'n/a')}`")
         lines.append(f"- Sweep history: `{transient_sweep.get('history_path', 'n/a')}`")
+
+    benchmark_residuals = summary.get("benchmark_residuals", {})
+    if benchmark_residuals:
+        lines.extend(["", "## Benchmark Residuals", ""])
+        lines.append(f"- Residual item count: `{benchmark_residuals.get('item_count', 0)}`")
+        lines.append(f"- Dataset count: `{benchmark_residuals.get('dataset_count', 0)}`")
+        for item in benchmark_residuals.get("items", []):
+            lines.append(
+                f"- `{item.get('name', 'target')}`: "
+                f"metric=`{item.get('metric', 'n/a')}`, "
+                f"status=`{item.get('status', 'pending')}`, "
+                f"residual=`{item.get('residual', 'n/a')}`"
+            )
 
     if validation:
         lines.extend(["", "## Validation", ""])

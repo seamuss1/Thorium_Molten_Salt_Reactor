@@ -43,13 +43,23 @@ def test_example_pin_run_no_solver_succeeds_end_to_end() -> None:
         assert exit_code == 0
         summary = json.loads((scratch_root / "results" / "example_pin" / "smoke" / "summary.json").read_text(encoding="utf-8"))
         validation = json.loads((scratch_root / "results" / "example_pin" / "smoke" / "validation.json").read_text(encoding="utf-8"))
+        runtime_context = json.loads((scratch_root / "results" / "example_pin" / "smoke" / "runtime_context.json").read_text(encoding="utf-8"))
+        state_store = json.loads((scratch_root / "results" / "example_pin" / "smoke" / "state_store.json").read_text(encoding="utf-8"))
         assert summary["neutronics"]["status"] == "dry-run"
         assert summary["neutronics"]["message"] == "Solver execution was disabled for this run."
         assert summary["workflow_capabilities"] == [NEUTRONICS_ONLY]
+        assert (scratch_root / "results" / "example_pin" / "smoke" / "state_store.json").exists()
+        assert (scratch_root / "results" / "example_pin" / "smoke" / "property_audit.json").exists()
+        assert (scratch_root / "results" / "example_pin" / "smoke" / "benchmark_residuals.json").exists()
+        assert (scratch_root / "results" / "example_pin" / "smoke" / "runtime_context.json").exists()
         assert "bop" not in summary
         assert "primary_system" not in summary
         assert "flow" not in summary
         assert "transient" not in summary
+        assert runtime_context["service"] == "host"
+        assert runtime_context["containerized"] is False
+        assert runtime_context["command"] == ["run", "example_pin"]
+        assert state_store["runtime_context"]["command"] == ["run", "example_pin"]
         assert isinstance(validation["checks"], list)
         assert not (scratch_root / "results" / "example_pin" / "smoke" / "render_assets.json").exists()
     finally:
@@ -67,7 +77,7 @@ def test_solver_enabled_without_openmc_reports_missing_solver_status() -> None:
 
         assert summary["neutronics"]["status"] in {"completed", "completed_without_statepoint", "failed", "skipped_missing_solver"}
         if summary["neutronics"]["status"] == "skipped_missing_solver":
-            assert "environment-openmc-linux.yml" in summary["neutronics"]["message"]
+            assert "docker compose run --rm openmc" in summary["neutronics"]["message"]
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
@@ -196,7 +206,7 @@ def test_transient_command_produces_configured_history() -> None:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
 
-def test_moose_and_scale_commands_export_inputs_and_update_summary() -> None:
+def test_external_integration_commands_export_inputs_and_update_summary() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-external-integrations" / uuid.uuid4().hex
     case_dir = scratch_root / "configs" / "cases" / "immersed_pool_reference"
     benchmark_dir = scratch_root / "benchmarks" / "tmsr_lf1"
@@ -213,24 +223,51 @@ def test_moose_and_scale_commands_export_inputs_and_update_summary() -> None:
 
         moose_exit = main(["--repo-root", str(scratch_root), "moose", "immersed_pool_reference", "--run-id", "integrations"])
         scale_exit = main(["--repo-root", str(scratch_root), "scale", "immersed_pool_reference", "--run-id", "integrations"])
+        thermochimica_exit = main(["--repo-root", str(scratch_root), "thermochimica", "immersed_pool_reference", "--run-id", "integrations"])
+        saltproc_exit = main(["--repo-root", str(scratch_root), "saltproc", "immersed_pool_reference", "--run-id", "integrations"])
+        moltres_exit = main(["--repo-root", str(scratch_root), "moltres", "immersed_pool_reference", "--run-id", "integrations"])
 
         assert moose_exit == 0
         assert scale_exit == 0
+        assert thermochimica_exit == 0
+        assert saltproc_exit == 0
+        assert moltres_exit == 0
 
         summary = json.loads((bundle.root / "summary.json").read_text(encoding="utf-8"))
         moose_payload = json.loads((bundle.root / "moose_integration.json").read_text(encoding="utf-8"))
         scale_payload = json.loads((bundle.root / "scale_integration.json").read_text(encoding="utf-8"))
+        thermochimica_payload = json.loads((bundle.root / "thermochimica_integration.json").read_text(encoding="utf-8"))
+        saltproc_payload = json.loads((bundle.root / "saltproc_integration.json").read_text(encoding="utf-8"))
+        moltres_payload = json.loads((bundle.root / "moltres_integration.json").read_text(encoding="utf-8"))
         moose_handoff = json.loads((bundle.root / "moose_handoff.json").read_text(encoding="utf-8"))
         scale_handoff = json.loads((bundle.root / "scale_handoff.json").read_text(encoding="utf-8"))
+        thermochimica_handoff = json.loads((bundle.root / "thermochimica_handoff.json").read_text(encoding="utf-8"))
+        saltproc_handoff = json.loads((bundle.root / "saltproc_handoff.json").read_text(encoding="utf-8"))
+        moltres_handoff = json.loads((bundle.root / "moltres_handoff.json").read_text(encoding="utf-8"))
 
         assert summary["integrations"]["moose"]["status"] == "input_deck_exported"
         assert summary["integrations"]["scale"]["status"] == "input_deck_exported"
+        assert summary["integrations"]["thermochimica"]["status"] == "input_bundle_exported"
+        assert summary["integrations"]["saltproc"]["status"] == "input_bundle_exported"
+        assert summary["integrations"]["moltres"]["status"] == "input_deck_exported"
         assert Path(moose_payload["input_path"]).exists()
         assert Path(scale_payload["input_path"]).exists()
+        assert Path(thermochimica_payload["input_path"]).exists()
+        assert Path(saltproc_payload["input_path"]).exists()
+        assert Path(moltres_payload["input_path"]).exists()
         assert Path(moose_payload["handoff_path"]).exists()
         assert Path(scale_payload["handoff_path"]).exists()
+        assert Path(thermochimica_payload["handoff_path"]).exists()
+        assert Path(saltproc_payload["handoff_path"]).exists()
+        assert Path(moltres_payload["handoff_path"]).exists()
         assert "Executioner" in Path(moose_payload["input_path"]).read_text(encoding="utf-8")
         assert "=csas6" in Path(scale_payload["input_path"]).read_text(encoding="utf-8")
+        assert thermochimica_handoff["tool"] == "thermochimica"
+        assert saltproc_handoff["tool"] == "saltproc"
+        assert moltres_handoff["tool"] == "moltres"
+        assert moose_payload["provenance"]["runtime_context"]["command"] == ["moose", "immersed_pool_reference"]
+        assert thermochimica_payload["provenance"]["runtime_context"]["tool_version"] is None
+        assert thermochimica_handoff["provenance"]["runtime_context"]["command"] == ["thermochimica", "immersed_pool_reference"]
         assert moose_handoff["geometry"]["channel_count"] == summary["metrics"]["channel_count"]
         assert scale_handoff["materials"]["fuel_salt"]["nuclide_count"] > 0
     finally:

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from thorium_reactor.capabilities import resolve_primary_coolant_material_name
 
@@ -154,6 +158,18 @@ def _evaluate_property_spec(spec: dict[str, Any] | None, *, temperature_c: float
     if not spec:
         raise ValueError("Missing property specification.")
 
+    provider = str(spec.get("provider", "legacy_correlation"))
+    if provider == "evaluated_table":
+        return _evaluate_tabulated_property(spec, temperature_c=temperature_c)
+    if provider == "thermochemical_equilibrium":
+        if "fallback_value" in spec:
+            return float(spec["fallback_value"])
+        if "reference_value" in spec:
+            return float(spec["reference_value"])
+        if "value" in spec:
+            return float(spec["value"])
+        raise ValueError("thermochemical_equilibrium properties require fallback_value, reference_value, or value.")
+
     model = spec.get("model", "constant")
     if model == "constant":
         return float(spec["value"])
@@ -170,6 +186,41 @@ def _evaluate_property_spec(spec: dict[str, Any] | None, *, temperature_c: float
             raise ValueError("Temperature must remain above absolute zero for Arrhenius properties.")
         return pre_exponential * math.exp(activation_temperature_k / temperature_k)
     raise ValueError(f"Unsupported property model: {model}")
+
+
+def _evaluate_tabulated_property(spec: dict[str, Any], *, temperature_c: float) -> float:
+    temperatures = spec.get("temperatures_c")
+    values = spec.get("values")
+    if spec.get("table_path"):
+        temperatures, values = _load_tabulated_data(Path(str(spec["table_path"])))
+    if not isinstance(temperatures, list) or not isinstance(values, list) or len(temperatures) != len(values) or len(temperatures) < 2:
+        raise ValueError("evaluated_table properties require matching temperatures_c and values arrays with at least two entries.")
+    paired = sorted((float(x), float(y)) for x, y in zip(temperatures, values))
+    xs = [item[0] for item in paired]
+    ys = [item[1] for item in paired]
+    if temperature_c <= xs[0]:
+        return ys[0]
+    if temperature_c >= xs[-1]:
+        return ys[-1]
+    for index in range(1, len(xs)):
+        if temperature_c <= xs[index]:
+            x0, x1 = xs[index - 1], xs[index]
+            y0, y1 = ys[index - 1], ys[index]
+            fraction = (temperature_c - x0) / max(x1 - x0, 1.0e-12)
+            return y0 + fraction * (y1 - y0)
+    return ys[-1]
+
+
+def _load_tabulated_data(path: Path) -> tuple[list[float], list[float]]:
+    if not path.exists():
+        raise ValueError(f"Property table file '{path}' does not exist.")
+    if path.suffix.lower() == ".json":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    temperatures = payload.get("temperatures_c")
+    values = payload.get("values")
+    return list(temperatures or []), list(values or [])
 
 
 def _convert_property_value(value: float, units: str | None, *, expected_quantity: str) -> float:

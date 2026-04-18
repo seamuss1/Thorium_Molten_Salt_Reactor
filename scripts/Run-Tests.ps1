@@ -3,11 +3,9 @@ param(
     [string[]]$PytestArgs
 )
 
-. (Join-Path $PSScriptRoot "Enter-PytbknShell.ps1")
-
 if (-not $PytestArgs -or $PytestArgs.Count -eq 0) {
     $PytestArgs = @("tests")
 }
 
-& python -m pytest @PytestArgs
+& docker compose run --rm --build app python -m pytest @PytestArgs
 exit $LASTEXITCODE

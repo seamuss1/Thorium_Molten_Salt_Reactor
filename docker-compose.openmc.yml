@@ -7,3 +7,8 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
+    environment:
+      PYTHONPATH: /workspace/src
+      THORIUM_REACTOR_RUNTIME_SERVICE: openmc
+      THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-openmc:latest
+    command: ["python", "-m", "thorium_reactor.cli", "--help"]

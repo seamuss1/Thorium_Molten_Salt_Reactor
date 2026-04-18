@@ -1,0 +1,26 @@
+title: MSRE U-233 zero-power reference benchmark
+references:
+  - This benchmark tracks the U-233-fueled operating mode that differentiates thorium-cycle validation from generic MSR criticality.
+datasets:
+  - id: msre_u233_zero_power
+    phenomenon: u233_zero_power
+    status: numerical_validation
+    confidence: medium
+    source: https://moltensalt.org/references/static/downloads/pdf/ORNL-TM-3963.pdf
+    observables:
+      - id: expected_keff_band
+        min: 0.98
+        max: 1.02
+        units: delta-k/k
+        status: literature-backed
+        confidence: medium
+validation:
+  operating_point_source:
+    status: literature-backed
+  cross_code_checks:
+    - name: openmc_u233_reference_check
+      status: planned
+      note: Cross-check the U-233 benchmark harness against a second reference model.
+  uncertainty_coverage:
+    status: qualitative
+    note: U-233 benchmark uncertainty remains qualitative in the current open harness.

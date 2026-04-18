@@ -1,0 +1,100 @@
+name: msre_u233_zero_power
+reactor:
+  name: MSRE U-233 Zero-Power Harness
+  family: MSRE-inspired historical benchmark
+  stage: benchmark
+  mode: historic_benchmark
+  property_reference_temperature_c: 600.0
+  design_power_mwth: 8.0
+  hot_leg_temp_c: 650.0
+  cold_leg_temp_c: 620.0
+  primary_cp_kj_kgk: 1.95
+  steam_generator_effectiveness: 0.88
+  turbine_efficiency: 0.35
+  generator_efficiency: 0.96
+  benchmark: benchmarks/msre_u233_zero_power/benchmark.yaml
+benchmark_datasets: [msre_u233_zero_power]
+properties:
+  provider: evaluated_table
+materials:
+  fuel_salt:
+    name: fuel_salt
+    density:
+      provider: evaluated_table
+      units: g/cm3
+      temperatures_c: [550.0, 600.0, 650.0, 700.0]
+      values: [2.64, 2.60, 2.56, 2.52]
+    cp:
+      provider: evaluated_table
+      units: j/kg-k
+      temperatures_c: [550.0, 600.0, 650.0, 700.0]
+      values: [1885.0, 1915.0, 1945.0, 1975.0]
+    thermal_conductivity: { provider: thermochemical_equilibrium, units: w/m-k, fallback_value: 1.0 }
+    dynamic_viscosity:
+      provider: evaluated_table
+      units: pa-s
+      temperatures_c: [550.0, 600.0, 650.0, 700.0]
+      values: [0.0145, 0.0121, 0.0102, 0.0088]
+    nuclides:
+      - { name: Li7, ao: 0.337 }
+      - { name: F19, ao: 0.612 }
+      - { name: Be9, ao: 0.047 }
+      - { name: Zr90, ao: 0.002 }
+      - { name: U233, ao: 0.002 }
+  graphite:
+    name: graphite
+    density: { units: g/cm3, value: 1.86 }
+    elements:
+      - { name: C, ao: 1.0 }
+  pipe:
+    name: pipe
+    density: { units: g/cm3, value: 8.8 }
+    elements:
+      - { name: Ni, ao: 1.0 }
+  air:
+    name: air
+    density: { units: g/cm3, value: 0.00018 }
+    elements:
+      - { name: He, ao: 1.0 }
+geometry:
+  kind: layered_channel
+  pitch: 1.80
+  boundary: reflective
+  background_name: void
+  background_material: air
+  height_cm: 150.0
+  layers:
+    - { name: moderator_center, material: graphite, inner_radius: 0.0, outer_radius: 0.25 }
+    - { name: fuel_annulus, material: fuel_salt, inner_radius: 0.2501, outer_radius: 0.39, tag_as: fuel }
+    - { name: gas_gap_inner, material: null, inner_radius: 0.39, outer_radius: 0.40 }
+    - { name: primary_pipe, material: pipe, inner_radius: 0.40, outer_radius: 0.46, tag_as: pipe }
+    - { name: gas_gap_outer, material: null, inner_radius: 0.4601, outer_radius: 0.60 }
+simulation:
+  mode: eigenvalue
+  particles: 5000
+  batches: 60
+  inactive: 10
+  source:
+    type: point
+    parameters: [0.0, 0.0, 0.0]
+  tallies:
+    - name: fuel_reaction_rates
+      cell: fuel
+      nuclides: [U233]
+      scores: [total, fission, absorption, "(n,gamma)"]
+reporting:
+  plots:
+    - name: msre_u233_zero_power_cross_section
+      kind: svg
+validation_targets:
+  expected_cells:
+    metric: expected_cells
+    source: metrics
+    min: 7
+    max: 7
+  keff_u233_band:
+    metric: keff
+    source: metrics
+    min: 0.98
+    max: 1.02
+    benchmark_target_ids: [expected_keff_band]

@@ -59,6 +59,23 @@ def generate_summary_plots(bundle, summary: dict[str, Any]) -> dict[str, str]:
         if _write_keff_history_svg(statepoint_path, history_path):
             assets["keff_history"] = str(history_path)
 
+    benchmark_residuals = summary.get("benchmark_residuals", {})
+    if isinstance(benchmark_residuals, dict):
+        residual_metrics = {
+            str(item.get("name", f"target_{index}")): float(item["residual"])
+            for index, item in enumerate(benchmark_residuals.get("items", []), start=1)
+            if isinstance(item, dict) and isinstance(item.get("residual"), (int, float))
+        }
+        if residual_metrics:
+            residual_path = bundle.plots_dir / "benchmark_residuals.svg"
+            _write_bar_chart_svg(
+                residual_metrics,
+                residual_path,
+                title=f"{summary['case']} benchmark residuals",
+                palette=["#0f766e", "#1d4ed8", "#b45309", "#7c3aed"],
+            )
+            assets["benchmark_residuals"] = str(residual_path)
+
     transient = summary.get("transient", {})
     transient_path = _resolve_transient_path(bundle, transient)
     if transient_path is not None:
@@ -98,6 +115,36 @@ def generate_summary_plots(bundle, summary: dict[str, Any]) -> dict[str, str]:
                     y_label="Fuel temperature (C)",
                 )
                 assets["transient_fuel_temperature"] = str(fuel_path)
+            redox_points = [
+                (float(item["time_s"]), float(item["redox_state_ev"]))
+                for item in history
+                if isinstance(item, dict) and "time_s" in item and "redox_state_ev" in item
+            ]
+            if redox_points:
+                redox_path = bundle.plots_dir / "transient_redox_state.svg"
+                _write_xy_line_chart_svg(
+                    redox_points,
+                    redox_path,
+                    title=f"{summary['case']} transient redox state",
+                    x_label="Time (s)",
+                    y_label="Redox state (eV)",
+                )
+                assets["transient_redox_state"] = str(redox_path)
+            fissile_points = [
+                (float(item["time_s"]), float(item["fissile_inventory_fraction"]))
+                for item in history
+                if isinstance(item, dict) and "time_s" in item and "fissile_inventory_fraction" in item
+            ]
+            if fissile_points:
+                fissile_path = bundle.plots_dir / "transient_fissile_inventory.svg"
+                _write_xy_line_chart_svg(
+                    fissile_points,
+                    fissile_path,
+                    title=f"{summary['case']} transient fissile inventory",
+                    x_label="Time (s)",
+                    y_label="Fissile inventory fraction",
+                )
+                assets["transient_fissile_inventory"] = str(fissile_path)
 
     transient_sweep = summary.get("transient_sweep", {})
     transient_sweep_path = _resolve_transient_sweep_path(bundle, transient_sweep)

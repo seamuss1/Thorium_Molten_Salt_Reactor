@@ -22,6 +22,7 @@ def test_structured_benchmark_metadata_has_traceability_summary() -> None:
     assert traceability["validation_maturity"]["validation_maturity_score"] < 40.0
     assert traceability["validation_maturity"]["validation_maturity_stage"] == "surrogate_only"
     assert any("literature-backed" in gap for gap in traceability["validation_maturity"]["gaps"])
+    assert traceability["datasets"][0]["status"] == "context_only"
 
 
 def test_build_docker_openmc_command_targets_repo_compose_runtime() -> None:
@@ -30,8 +31,6 @@ def test_build_docker_openmc_command_targets_repo_compose_runtime() -> None:
     assert command == [
         "docker",
         "compose",
-        "-f",
-        "docker-compose.openmc.yml",
         "run",
         "--build",
         "--rm",

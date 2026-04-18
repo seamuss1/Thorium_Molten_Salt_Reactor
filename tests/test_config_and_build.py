@@ -23,6 +23,14 @@ def test_benchmark_paths_resolve_from_case_configs() -> None:
     assert config.benchmark_file.exists()
 
 
+def test_msre_benchmark_case_uses_historic_mode_and_resolves_benchmark() -> None:
+    config = _load_case("msre_first_criticality")
+
+    assert config.reactor["mode"] == "historic_benchmark"
+    assert config.benchmark_file is not None
+    assert config.benchmark_file.exists()
+
+
 def test_core_case_manifest_has_expected_channel_count() -> None:
     config = _load_case("tmsr_lf1_core")
     built = build_case(config)
@@ -252,6 +260,21 @@ def test_case_loader_rejects_non_numeric_chemistry_field() -> None:
         case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
         with pytest.raises(ConfigError, match="chemistry.target_redox_state_ev"):
+            load_case_config(case_path)
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_case_loader_rejects_unsupported_property_provider() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "msre_first_criticality" / "case.yaml").read_text(encoding="utf-8"))
+        payload.setdefault("properties", {})["provider"] = "mystery_provider"
+        case_path = scratch_root / "case.yaml"
+        case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="properties.provider"):
             load_case_config(case_path)
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)

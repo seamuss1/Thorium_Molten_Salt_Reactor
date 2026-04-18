@@ -2,6 +2,19 @@ title: TMSR-LF1-inspired surrogate benchmark
 references:
   - Public TMSR-LF1 concept descriptions and open molten-salt literature should replace or tighten these bands.
   - Current values are explicitly labeled surrogate acceptance bounds for implementation scaffolding.
+datasets:
+  - id: tmsr_lf1_program_context
+    phenomenon: licensing_and_program_milestones
+    status: context_only
+    confidence: medium
+    source: https://www.mee.gov.cn/xxgk2018/xxgk/xxgk09/202306/t20230613_1033619.html
+    observables:
+      - id: nominal_thermal_power_mwth
+        value: 2.0
+        units: MWth
+        status: surrogate
+        confidence: low
+        note: Contextual modern-program value, not a benchmark-grade numerical validation target.
 assumptions:
   - id: open_reproducible_scope
     text: This repository targets an openly reproducible, TMSR-LF1-inspired model rather than a proprietary plant replica.

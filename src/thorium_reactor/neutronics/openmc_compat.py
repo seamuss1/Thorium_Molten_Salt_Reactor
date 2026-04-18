@@ -13,13 +13,20 @@ def missing_openmc_runtime_message(command_name: str = "run", *, system_name: st
     message = "OpenMC is not installed in the active environment."
     if system.startswith("win"):
         message += (
-            " This Windows runtime supports reduced-order local workflows, but solver-backed OpenMC runs require "
-            "Docker or a supported Linux/OpenMC environment created from `environment-openmc-linux.yml`."
+            " This repository now defaults to the Docker Compose workflow, so solver-backed OpenMC runs should use "
+            "`docker compose run --rm openmc ...` or the `Run-Reactor.cmd` wrapper. A supported "
+            "`environment-openmc-linux.yml` environment remains available as a best-effort fallback."
         )
     else:
-        message += " Solver-backed runs require an environment with OpenMC installed, such as `environment-openmc-linux.yml`."
+        message += (
+            " Solver-backed runs require either the Docker Compose `openmc` service or an environment with OpenMC "
+            "installed, such as `environment-openmc-linux.yml`."
+        )
     if command_name == "benchmark":
-        message += " Benchmark runs require the solver-backed path and can use `reactor benchmark <case> --docker-openmc` when Docker is available."
+        message += (
+            " Benchmark runs require the solver-backed path and can use `reactor benchmark <case> --docker-openmc` "
+            "or `docker compose run --rm openmc python -m thorium_reactor.cli benchmark <case>`."
+        )
     return message
 
 

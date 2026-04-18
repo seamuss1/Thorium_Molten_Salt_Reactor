@@ -10,6 +10,7 @@ from thorium_reactor.config import CaseConfig
 
 
 CONFIDENCE_LEVELS = ("high", "medium", "low")
+DATASET_STATUSES = {"planned", "numerical_validation", "context_only"}
 REACTOR_TARGET_LINKS = (
     ("design_power_mwth", "nominal_thermal_power_mwth", "design thermal power"),
     ("hot_leg_temp_c", "nominal_hot_leg_temp_c", "hot-leg temperature"),
@@ -28,7 +29,8 @@ def assess_benchmark_traceability(
 
     evidence = [_normalize_evidence(item, index) for index, item in enumerate(benchmark.get("evidence", []), start=1)]
     assumptions = [_normalize_assumption(item, index) for index, item in enumerate(benchmark.get("assumptions", []), start=1)]
-    targets = [_normalize_target(name, spec) for name, spec in (benchmark.get("targets") or {}).items()]
+    targets = _collect_benchmark_targets(benchmark)
+    datasets = [_normalize_dataset(item, index) for index, item in enumerate(benchmark.get("datasets", []), start=1)]
 
     evidence_complete_count = sum(1 for item in evidence if item["complete"])
     assumption_structured_count = sum(1 for item in assumptions if item["structured"])
@@ -185,6 +187,7 @@ def assess_benchmark_traceability(
         "assumptions": assumptions,
         "targets": targets,
         "evidence": evidence,
+        "datasets": datasets,
     }
 
 
@@ -264,8 +267,6 @@ def build_docker_openmc_command(case_name: str, run_id: str) -> list[str]:
     return [
         "docker",
         "compose",
-        "-f",
-        "docker-compose.openmc.yml",
         "run",
         "--build",
         "--rm",
@@ -356,6 +357,51 @@ def _normalize_target(name: str, spec: Any) -> dict[str, Any]:
     }
 
 
+def _collect_benchmark_targets(benchmark: dict[str, Any]) -> list[dict[str, Any]]:
+    targets = [_normalize_target(name, spec) for name, spec in (benchmark.get("targets") or {}).items()]
+    for dataset_index, dataset in enumerate(benchmark.get("datasets", []), start=1):
+        if not isinstance(dataset, dict):
+            continue
+        dataset_id = str(dataset.get("id", f"dataset_{dataset_index}"))
+        observables = dataset.get("observables", [])
+        if not isinstance(observables, list):
+            continue
+        for observable_index, observable in enumerate(observables, start=1):
+            if not isinstance(observable, dict):
+                continue
+            observable_id = str(observable.get("id", f"{dataset_id}_observable_{observable_index}"))
+            normalized = _normalize_target(observable_id, observable)
+            normalized["dataset_id"] = dataset_id
+            normalized["dataset_status"] = str(dataset.get("status", "planned"))
+            targets.append(normalized)
+    return targets
+
+
+def _normalize_dataset(item: Any, index: int) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        return {
+            "id": f"dataset_{index}",
+            "phenomenon": None,
+            "status": "planned",
+            "confidence": None,
+            "observable_count": 0,
+        }
+    status = str(item.get("status", "planned")).lower()
+    if status not in DATASET_STATUSES:
+        status = "planned"
+    observables = item.get("observables", [])
+    if not isinstance(observables, list):
+        observables = []
+    return {
+        "id": str(item.get("id", f"dataset_{index}")),
+        "phenomenon": item.get("phenomenon"),
+        "status": status,
+        "confidence": _normalize_confidence(item.get("confidence")),
+        "observable_count": len(observables),
+        "source": item.get("source"),
+    }
+
+
 def _normalize_confidence(value: Any) -> str | None:
     if value is None:
         return None
@@ -366,6 +412,9 @@ def _normalize_confidence(value: Any) -> str | None:
 
 
 def _infer_benchmark_targets_for_validation(target: dict[str, Any]) -> list[str]:
+    benchmark_target_ids = target.get("benchmark_target_ids")
+    if isinstance(benchmark_target_ids, list) and benchmark_target_ids:
+        return [str(value) for value in benchmark_target_ids if str(value).strip()]
     metric = str(target.get("metric", ""))
     if metric == "keff":
         return ["expected_keff_band"]
@@ -481,4 +530,54 @@ def _normalize_cross_code_check(index: int, item: Any) -> dict[str, Any]:
         "name": str(item.get("name", f"cross_code_check_{index}")),
         "status": status,
         "note": item.get("note"),
+    }
+
+
+def build_benchmark_residuals(
+    config: CaseConfig | dict[str, Any],
+    summary: dict[str, Any],
+    benchmark: dict[str, Any] | None,
+) -> dict[str, Any]:
+    benchmark = benchmark or {}
+    _, validation_targets = _extract_config_parts(config)
+    metrics = summary.get("metrics", {})
+    items: list[dict[str, Any]] = []
+    for name, target in validation_targets.items():
+        if not isinstance(target, dict):
+            continue
+        source_name = str(target.get("source", "metrics"))
+        source = metrics if source_name == "metrics" else summary.get(source_name, {})
+        value = source.get(target.get("metric"))
+        minimum = target.get("min")
+        maximum = target.get("max")
+        center = None
+        residual = None
+        if minimum is not None and maximum is not None:
+            center = (float(minimum) + float(maximum)) / 2.0
+        if value is not None and center is not None:
+            residual = round(float(value) - center, 6)
+        status = "pending"
+        if value is not None:
+            status = "pass"
+            if minimum is not None and float(value) < float(minimum):
+                status = "fail"
+            if maximum is not None and float(value) > float(maximum):
+                status = "fail"
+        items.append(
+            {
+                "name": name,
+                "metric": target.get("metric"),
+                "value": value,
+                "min": minimum,
+                "max": maximum,
+                "center": center,
+                "residual": residual,
+                "status": status,
+                "benchmark_target_ids": _infer_benchmark_targets_for_validation(target),
+            }
+        )
+    return {
+        "item_count": len(items),
+        "items": items,
+        "dataset_count": len(benchmark.get("datasets", [])) if isinstance(benchmark.get("datasets"), list) else 0,
     }

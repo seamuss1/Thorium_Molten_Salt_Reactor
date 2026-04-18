@@ -1,0 +1,48 @@
+title: MSRE first criticality reference benchmark
+references:
+  - Historical MSRE first criticality measurements remain the primary open benchmark anchor for molten-salt reactor neutronics.
+assumptions:
+  - id: msre_open_model_scope
+    text: This case is an openly reproducible MSRE-inspired benchmark harness rather than a full-fidelity proprietary reconstruction.
+    basis: project_scope
+    confidence: medium
+    evidence_refs: [ornl-measurements]
+evidence:
+  - id: ornl-measurements
+    topic: MSRE benchmark basis
+    source: https://www.ornl.gov/molten-salt-reactor/measurements
+    claim: ORNL identifies the MSRE as the foundation of the evaluated molten-salt benchmark record.
+    relevance: The repo uses MSRE as the quantitative validation anchor for historical liquid-fuel behavior.
+    confidence: high
+datasets:
+  - id: msre_first_criticality
+    phenomenon: criticality
+    status: numerical_validation
+    confidence: high
+    source: https://www.ornl.gov/molten-salt-reactor/measurements
+    observables:
+      - id: expected_keff_band
+        min: 0.99
+        max: 1.01
+        units: delta-k/k
+        status: literature-backed
+        confidence: medium
+        note: Placeholder benchmark band for the open harness until the reconstructed geometry is tightened further.
+targets:
+  nominal_thermal_power_mwth:
+    value: 8.0
+    units: MWth
+    status: literature-backed
+    confidence: medium
+    evidence_refs: [ornl-measurements]
+validation:
+  operating_point_source:
+    status: literature-backed
+    note: Historical operating-point values are benchmark-facing for this reference harness.
+  cross_code_checks:
+    - name: openmc_reference_model
+      status: planned
+      note: Compare the open harness against a second independently prepared reference model.
+  uncertainty_coverage:
+    status: qualitative
+    note: Initial benchmark uncertainty is carried qualitatively until the reconstructed model is tightened.
