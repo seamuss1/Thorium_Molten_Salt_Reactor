@@ -12,6 +12,7 @@ from thorium_reactor.capabilities import BALANCE_OF_PLANT, THERMAL_NETWORK, vali
 from thorium_reactor.precursors import (
     build_initial_precursor_state,
     precursor_group_summary,
+    precursor_loop_segment_summary,
     resolve_precursor_transport,
     step_precursor_state,
     summarize_precursor_state,
@@ -228,6 +229,11 @@ def _build_transient_baseline(config: Any, summary: dict[str, Any]) -> dict[str,
             bulk_temperature_c=average_temp_c,
             cleanup_turnover_days=float(fuel_cycle.get("cleanup_turnover_days", config.reactor.get("cleanup_turnover_days", 14.0))),
         )
+    precursor_loop_segments = _resolve_precursor_loop_segments(
+        config,
+        primary_system=primary_system,
+        loop_residence_time_s=loop_residence_time_s,
+    )
     return {
         "thermal_power_mw": _round_float(thermal_power_mw),
         "hot_leg_temp_c": _round_float(hot_leg_temp_c),
@@ -241,6 +247,7 @@ def _build_transient_baseline(config: Any, summary: dict[str, Any]) -> dict[str,
         "initial_core_precursor_fraction": _round_float(initial_core_precursor_fraction),
         "chemistry": chemistry_summary,
         "fuel_cycle": fuel_cycle,
+        "precursor_loop_segments": precursor_loop_segments,
     }
 
 
@@ -320,6 +327,8 @@ def _integrate_transient(
         core_residence_time_s=float(baseline["core_residence_time_s"]),
         loop_residence_time_s=float(baseline["loop_residence_time_s"]),
         cleanup_rate_s=nominal_cleanup_rate_s,
+        transport_model=str(model_parameters["precursor_transport_model"]),
+        loop_segments=baseline.get("precursor_loop_segments"),
     )
     precursor_summary = summarize_precursor_state(
         precursor_state,
@@ -335,6 +344,10 @@ def _integrate_transient(
         "precursor_transport_loss_fraction"
     ]
     baseline["delayed_neutron_precursor_groups"] = precursor_group_summary(
+        precursor_state,
+        precursor_groups,
+    )
+    baseline["precursor_loop_segment_summary"] = precursor_loop_segment_summary(
         precursor_state,
         precursor_groups,
     )
@@ -435,6 +448,8 @@ def _integrate_transient(
             core_residence_time_s=float(baseline["core_residence_time_s"]),
             loop_residence_time_s=float(baseline["loop_residence_time_s"]),
             cleanup_rate_s=cleanup_rate_s,
+            transport_model=str(model_parameters["precursor_transport_model"]),
+            loop_segments=baseline.get("precursor_loop_segments"),
         )
         precursor_summary = summarize_precursor_state(
             precursor_state,
@@ -619,6 +634,56 @@ def _precursor_cleanup_rate_s(
         1.0,
     )
     return cleanup_rate_s
+
+
+def _resolve_precursor_loop_segments(
+    config: Any,
+    *,
+    primary_system: dict[str, Any],
+    loop_residence_time_s: float,
+) -> list[dict[str, Any]]:
+    configured_segments = config.data.get("loop_segments")
+    if isinstance(configured_segments, list) and configured_segments:
+        return [
+            {
+                "id": str(segment.get("id") or segment.get("name") or f"loop_segment_{index + 1}"),
+                "residence_fraction": float(segment.get("residence_fraction", segment.get("volume_fraction", 0.0))),
+                "cleanup_weight": float(segment.get("cleanup_weight", segment.get("cleanup_fraction", 1.0))),
+            }
+            for index, segment in enumerate(configured_segments)
+            if isinstance(segment, dict)
+        ]
+
+    primary_loop_segments = primary_system.get("loop_segments", [])
+    if isinstance(primary_loop_segments, list) and primary_loop_segments:
+        residence_estimates: list[tuple[str, float]] = []
+        for index, segment in enumerate(primary_loop_segments):
+            if not isinstance(segment, dict):
+                continue
+            flow_m3_s = max(float(segment.get("volumetric_flow_m3_s", 0.0)), 0.0)
+            length_m = max(float(segment.get("length_m", 0.0)), 0.0)
+            diameter_m = max(float(segment.get("inner_diameter_m", 0.0)), 0.0)
+            volume_m3 = 3.141592653589793 * (0.5 * diameter_m) ** 2 * length_m
+            residence_s = volume_m3 / flow_m3_s if flow_m3_s > 0.0 else 0.0
+            residence_estimates.append((str(segment.get("id") or segment.get("name") or f"loop_segment_{index + 1}"), residence_s))
+        total_residence_s = sum(value for _, value in residence_estimates)
+        if total_residence_s > 0.0:
+            return [
+                {
+                    "id": segment_id,
+                    "residence_fraction": residence_s / total_residence_s,
+                    "cleanup_weight": 1.0,
+                }
+                for segment_id, residence_s in residence_estimates
+            ]
+
+    return [
+        {
+            "id": "external_loop",
+            "residence_fraction": 1.0,
+            "cleanup_weight": 1.0 if loop_residence_time_s > 0.0 else 0.0,
+        }
+    ]
 
 
 def _first_order_step(current_value: float, target_value: float, dt: float, time_constant_s: float) -> float:

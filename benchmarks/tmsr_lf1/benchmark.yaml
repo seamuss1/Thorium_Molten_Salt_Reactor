@@ -2,19 +2,100 @@ title: TMSR-LF1-inspired surrogate benchmark
 references:
   - Public TMSR-LF1 concept descriptions and open molten-salt literature should replace or tighten these bands.
   - Current values are explicitly labeled surrogate acceptance bounds for implementation scaffolding.
+  - Wang et al. 2026 RESTA3D 2 MWth TMSR transient analysis, https://doi.org/10.3390/en19040964.
+  - Poo 2026 National Science Review editorial on China's fourth-generation reactor progress, https://doi.org/10.1093/nsr/nwaf509.
+  - Chinese Academy of Sciences 2025 report of thorium-uranium conversion in the Wuwei molten-salt reactor.
 datasets:
   - id: tmsr_lf1_program_context
     phenomenon: licensing_and_program_milestones
-    status: context_only
-    confidence: medium
-    source: https://www.mee.gov.cn/xxgk2018/xxgk/xxgk09/202306/t20230613_1033619.html
+    status: literature_backed
+    confidence: high
+    source: https://doi.org/10.1093/nsr/nwaf509
     observables:
       - id: nominal_thermal_power_mwth
         value: 2.0
         units: MWth
-        status: surrogate
-        confidence: low
-        note: Contextual modern-program value, not a benchmark-grade numerical validation target.
+        status: literature-backed
+        confidence: high
+        note: Public 2 MWth Wuwei TMSR operating milestone.
+      - id: first_criticality_date
+        value: "2023-10-11"
+        units: date
+        status: literature-backed
+        confidence: medium
+      - id: full_power_operation_date
+        value: "2024-06"
+        units: month
+        status: literature-backed
+        confidence: medium
+      - id: thorium_conversion_report_date
+        value: "2025-11"
+        units: month
+        status: literature-backed
+        confidence: medium
+  - id: resta3d_2mw_tmsr_operating_point
+    phenomenon: operating_point_and_loop_transport
+    status: literature_backed
+    confidence: high
+    source: https://doi.org/10.3390/en19040964
+    observables:
+      - id: active_fuel_channels
+        value: 696
+        units: count
+        status: literature-backed
+        confidence: high
+      - id: fuel_salt_mole_composition
+        value: 68LiF-28BeF2-0.1ThF4-3.9UF4
+        units: mole-percent
+        status: literature-backed
+        confidence: high
+      - id: primary_inlet_temperature_k
+        value: 873.0
+        units: K
+        status: literature-backed
+        confidence: high
+      - id: primary_outlet_temperature_k
+        value: 893.0
+        units: K
+        status: literature-backed
+        confidence: high
+      - id: primary_mass_flow_kg_s
+        value: 55.0
+        units: kg/s
+        status: literature-backed
+        confidence: high
+      - id: external_core_residence_time_s
+        value: 55.25
+        units: s
+        status: literature-backed
+        confidence: high
+        note: Residence time outside the core, directly relevant to delayed-neutron precursor loss.
+  - id: tmsr_sf0_property_uncertainty
+    phenomenon: molten_salt_thermophysical_property_uncertainty
+    status: literature_backed
+    confidence: high
+    source: https://doi.org/10.1016/j.net.2023.11.016
+    observables:
+      - id: density_uncertainty_95_fraction
+        value: 0.02
+        units: fraction
+        status: literature-backed
+        confidence: high
+      - id: cp_uncertainty_95_fraction
+        value: 0.10
+        units: fraction
+        status: literature-backed
+        confidence: high
+      - id: conductivity_uncertainty_95_fraction
+        value: 0.10
+        units: fraction
+        status: literature-backed
+        confidence: high
+      - id: viscosity_uncertainty_95_fraction
+        value: 0.10
+        units: fraction
+        status: literature-backed
+        confidence: high
 assumptions:
   - id: open_reproducible_scope
     text: This repository targets an openly reproducible, TMSR-LF1-inspired model rather than a proprietary plant replica.
@@ -66,26 +147,26 @@ novelty_tracks:
     summary: Couple neutronics outputs with a nodal transient model to explore delayed-neutron drift, salt transport lag, and plant-level control scenarios that are hard to show in static LWR-style workflows.
 targets:
   nominal_thermal_power_mwth:
-    value: 250.0
+    value: 2.0
     units: MWth
-    status: surrogate
-    confidence: low
-    evidence_refs: [openmsr-archive]
-    note: Replace with a citation-backed TMSR-LF1 thermal rating once the benchmark case is source-linked.
+    status: literature-backed
+    confidence: high
+    evidence_refs: [tmsr_lf1_program_context, resta3d_2mw_tmsr_operating_point]
+    note: Source-linked TMSR-LF1 public operating point; the repository's larger inspired case remains a scale-up scenario.
   nominal_hot_leg_temp_c:
-    value: 700.0
+    value: 619.85
     units: C
-    status: surrogate
-    confidence: low
-    evidence_refs: [openmsr-archive]
-    note: Replace with a source-linked primary outlet temperature when literature extraction is complete.
+    status: literature-backed
+    confidence: high
+    evidence_refs: [resta3d_2mw_tmsr_operating_point]
+    note: Converted from the 893 K core outlet temperature reported for the 2 MWth TMSR model.
   nominal_cold_leg_temp_c:
-    value: 560.0
+    value: 599.85
     units: C
-    status: surrogate
-    confidence: low
-    evidence_refs: [openmsr-archive]
-    note: Replace with a source-linked primary inlet temperature when literature extraction is complete.
+    status: literature-backed
+    confidence: high
+    evidence_refs: [resta3d_2mw_tmsr_operating_point]
+    note: Converted from the 873 K core inlet temperature reported for the 2 MWth TMSR model.
   expected_keff_band:
     min: 0.98
     max: 1.08
@@ -96,8 +177,8 @@ targets:
     note: Tighten this band against a benchmarked reference model once solver-backed cross-checking is in place.
 validation:
   operating_point_source:
-    status: surrogate
-    note: Operating-point values remain openly documented surrogate bands until a citation-backed LF1 source set is extracted.
+    status: literature-backed
+    note: Public 2 MWth TMSR operating-point values are now traceable to RESTA3D and NSR/CAS sources.
   cross_code_checks:
     - name: openmc_reference_model
       status: planned
@@ -106,5 +187,5 @@ validation:
       status: planned
       note: Cross-check reduced-order core hydraulics against a homogenized or external thermal-hydraulics model.
   uncertainty_coverage:
-    status: missing
-    note: No quantified uncertainty bands are published for this scaffold benchmark yet.
+    status: partial
+    note: Molten-salt thermophysical property uncertainty defaults use the TMSR-SF0 RELAP5 uncertainty study.

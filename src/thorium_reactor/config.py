@@ -11,6 +11,7 @@ from thorium_reactor.modeling import (
     FUEL_CYCLE_REPRESENTATIONS,
     MODEL_MATERIAL_REPRESENTATIONS,
 )
+from thorium_reactor.precursors import SUPPORTED_PRECURSOR_TRANSPORT_MODELS
 
 
 REQUIRED_CASE_KEYS = (
@@ -124,6 +125,9 @@ def _validate_case_schema(path: Path, raw: Mapping[str, Any]) -> None:
     _validate_optional_depletion_settings(path, raw.get("depletion"))
     _validate_optional_chemistry_settings(path, raw.get("chemistry"))
     _validate_optional_properties_settings(path, raw.get("properties"))
+    _validate_optional_property_uncertainty_settings(path, raw.get("property_uncertainty"))
+    _validate_optional_tritium_settings(path, raw.get("tritium"))
+    _validate_optional_graphite_lifetime_settings(path, raw.get("graphite_lifetime"))
     _validate_optional_loop_segments(path, raw.get("loop_segments"))
     _validate_validation_targets_settings(path, raw.get("validation_targets"))
     _validate_optional_flow_settings(path, raw.get("flow"))
@@ -315,6 +319,13 @@ def _validate_optional_transient_settings(path: Path, transient: Any) -> None:
         if field_name in transient:
             _require_number(path, f"transient.{field_name}", transient[field_name])
     precursor_groups = transient.get("delayed_neutron_precursor_groups")
+    precursor_transport_model = transient.get("precursor_transport_model")
+    if precursor_transport_model is not None and precursor_transport_model not in SUPPORTED_PRECURSOR_TRANSPORT_MODELS:
+        supported = ", ".join(sorted(SUPPORTED_PRECURSOR_TRANSPORT_MODELS))
+        raise ConfigError(
+            f"Case config {path} transient.precursor_transport_model '{precursor_transport_model}' is unsupported. "
+            f"Supported values: {supported}."
+        )
     if precursor_groups is not None:
         if not isinstance(precursor_groups, list):
             raise ConfigError(f"Case config {path} transient.delayed_neutron_precursor_groups must be a list.")
@@ -431,6 +442,67 @@ def _validate_optional_properties_settings(path: Path, properties: Any) -> None:
         )
 
 
+def _validate_optional_property_uncertainty_settings(path: Path, property_uncertainty: Any) -> None:
+    if property_uncertainty is None:
+        return
+    if not isinstance(property_uncertainty, Mapping):
+        raise ConfigError(f"Case config {path} optional 'property_uncertainty' section must be a mapping.")
+    for field_name in (
+        "confidence_level",
+        "density_uncertainty_95_fraction",
+        "cp_uncertainty_95_fraction",
+        "thermal_conductivity_uncertainty_95_fraction",
+        "dynamic_viscosity_uncertainty_95_fraction",
+        "core_outlet_temperature_uncertainty_95_c",
+    ):
+        if field_name in property_uncertainty:
+            _require_number(path, f"property_uncertainty.{field_name}", property_uncertainty[field_name])
+
+
+def _validate_optional_tritium_settings(path: Path, tritium: Any) -> None:
+    if tritium is None:
+        return
+    if not isinstance(tritium, Mapping):
+        raise ConfigError(f"Case config {path} optional 'tritium' section must be a mapping.")
+    for field_name in (
+        "lithium6_atom_fraction",
+        "reference_lithium6_atom_fraction",
+        "reference_power_mwth",
+        "gas_stripping_efficiency",
+        "reference_gas_stripping_efficiency",
+        "unmitigated_environment_fraction",
+        "mitigated_environment_fraction",
+        "spray_gas_removal_fraction",
+        "screening_operation_years",
+        "graphite_saturation_years",
+        "graphite_saturation_release_penalty",
+        "graphite_retention_fraction",
+    ):
+        if field_name in tritium:
+            _require_number(path, f"tritium.{field_name}", tritium[field_name])
+
+
+def _validate_optional_graphite_lifetime_settings(path: Path, graphite_lifetime: Any) -> None:
+    if graphite_lifetime is None:
+        return
+    if not isinstance(graphite_lifetime, Mapping):
+        raise ConfigError(f"Case config {path} optional 'graphite_lifetime' section must be a mapping.")
+    for field_name in (
+        "target_fuel_volume_fraction",
+        "core_zoning_flattening_credit",
+        "hexagonal_prism_assembly_credit",
+        "fast_flux_peaking_factor",
+        "nominal_max_fast_flux_n_cm2_s",
+        "fast_fluence_limit_n_cm2",
+        "capacity_factor",
+        "target_lifespan_years",
+        "reference_power_density_mw_m3",
+        "reference_fast_flux_n_cm2_s",
+    ):
+        if field_name in graphite_lifetime:
+            _require_number(path, f"graphite_lifetime.{field_name}", graphite_lifetime[field_name])
+
+
 def _validate_optional_loop_segments(path: Path, loop_segments: Any) -> None:
     if loop_segments is None:
         return
@@ -441,7 +513,7 @@ def _validate_optional_loop_segments(path: Path, loop_segments: Any) -> None:
             raise ConfigError(f"Case config {path} loop_segments[{index}] must be a mapping.")
         if not segment.get("id"):
             raise ConfigError(f"Case config {path} loop_segments[{index}] must define an id.")
-        for field_name in ("residence_fraction", "volume_fraction", "decay_heat_fraction"):
+        for field_name in ("residence_fraction", "volume_fraction", "decay_heat_fraction", "cleanup_weight", "cleanup_fraction"):
             if field_name in segment:
                 _require_number(path, f"loop_segments[{index}].{field_name}", segment[field_name])
 

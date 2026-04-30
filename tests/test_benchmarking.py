@@ -19,10 +19,10 @@ def test_structured_benchmark_metadata_has_traceability_summary() -> None:
     assert traceability["coverage"]["physics_validation_targets_linked"] == {"linked": 1, "total": 1}
     assert traceability["status_summary"]["surrogate_targets"] >= 1
     assert any("surrogate" in gap for gap in traceability["gaps"])
-    assert traceability["validation_maturity"]["validation_maturity_score"] < 40.0
-    assert traceability["validation_maturity"]["validation_maturity_stage"] == "surrogate_only"
-    assert any("literature-backed" in gap for gap in traceability["validation_maturity"]["gaps"])
-    assert traceability["datasets"][0]["status"] == "context_only"
+    assert traceability["validation_maturity"]["validation_maturity_score"] >= 40.0
+    assert traceability["validation_maturity"]["validation_maturity_stage"] == "screening_backed"
+    assert any("cross-code" in gap for gap in traceability["validation_maturity"]["gaps"])
+    assert traceability["datasets"][0]["status"] == "literature_backed"
 
 
 def test_build_docker_openmc_command_targets_repo_compose_runtime() -> None:

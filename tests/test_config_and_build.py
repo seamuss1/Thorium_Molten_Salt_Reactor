@@ -46,7 +46,7 @@ def test_core_case_manifest_has_expected_channel_count() -> None:
     assert built.geometry_description["type"] == "detailed_molten_salt_reactor"
     assert built.manifest["benchmark_traceability"]["traceability_score"] >= 80.0
     assert built.manifest["benchmark_traceability"]["maturity_stage"] == "traceable_surrogate"
-    assert built.manifest["validation_maturity"]["validation_maturity_score"] < 40.0
+    assert built.manifest["validation_maturity"]["validation_maturity_score"] >= 40.0
     assert built.manifest["model_representation"] == {
         "materials": "isotopic_explicit",
         "fuel_cycle": "proxy_breeding",

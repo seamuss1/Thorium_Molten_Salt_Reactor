@@ -37,6 +37,11 @@ from thorium_reactor.modeling import (
     fuel_salt_has_thorium,
     get_model_representation,
 )
+from thorium_reactor.literature_models import (
+    build_graphite_lifetime_summary,
+    build_property_uncertainty_summary,
+    build_tritium_transport_summary,
+)
 from thorium_reactor.neutronics.openmc_compat import missing_openmc_runtime_message, openmc
 from thorium_reactor.property_audit import build_property_audit
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot
@@ -371,7 +376,14 @@ def run_case(
             generator_efficiency=float(config.reactor.get("generator_efficiency", 0.98)),
         )
         summary["bop"] = run_steady_state_bop(bop_inputs).to_dict()
+        summary["property_uncertainty"] = build_property_uncertainty_summary(
+            config,
+            primary_delta_t_c=float(summary["bop"]["primary_delta_t_c"]),
+        )
         summary["metrics"]["electric_power_mwe"] = round(summary["bop"]["electric_power_mw"], 3)
+        summary["metrics"]["core_outlet_temperature_uncertainty_95_c"] = summary[
+            "property_uncertainty"
+        ]["core_outlet_temperature_uncertainty_95_c"]
         if THERMAL_NETWORK in capabilities and "flow" in summary:
             validate_case_capability(config, THERMAL_NETWORK)
             reduced_order_flow = build_reduced_order_flow_summary(
@@ -387,6 +399,17 @@ def run_case(
             summary["metrics"]["active_flow_residence_time_s"] = reduced_order_flow["active_flow"]["representative_residence_time_s"]
             summary["metrics"]["disconnected_flow_inventory_channels"] = reduced_order_flow["disconnected_inventory"]["channel_count"]
             summary["metrics"]["stagnant_flow_inventory_channels"] = reduced_order_flow["stagnant_inventory"]["channel_count"]
+            summary["graphite_lifetime"] = build_graphite_lifetime_summary(
+                config,
+                reduced_order_flow=reduced_order_flow,
+                thermal_power_mw=float(summary["bop"]["thermal_power_mw"]),
+            )
+            summary["metrics"]["graphite_lifetime_years"] = summary["graphite_lifetime"][
+                "estimated_lifespan_years"
+            ]
+            summary["metrics"]["graphite_fast_flux_peaking_factor"] = summary["graphite_lifetime"][
+                "fast_flux_peaking_factor"
+            ]
             if MSR_PRIMARY_SYSTEM in capabilities:
                 validate_case_capability(config, MSR_PRIMARY_SYSTEM)
                 primary_system = build_primary_system_summary(
@@ -399,6 +422,12 @@ def run_case(
                     summary["primary_system"] = primary_system
                     summary["fuel_cycle"] = _json_copy(primary_system["fuel_cycle"])
                     summary["chemistry"] = _json_copy(primary_system["chemistry"])
+                    summary["tritium"] = build_tritium_transport_summary(
+                        config,
+                        thermal_power_mw=float(summary["bop"]["thermal_power_mw"]),
+                        fuel_salt_volume_m3=float(primary_system["inventory"]["fuel_salt"]["total_m3"]),
+                        chemistry_summary=summary["chemistry"],
+                    )
                     hydraulics = primary_system["loop_hydraulics"]
                     heat_exchanger = primary_system["heat_exchanger"]
                     summary["metrics"]["primary_total_pressure_drop_kpa"] = hydraulics["total_pressure_drop_kpa"]
@@ -408,6 +437,9 @@ def run_case(
                     summary["metrics"]["coolant_salt_inventory_m3"] = primary_system["inventory"]["coolant_salt"]["net_pool_inventory_m3"]
                     summary["metrics"]["fissile_inventory_kg"] = primary_system["fuel_cycle"]["fissile_inventory_kg"]
                     summary["metrics"]["chemistry_corrosion_index"] = primary_system["chemistry"]["corrosion_index"]
+                    summary["metrics"]["tritium_environmental_release_fraction"] = summary["tritium"][
+                        "environmental_release_fraction"
+                    ]
     if built.manifest.get("benchmark_traceability"):
         summary["benchmark_traceability"] = _json_copy(built.manifest["benchmark_traceability"])
         summary["metrics"]["benchmark_traceability_score"] = built.manifest["benchmark_traceability"]["traceability_score"]

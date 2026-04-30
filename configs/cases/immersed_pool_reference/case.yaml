@@ -325,7 +325,7 @@ transient:
   graphite_temperature_feedback_pcm_per_c: -0.9
   coolant_temperature_feedback_pcm_per_c: -0.5
   precursor_worth_pcm: 180.0
-  precursor_transport_model: two_region_six_group_advection_decay
+  precursor_transport_model: loop_segment_six_group_advection_decay
   delayed_neutron_precursor_groups:
     - { name: group_1, decay_constant_s: 0.0124, yield_fraction: 0.000215 }
     - { name: group_2, decay_constant_s: 0.0305, yield_fraction: 0.001424 }
@@ -368,6 +368,43 @@ chemistry:
   noble_metal_plateout_fraction: 0.12
   corrosion_acceleration_per_ev: 4.0
   tritium_release_fraction: 0.35
+loop_segments:
+  - id: core_to_hx_hot_leg
+    residence_fraction: 0.46
+    cleanup_weight: 0.3
+  - id: heat_exchanger_and_gas_contact
+    residence_fraction: 0.32
+    cleanup_weight: 1.5
+  - id: hx_to_pump_cold_leg
+    residence_fraction: 0.12
+    cleanup_weight: 0.4
+  - id: pump_to_core_return
+    residence_fraction: 0.10
+    cleanup_weight: 0.4
+property_uncertainty:
+  model: tmsr_sf0_property_uncertainty_screen
+  density_uncertainty_95_fraction: 0.02
+  cp_uncertainty_95_fraction: 0.10
+  thermal_conductivity_uncertainty_95_fraction: 0.10
+  dynamic_viscosity_uncertainty_95_fraction: 0.10
+  core_outlet_temperature_uncertainty_95_c: 10.0
+tritium:
+  model: tmsr_lithium_salt_tritium_distribution_screen
+  lithium6_atom_fraction: 0.0005
+  reference_power_mwth: 10.0
+  unmitigated_environment_fraction: 0.33
+  mitigated_environment_fraction: 0.10
+  spray_gas_removal_fraction: 0.66
+  screening_operation_years: 5.0
+  graphite_saturation_years: 5.0
+graphite_lifetime:
+  model: fast_flux_flattening_graphite_lifetime_screen
+  fast_fluence_limit_n_cm2: 3.0e+22
+  target_fuel_volume_fraction: 0.08
+  core_zoning_flattening_credit: 0.06
+  hexagonal_prism_assembly_credit: 0.08
+  target_lifespan_years: 8.0
+  capacity_factor: 0.85
 integrations:
   moose:
     application: app-opt

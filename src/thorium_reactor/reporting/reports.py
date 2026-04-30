@@ -206,6 +206,31 @@ def generate_report(
         for key, value in summary["bop"].items():
             lines.append(f"- {key}: `{value}`")
 
+    property_uncertainty = summary.get("property_uncertainty", {})
+    if property_uncertainty:
+        lines.extend(["", "## Property Uncertainty", ""])
+        lines.append(f"- Model: `{property_uncertainty.get('model', 'n/a')}`")
+        lines.append(
+            "- Density uncertainty 95% fraction: "
+            f"`{property_uncertainty.get('density_uncertainty_95_fraction', 'n/a')}`"
+        )
+        lines.append(
+            "- Heat capacity uncertainty 95% fraction: "
+            f"`{property_uncertainty.get('cp_uncertainty_95_fraction', 'n/a')}`"
+        )
+        lines.append(
+            "- Conductivity uncertainty 95% fraction: "
+            f"`{property_uncertainty.get('thermal_conductivity_uncertainty_95_fraction', 'n/a')}`"
+        )
+        lines.append(
+            "- Viscosity uncertainty 95% fraction: "
+            f"`{property_uncertainty.get('dynamic_viscosity_uncertainty_95_fraction', 'n/a')}`"
+        )
+        lines.append(
+            "- Core outlet temperature uncertainty 95% (C): "
+            f"`{property_uncertainty.get('core_outlet_temperature_uncertainty_95_c', 'n/a')}`"
+        )
+
     reduced_order_flow = summary.get("flow", {}).get("reduced_order", {})
     if reduced_order_flow:
         active_flow = reduced_order_flow.get("active_flow", {})
@@ -266,6 +291,31 @@ def generate_report(
         lines.append(f"- Corrosion risk: `{chemistry.get('corrosion_risk', 'n/a')}`")
         lines.append(f"- Gas stripping efficiency: `{chemistry.get('gas_stripping_efficiency', 'n/a')}`")
         lines.append(f"- Tritium release fraction: `{chemistry.get('tritium_release_fraction', 'n/a')}`")
+
+    tritium = summary.get("tritium", {})
+    if tritium:
+        lines.extend(["", "## Tritium Transport", ""])
+        lines.append(f"- Model: `{tritium.get('model', 'n/a')}`")
+        lines.append(f"- Relative production rate: `{tritium.get('relative_production_rate', 'n/a')}`")
+        lines.append(f"- Environmental release fraction: `{tritium.get('environmental_release_fraction', 'n/a')}`")
+        lines.append(f"- Removal fraction: `{tritium.get('removal_fraction', 'n/a')}`")
+        lines.append(f"- Graphite retention fraction: `{tritium.get('graphite_retention_fraction', 'n/a')}`")
+        lines.append(f"- Circulating inventory fraction: `{tritium.get('circulating_inventory_fraction', 'n/a')}`")
+        lines.append(f"- Control effect: `{tritium.get('control_effect', 'n/a')}`")
+
+    graphite_lifetime = summary.get("graphite_lifetime", {})
+    if graphite_lifetime:
+        lines.extend(["", "## Graphite Lifetime", ""])
+        lines.append(f"- Model: `{graphite_lifetime.get('model', 'n/a')}`")
+        lines.append(f"- Fuel volume fraction: `{graphite_lifetime.get('fuel_volume_fraction', 'n/a')}`")
+        lines.append(f"- Fast-flux peaking factor: `{graphite_lifetime.get('fast_flux_peaking_factor', 'n/a')}`")
+        lines.append(
+            "- Nominal maximum fast flux (n/cm2-s): "
+            f"`{graphite_lifetime.get('nominal_max_fast_flux_n_cm2_s', 'n/a')}`"
+        )
+        lines.append(f"- Estimated lifespan (years): `{graphite_lifetime.get('estimated_lifespan_years', 'n/a')}`")
+        lines.append(f"- Lifetime margin: `{graphite_lifetime.get('lifetime_margin', 'n/a')}`")
+        lines.append(f"- Screening status: `{graphite_lifetime.get('screening_status', 'n/a')}`")
 
     fuel_cycle = summary.get("fuel_cycle", {})
     if fuel_cycle:

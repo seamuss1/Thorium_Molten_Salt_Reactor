@@ -10,8 +10,9 @@ The current workflow combines:
 - a reduced-order core flow allocation model,
 - a 1D-style primary-loop hydraulic budget,
 - lumped heat-exchanger and thermal-profile calculations,
-- and a reduced-order transient proxy for temperature, reactivity, precursor transport, and cleanup scenarios.
-- a steady-state salt chemistry proxy and transient chemistry/depletion coupling terms.
+- a reduced-order transient proxy for temperature, reactivity, segmented precursor transport, and cleanup scenarios,
+- a steady-state salt chemistry proxy and transient chemistry/depletion coupling terms,
+- and literature-backed screening models for molten-salt property uncertainty, tritium distribution, and graphite irradiation lifetime.
 
 The relevant implementation lives in:
 
@@ -53,6 +54,19 @@ The property evaluator supports:
 - Arrhenius-style viscosity form: `x(T) = A * exp(T_a / T_K)`
 
 where `T_K = T_C + 273.15`.
+
+The run summary also carries a TMSR-SF0-inspired uncertainty screen for molten
+salt thermophysical properties. The default 95% confidence bands are:
+
+```text
+sigma_95(rho) = 2%
+sigma_95(cp) = 10%
+sigma_95(k) = 10%
+sigma_95(mu) = 10%
+```
+
+The reported core outlet temperature uncertainty defaults to the larger of the
+case-propagated heat-capacity/density uncertainty and 10 C.
 
 ## Reduced-Order Core Flow Allocation
 
@@ -240,8 +254,9 @@ P_target = clamp(1 + rho_total / rho_scale, P_min, P_max)
 
 Delayed-neutron precursor transport uses a configurable group set. By default,
 the repository uses six conventional delayed-neutron groups, each with a declared
-decay constant `lambda_i` and yield fraction `y_i`. The reduced-order transport
-model splits each group into core and external-loop inventories:
+decay constant `lambda_i` and yield fraction `y_i`. The older two-region
+transport model remains available and splits each group into core and
+external-loop inventories:
 
 ```text
 dC_core,i/dt =
@@ -272,6 +287,33 @@ than a scalar inventory relaxation:
 S_core = sum_i lambda_i * C_core,i
 rho_precursor = W_precursor * (S_core / S_core,0 - 1)
 ```
+
+The default transport model now subdivides the external loop into configured
+segments. For segment `j`:
+
+```text
+dC_1,i/dt =
+  C_core,i / tau_core
+  - C_1,i / tau_1
+  - lambda_i * C_1,i
+  - k_cleanup,1 * C_1,i
+
+dC_j,i/dt =
+  C_j-1,i / tau_j-1
+  - C_j,i / tau_j
+  - lambda_i * C_j,i
+  - k_cleanup,j * C_j,i
+
+dC_core,i/dt =
+  y_i * P
+  + C_last,i / tau_last
+  - C_core,i / tau_core
+  - lambda_i * C_core,i
+```
+
+Segment residence fractions are normalized from the case `loop_segments` block,
+or inferred from primary-loop pipe geometry when available. The update is solved
+implicitly so severe flow-reduction scenarios remain numerically stable.
 
 The xenon piece remains an explicit proxy:
 
@@ -316,6 +358,38 @@ corrosion_index =
 ```
 
 with the current implementation using a simple linear impurity penalty.
+
+## Tritium Transport Screen
+
+The tritium model is a reduced-order distribution screen, not an isotope
+transport solver. It tracks normalized tritium production and partitions the
+inventory into:
+
+- environmental release,
+- active removal,
+- graphite retention,
+- and circulating inventory.
+
+The default closure follows recent 10 MWe TMSR literature: unmitigated systems
+can release about one-third of produced tritium, while MSRE-like spray-gas
+removal can remove about two-thirds and reduce permeation toward roughly 10%.
+Graphite saturation adds a configurable release penalty over operating time.
+
+## Graphite Irradiation Lifetime Screen
+
+The graphite screen uses recent SINAP graphite optimization literature as a
+first-pass design check. It reports:
+
+- fuel volume fraction,
+- control-channel fraction,
+- fast-flux peaking proxy,
+- nominal maximum fast flux,
+- estimated lifetime against a default `3e22 n/cm2` fast-fluence limit,
+- and a pass/watch status against the configured target lifetime.
+
+The screen is intentionally conservative: it highlights when a case should be
+sent to a neutronics/thermal-mechanics workflow, rather than replacing that
+workflow.
 
 ## Coupled Depletion And Chemistry Terms In The Transient Proxy
 

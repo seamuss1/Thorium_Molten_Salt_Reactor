@@ -10,14 +10,14 @@ from thorium_reactor.config import CaseConfig
 
 
 CONFIDENCE_LEVELS = ("high", "medium", "low")
-DATASET_STATUSES = {"planned", "numerical_validation", "context_only"}
+DATASET_STATUSES = {"planned", "numerical_validation", "context_only", "literature_backed"}
 REACTOR_TARGET_LINKS = (
     ("design_power_mwth", "nominal_thermal_power_mwth", "design thermal power"),
     ("hot_leg_temp_c", "nominal_hot_leg_temp_c", "hot-leg temperature"),
     ("cold_leg_temp_c", "nominal_cold_leg_temp_c", "cold-leg temperature"),
 )
 OPERATING_POINT_STATUSES = {"literature-backed", "cross-code-backed", "surrogate"}
-UNCERTAINTY_COVERAGE_STATUSES = {"quantified", "qualitative", "missing"}
+UNCERTAINTY_COVERAGE_STATUSES = {"quantified", "partial", "qualitative", "missing"}
 
 
 def assess_benchmark_traceability(
@@ -464,6 +464,7 @@ def _assess_validation_maturity(benchmark: dict[str, Any], targets: list[dict[st
     }[operating_point_status]
     uncertainty_score = {
         "quantified": 1.0,
+        "partial": 0.75,
         "qualitative": 0.5,
         "missing": 0.0,
     }[uncertainty_status]
@@ -494,8 +495,8 @@ def _assess_validation_maturity(benchmark: dict[str, Any], targets: list[dict[st
         gaps.append("Some cross-code validation checks are still pending.")
     if uncertainty_status == "missing":
         gaps.append("Benchmark uncertainty coverage is missing.")
-    elif uncertainty_status == "qualitative":
-        gaps.append("Benchmark uncertainty coverage is qualitative rather than quantified.")
+    elif uncertainty_status in {"partial", "qualitative"}:
+        gaps.append("Benchmark uncertainty coverage is not yet fully quantified.")
     surrogate_target_count = sum(1 for item in targets if item["status"] == "surrogate")
     if surrogate_target_count:
         gaps.append(f"{surrogate_target_count} validation target(s) still depend on surrogate values.")

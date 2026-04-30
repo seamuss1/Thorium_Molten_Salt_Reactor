@@ -7,9 +7,11 @@ from typing import Any
 
 from thorium_reactor.capabilities import BALANCE_OF_PLANT, THERMAL_NETWORK, validate_case_capability
 from thorium_reactor.chemistry import build_chemistry_assumptions
+from thorium_reactor.literature_models import build_property_uncertainty_summary
 from thorium_reactor.precursors import (
     build_initial_precursor_state,
     precursor_group_summary,
+    precursor_loop_segment_summary,
     step_precursor_state,
     summarize_precursor_state,
 )
@@ -48,7 +50,14 @@ def run_transient_sweep_case(
     model_parameters = _resolve_model_parameters(transient_config)
     depletion = build_depletion_assumptions(config)
     chemistry = build_chemistry_assumptions(config)
-    uncertainty_model = _resolve_uncertainty_model(transient_config)
+    property_uncertainty = build_property_uncertainty_summary(
+        config,
+        primary_delta_t_c=float(baseline.get("steady_state_delta_t_c", 0.0)),
+    )
+    uncertainty_model = _resolve_uncertainty_model(
+        transient_config,
+        property_uncertainty=property_uncertainty,
+    )
 
     history, metrics, backend = _integrate_transient_ensemble(
         baseline=baseline,
@@ -72,6 +81,7 @@ def run_transient_sweep_case(
         "baseline": baseline,
         "depletion": depletion,
         "chemistry": chemistry,
+        "property_uncertainty": property_uncertainty,
         "model_parameters": model_parameters,
         "uncertainty_model": uncertainty_model,
         "metrics": metrics,
@@ -108,6 +118,9 @@ def run_transient_sweep_case(
             "minimum_core_delayed_neutron_source_fraction_p05"
         ],
         "peak_corrosion_index_p95": metrics["peak_corrosion_index_p95"],
+        "core_outlet_temperature_uncertainty_95_c": property_uncertainty[
+            "core_outlet_temperature_uncertainty_95_c"
+        ],
     }
     summary.setdefault("metrics", {})
     summary["metrics"]["transient_sweep_peak_power_fraction_p95"] = metrics["peak_power_fraction_p95"]
@@ -116,17 +129,24 @@ def run_transient_sweep_case(
     return payload
 
 
-def _resolve_uncertainty_model(transient_config: dict[str, Any]) -> dict[str, float]:
+def _resolve_uncertainty_model(
+    transient_config: dict[str, Any],
+    *,
+    property_uncertainty: dict[str, Any] | None = None,
+) -> dict[str, float]:
     ensemble = transient_config.get("ensemble", {})
     if not isinstance(ensemble, dict):
         ensemble = {}
     uncertainties = ensemble.get("uncertainties", {})
     if not isinstance(uncertainties, dict):
         uncertainties = {}
+    property_uncertainty = property_uncertainty or {}
+    flow_sigma = float(property_uncertainty.get("flow_uncertainty_95_fraction", 0.08)) / 1.96
+    heat_transfer_sigma = float(property_uncertainty.get("heat_transfer_uncertainty_95_fraction", 0.09)) / 1.96
     return {
         "event_reactivity_sigma_fraction": float(uncertainties.get("event_reactivity_sigma_fraction", 0.12)),
-        "flow_sigma_fraction": float(uncertainties.get("flow_sigma_fraction", 0.08)),
-        "heat_sink_sigma_fraction": float(uncertainties.get("heat_sink_sigma_fraction", 0.09)),
+        "flow_sigma_fraction": float(uncertainties.get("flow_sigma_fraction", max(0.08, flow_sigma))),
+        "heat_sink_sigma_fraction": float(uncertainties.get("heat_sink_sigma_fraction", max(0.09, heat_transfer_sigma))),
         "cleanup_sigma_fraction": float(uncertainties.get("cleanup_sigma_fraction", 0.12)),
         "temperature_feedback_sigma_fraction": float(
             uncertainties.get("temperature_feedback_sigma_fraction", 0.06)
@@ -217,6 +237,8 @@ def _integrate_transient_ensemble(
             core_residence_time_s=float(baseline["core_residence_time_s"]) / initial_flow_fraction,
             loop_residence_time_s=float(baseline["loop_residence_time_s"]) / initial_flow_fraction,
             cleanup_rate_s=initial_cleanup_rate_s,
+            transport_model=str(model_parameters["precursor_transport_model"]),
+            loop_segments=baseline.get("precursor_loop_segments"),
         )
         precursor_states.append(state)
         initial_precursor_summaries.append(
@@ -232,6 +254,10 @@ def _integrate_transient_ensemble(
         sum(item["precursor_transport_loss_fraction"] for item in initial_precursor_summaries) / samples
     )
     baseline["delayed_neutron_precursor_groups"] = precursor_group_summary(
+        precursor_states[0],
+        precursor_groups,
+    )
+    baseline["precursor_loop_segment_summary"] = precursor_loop_segment_summary(
         precursor_states[0],
         precursor_groups,
     )
@@ -349,6 +375,8 @@ def _integrate_transient_ensemble(
                 core_residence_time_s=float(baseline["core_residence_time_s"]),
                 loop_residence_time_s=float(baseline["loop_residence_time_s"]),
                 cleanup_rate_s=cleanup_rate_s[index],
+                transport_model=str(model_parameters["precursor_transport_model"]),
+                loop_segments=baseline.get("precursor_loop_segments"),
             )
             precursor_summaries.append(
                 summarize_precursor_state(

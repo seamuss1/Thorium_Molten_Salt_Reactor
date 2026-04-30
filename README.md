@@ -13,11 +13,11 @@ The `tmsr_lf1_core` case now resolves to a detailed CSG reactor stack with activ
 - `src/thorium_reactor`: installable platform package and `reactor` CLI
 - `configs/cases`: canonical reactor cases
 - `benchmarks/msre_*`: historic benchmark metadata and dataset-centric acceptance targets
-- `benchmarks/tmsr_lf1`: modern test-reactor metadata with contextual and low-confidence numerical targets
+- `benchmarks/tmsr_lf1`: modern test-reactor metadata with source-linked Chinese 2 MWth TMSR operating-point, property-uncertainty, and validation-maturity records
 - `results`: generated result bundles at `results/<case>/<run_id>/`
 - `resources`: rendered reference images used in project documentation
 - `archive/legacy_openmc_2022`: preserved historical scripts and outputs from the thesis prototype
-- `tests`: unit tests for config loading, geometry manifests, BOP closure, and CLI wiring
+- `tests`: unit tests for config loading, geometry manifests, BOP closure, transient physics screens, and CLI wiring
 
 ## Canonical Cases
 
@@ -99,7 +99,7 @@ Command behavior:
 - `reactor report <case>` generates `report.md` from the latest or specified run bundle, including benchmark traceability scorecards, runtime context, and benchmark residual summaries when metadata is present.
 - `reactor render <case>` writes procedural geometry exports for visualization workflows, including OBJ, STL, watertight mesh validation JSON, a rendered PNG, animated GIF flow output, and MP4 video output when a case defines flow-animation paths and `ffmpeg` is available.
 - `reactor transient <case>` runs a reduced-order nodal transient proxy from the steady-state summary, writes `transient.json`, updates `summary.json`, and emits transient plots when the case defines transient scenarios.
-- `reactor transient-sweep <case>` runs an uncertainty ensemble around the reduced-order transient model, writes `transient_sweep.json`, updates `summary.json` with p50/p95 envelope metrics, and prefers CuPy when `--prefer-gpu` is supplied and a CUDA device is available. Otherwise it uses the built-in CPU backend.
+- `reactor transient-sweep <case>` runs an uncertainty ensemble around the reduced-order transient model, writes `transient_sweep.json`, updates `summary.json` with p50/p95 envelope metrics, and carries molten-salt property uncertainty bands into the ensemble defaults. It prefers CuPy when `--prefer-gpu` is supplied and a CUDA device is available; otherwise it uses the built-in CPU backend.
 - `reactor moose <case>`, `reactor scale <case>`, `reactor thermochimica <case>`, `reactor saltproc <case>`, and `reactor moltres <case>` export integration inputs plus handoff metadata into the current bundle, and can optionally attempt external execution with `--run-external`.
 
 ## Result Bundle Contract
