@@ -54,8 +54,10 @@ def test_run_transient_sweep_case_produces_cpu_backed_bundle() -> None:
     assert payload["samples"] == 128
     assert len(payload["history"]) >= 100
     assert payload["metrics"]["peak_power_fraction_p95"] >= 1.0
+    assert payload["metrics"]["final_core_delayed_neutron_source_fraction_p50"] > 0.0
     assert summary["transient_sweep"]["samples"] == 128
     assert summary["transient_sweep"]["backend"] in {"python", "numpy"}
+    assert summary["transient_sweep"]["final_core_delayed_neutron_source_fraction_p50"] > 0.0
     assert (bundle.root / "transient_sweep.json").exists()
 
 

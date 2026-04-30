@@ -235,6 +235,23 @@ def test_case_loader_rejects_non_numeric_transient_duration() -> None:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
 
+def test_case_loader_rejects_invalid_delayed_neutron_group() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8"))
+        payload["transient"]["delayed_neutron_precursor_groups"] = [
+            {"name": "bad", "decay_constant_s": -0.1, "yield_fraction": 0.001}
+        ]
+        case_path = scratch_root / "case.yaml"
+        case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="decay_constant_s"):
+            load_case_config(case_path)
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
 def test_case_loader_rejects_non_list_integration_args() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)

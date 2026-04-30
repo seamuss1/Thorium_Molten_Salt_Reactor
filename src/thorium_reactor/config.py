@@ -314,6 +314,45 @@ def _validate_optional_transient_settings(path: Path, transient: Any) -> None:
     ):
         if field_name in transient:
             _require_number(path, f"transient.{field_name}", transient[field_name])
+    precursor_groups = transient.get("delayed_neutron_precursor_groups")
+    if precursor_groups is not None:
+        if not isinstance(precursor_groups, list):
+            raise ConfigError(f"Case config {path} transient.delayed_neutron_precursor_groups must be a list.")
+        if not precursor_groups:
+            raise ConfigError(
+                f"Case config {path} transient.delayed_neutron_precursor_groups must contain at least one group."
+            )
+        total_yield = 0.0
+        for index, group in enumerate(precursor_groups, start=1):
+            if not isinstance(group, Mapping):
+                raise ConfigError(
+                    f"Case config {path} transient.delayed_neutron_precursor_groups[{index}] must be a mapping."
+                )
+            decay_constant = _require_number(
+                path,
+                f"transient.delayed_neutron_precursor_groups[{index}].decay_constant_s",
+                group.get("decay_constant_s"),
+            )
+            if decay_constant <= 0.0:
+                raise ConfigError(
+                    f"Case config {path} field "
+                    f"'transient.delayed_neutron_precursor_groups[{index}].decay_constant_s' must be positive."
+                )
+            yield_fraction = _require_number(
+                path,
+                f"transient.delayed_neutron_precursor_groups[{index}].yield_fraction",
+                group.get("yield_fraction"),
+            )
+            if yield_fraction < 0.0:
+                raise ConfigError(
+                    f"Case config {path} field "
+                    f"'transient.delayed_neutron_precursor_groups[{index}].yield_fraction' must be non-negative."
+                )
+            total_yield += yield_fraction
+        if total_yield <= 0.0:
+            raise ConfigError(
+                f"Case config {path} transient.delayed_neutron_precursor_groups total yield_fraction must be positive."
+            )
     scenarios = transient.get("scenarios")
     if scenarios is not None:
         if not isinstance(scenarios, list):

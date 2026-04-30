@@ -210,8 +210,8 @@ The transient state tracks:
 
 - power fraction,
 - representative fuel, graphite, and coolant temperatures,
-- total precursor inventory,
-- core precursor fraction,
+- delayed-neutron precursor inventories in core and external-loop regions,
+- core precursor fraction and core delayed-neutron source fraction,
 - and xenon-poison fraction.
 
 The implemented update pattern is first-order relaxation toward control-dependent targets:
@@ -238,11 +238,43 @@ and power fraction driven toward:
 P_target = clamp(1 + rho_total / rho_scale, P_min, P_max)
 ```
 
-The precursor and xenon pieces are explicit proxies:
+Delayed-neutron precursor transport uses a configurable group set. By default,
+the repository uses six conventional delayed-neutron groups, each with a declared
+decay constant `lambda_i` and yield fraction `y_i`. The reduced-order transport
+model splits each group into core and external-loop inventories:
 
-- precursor inventory follows power with a configurable response time,
-- precursor core fraction shifts with flow,
-- cleanup removes loop-associated precursor inventory,
+```text
+dC_core,i/dt =
+  y_i * P
+  + C_loop,i / tau_loop
+  - C_core,i / tau_core
+  - lambda_i * C_core,i
+
+dC_loop,i/dt =
+  C_core,i / tau_core
+  - C_loop,i / tau_loop
+  - lambda_i * C_loop,i
+  - k_cleanup * C_loop,i
+```
+
+The residence times are derived from the steady-state reduced-order flow summary
+and scaled as:
+
+```text
+tau_core = tau_core,0 / flow_fraction
+tau_loop = tau_loop,0 / flow_fraction
+```
+
+The precursor reactivity term follows the core delayed-neutron source rather
+than a scalar inventory relaxation:
+
+```text
+S_core = sum_i lambda_i * C_core,i
+rho_precursor = W_precursor * (S_core / S_core,0 - 1)
+```
+
+The xenon piece remains an explicit proxy:
+
 - xenon follows power with a configurable lag and cleanup removal term.
 
 This model is intended for scenario comparison and qualitative trend studies, not licensing-grade transient prediction.
@@ -345,6 +377,6 @@ This is an integration adapter layer, not a validated mesh/material translation 
 This document describes the implemented reduced-order model only. It does not imply:
 
 - transient thermal hydraulics,
-- precursor drift or coupled kinetics,
+- spatially resolved precursor drift or coupled kinetics,
 - benchmark-grade depletion or online reprocessing,
 - or validated molten-salt-specific closure laws beyond the current first-pass correlations.

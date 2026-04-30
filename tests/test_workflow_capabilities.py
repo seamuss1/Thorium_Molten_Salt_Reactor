@@ -197,11 +197,15 @@ def test_transient_command_produces_configured_history() -> None:
         assert transient["depletion"]["chain"] == "thorium_u233_cleanup_proxy"
         assert transient["chemistry"]["model"] == "salt_redox_cleanup_proxy"
         assert transient["metrics"]["final_fissile_inventory_fraction"] > 0.0
+        assert transient["metrics"]["final_core_delayed_neutron_source_fraction"] > 0.0
+        assert transient["metrics"]["final_precursor_transport_loss_fraction"] > 0.0
         assert transient["metrics"]["peak_corrosion_index"] >= 0.1
         first_history = transient["history"][0]
         assert "redox_state_ev" in first_history
         assert "fissile_inventory_fraction" in first_history
         assert "chemistry_reactivity_pcm" in first_history
+        assert "core_delayed_neutron_source_fraction" in first_history
+        assert "precursor_transport_loss_fraction" in first_history
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 

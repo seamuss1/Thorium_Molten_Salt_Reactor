@@ -9,6 +9,13 @@ from thorium_reactor.chemistry import (
     corrosion_index_from_state,
 )
 from thorium_reactor.capabilities import BALANCE_OF_PLANT, THERMAL_NETWORK, validate_case_capability
+from thorium_reactor.precursors import (
+    build_initial_precursor_state,
+    precursor_group_summary,
+    resolve_precursor_transport,
+    step_precursor_state,
+    summarize_precursor_state,
+)
 
 
 DEFAULT_TRANSIENT_MODEL = "reduced_order_transient_proxy"
@@ -104,6 +111,9 @@ def run_transient_case(
         "peak_graphite_temperature_c": metrics["peak_graphite_temperature_c"],
         "peak_coolant_temperature_c": metrics["peak_coolant_temperature_c"],
         "minimum_precursor_core_fraction": metrics["minimum_precursor_core_fraction"],
+        "minimum_core_delayed_neutron_source_fraction": metrics["minimum_core_delayed_neutron_source_fraction"],
+        "final_core_delayed_neutron_source_fraction": metrics["final_core_delayed_neutron_source_fraction"],
+        "final_precursor_transport_loss_fraction": metrics["final_precursor_transport_loss_fraction"],
         "final_total_reactivity_pcm": metrics["final_total_reactivity_pcm"],
         "depletion_chain": depletion["chain"],
         "cleanup_scenario": depletion["cleanup_scenario"],
@@ -116,6 +126,9 @@ def run_transient_case(
     summary["metrics"]["transient_peak_power_fraction"] = metrics["peak_power_fraction"]
     summary["metrics"]["transient_peak_fuel_temperature_c"] = metrics["peak_fuel_temperature_c"]
     summary["metrics"]["transient_final_reactivity_pcm"] = metrics["final_total_reactivity_pcm"]
+    summary["metrics"]["transient_final_core_delayed_neutron_source_fraction"] = metrics[
+        "final_core_delayed_neutron_source_fraction"
+    ]
     summary["metrics"]["transient_final_redox_state_ev"] = metrics["final_redox_state_ev"]
     summary["metrics"]["transient_final_fissile_inventory_fraction"] = metrics["final_fissile_inventory_fraction"]
     return payload
@@ -231,8 +244,8 @@ def _build_transient_baseline(config: Any, summary: dict[str, Any]) -> dict[str,
     }
 
 
-def _resolve_model_parameters(transient_config: dict[str, Any]) -> dict[str, float]:
-    return {
+def _resolve_model_parameters(transient_config: dict[str, Any]) -> dict[str, Any]:
+    model_parameters: dict[str, Any] = {
         "power_response_time_s": float(transient_config.get("power_response_time_s", 2.5)),
         "fuel_temperature_response_time_s": float(transient_config.get("fuel_temperature_response_time_s", 8.0)),
         "graphite_temperature_response_time_s": float(transient_config.get("graphite_temperature_response_time_s", 28.0)),
@@ -268,6 +281,8 @@ def _resolve_model_parameters(transient_config: dict[str, Any]) -> dict[str, flo
         ),
         "max_power_fraction": float(transient_config.get("max_power_fraction", 3.0)),
     }
+    model_parameters.update(resolve_precursor_transport(transient_config))
+    return model_parameters
 
 
 def _integrate_transient(
@@ -294,14 +309,44 @@ def _integrate_transient(
     steady_fuel_temp_c = float(baseline["hot_leg_temp_c"])
     steady_graphite_temp_c = float(baseline["average_primary_temp_c"])
     steady_coolant_temp_c = float(baseline["average_primary_temp_c"])
-    steady_precursor_fraction = float(baseline["initial_core_precursor_fraction"])
+    precursor_groups = model_parameters["delayed_neutron_precursor_groups"]
+    nominal_cleanup_rate_s = _precursor_cleanup_rate_s(
+        baseline=baseline,
+        depletion=depletion,
+        cleanup_multiplier=1.0,
+    )
+    precursor_state = build_initial_precursor_state(
+        groups=precursor_groups,
+        core_residence_time_s=float(baseline["core_residence_time_s"]),
+        loop_residence_time_s=float(baseline["loop_residence_time_s"]),
+        cleanup_rate_s=nominal_cleanup_rate_s,
+    )
+    precursor_summary = summarize_precursor_state(
+        precursor_state,
+        precursor_groups,
+        steady_state=precursor_state["steady_state"],
+    )
+    steady_precursor_fraction = float(precursor_summary["core_precursor_fraction"])
+    baseline["initial_core_precursor_fraction"] = _round_float(steady_precursor_fraction)
+    baseline["initial_core_delayed_neutron_source_absolute_fraction"] = precursor_summary[
+        "core_delayed_neutron_source_absolute_fraction"
+    ]
+    baseline["initial_precursor_transport_loss_fraction"] = precursor_summary[
+        "precursor_transport_loss_fraction"
+    ]
+    baseline["delayed_neutron_precursor_groups"] = precursor_group_summary(
+        precursor_state,
+        precursor_groups,
+    )
 
     power_fraction = 1.0
     fuel_temp_c = steady_fuel_temp_c
     graphite_temp_c = steady_graphite_temp_c
     coolant_temp_c = steady_coolant_temp_c
-    precursor_total = 1.0
+    precursor_total = float(precursor_summary["precursor_total_fraction"])
     core_precursor_fraction = steady_precursor_fraction
+    core_delayed_neutron_source_fraction = float(precursor_summary["core_delayed_neutron_source_fraction"])
+    precursor_transport_loss_fraction = float(precursor_summary["precursor_transport_loss_fraction"])
     xenon_fraction = 1.0
     fissile_inventory_fraction = float(depletion["initial_fissile_inventory_fraction"])
     protactinium_inventory_fraction = 0.0
@@ -318,6 +363,7 @@ def _integrate_transient(
     peak_graphite_temp_c = graphite_temp_c
     peak_coolant_temp_c = coolant_temp_c
     minimum_core_precursor_fraction = core_precursor_fraction
+    minimum_core_delayed_neutron_source_fraction = core_delayed_neutron_source_fraction
     total_reactivity_pcm = 0.0
     peak_protactinium_inventory_fraction = protactinium_inventory_fraction
     peak_corrosion_index = corrosion_index
@@ -344,14 +390,10 @@ def _integrate_transient(
 
         effective_flow_fraction = _clamp(controls["flow_fraction"], 0.05, 1.5)
         effective_heat_sink_fraction = _clamp(controls["heat_sink_fraction"], 0.0, 1.5)
-        cleanup_rate_s = (
-            float(baseline["cleanup_removal_efficiency"])
-            * _clamp(controls["cleanup_multiplier"], 0.0, 2.0)
-            / max(float(baseline["cleanup_turnover_s"]), 1.0)
-        )
-        cleanup_rate_s += float(depletion["volatile_removal_efficiency"]) / max(
-            float(baseline["cleanup_turnover_s"]) * 6.0,
-            1.0,
+        cleanup_rate_s = _precursor_cleanup_rate_s(
+            baseline=baseline,
+            depletion=depletion,
+            cleanup_multiplier=_clamp(controls["cleanup_multiplier"], 0.0, 2.0),
         )
         gas_stripping_efficiency = _clamp(controls["gas_stripping_efficiency"], 0.0, 1.0)
 
@@ -384,25 +426,27 @@ def _integrate_transient(
             model_parameters["coolant_temperature_response_time_s"],
         )
 
-        target_core_fraction = _clamp(
-            steady_precursor_fraction / max(effective_flow_fraction ** 0.5, 0.2),
-            0.05,
-            0.98,
+        precursor_state = step_precursor_state(
+            state=precursor_state,
+            groups=precursor_groups,
+            power_fraction=power_fraction,
+            flow_fraction=effective_flow_fraction,
+            dt_s=dt,
+            core_residence_time_s=float(baseline["core_residence_time_s"]),
+            loop_residence_time_s=float(baseline["loop_residence_time_s"]),
+            cleanup_rate_s=cleanup_rate_s,
         )
-        core_precursor_fraction = _first_order_step(
-            core_precursor_fraction,
-            target_core_fraction,
-            dt,
-            model_parameters["precursor_transport_response_time_s"],
+        precursor_summary = summarize_precursor_state(
+            precursor_state,
+            precursor_groups,
+            steady_state=precursor_state["steady_state"],
         )
-        precursor_total_target = max(power_fraction, 0.0)
-        precursor_total = _first_order_step(
-            precursor_total,
-            precursor_total_target,
-            dt,
-            model_parameters["precursor_inventory_response_time_s"],
+        core_precursor_fraction = float(precursor_summary["core_precursor_fraction"])
+        precursor_total = float(precursor_summary["precursor_total_fraction"])
+        core_delayed_neutron_source_fraction = float(
+            precursor_summary["core_delayed_neutron_source_fraction"]
         )
-        precursor_total = max(precursor_total - cleanup_rate_s * (1.0 - core_precursor_fraction) * precursor_total * dt, 0.05)
+        precursor_transport_loss_fraction = float(precursor_summary["precursor_transport_loss_fraction"])
 
         xenon_target = max(power_fraction, 0.0)
         xenon_fraction = _first_order_step(
@@ -465,7 +509,7 @@ def _integrate_transient(
             + model_parameters["coolant_temperature_feedback_pcm_per_c"] * (coolant_temp_c - steady_coolant_temp_c)
         )
         precursor_feedback_pcm = model_parameters["precursor_worth_pcm"] * (
-            core_precursor_fraction - steady_precursor_fraction
+            core_delayed_neutron_source_fraction - 1.0
         )
         xenon_feedback_pcm = model_parameters["xenon_worth_pcm_per_fraction"] * (xenon_fraction - 1.0)
         depletion_feedback_pcm = (
@@ -501,6 +545,10 @@ def _integrate_transient(
         peak_graphite_temp_c = max(peak_graphite_temp_c, graphite_temp_c)
         peak_coolant_temp_c = max(peak_coolant_temp_c, coolant_temp_c)
         minimum_core_precursor_fraction = min(minimum_core_precursor_fraction, core_precursor_fraction)
+        minimum_core_delayed_neutron_source_fraction = min(
+            minimum_core_delayed_neutron_source_fraction,
+            core_delayed_neutron_source_fraction,
+        )
         peak_protactinium_inventory_fraction = max(peak_protactinium_inventory_fraction, protactinium_inventory_fraction)
         peak_corrosion_index = max(peak_corrosion_index, corrosion_index)
 
@@ -514,6 +562,8 @@ def _integrate_transient(
                 "coolant_temp_c": _round_float(coolant_temp_c),
                 "core_precursor_fraction": _round_float(core_precursor_fraction),
                 "precursor_total_fraction": _round_float(precursor_total),
+                "core_delayed_neutron_source_fraction": _round_float(core_delayed_neutron_source_fraction),
+                "precursor_transport_loss_fraction": _round_float(precursor_transport_loss_fraction),
                 "xenon_fraction": _round_float(xenon_fraction),
                 "fissile_inventory_fraction": _round_float(fissile_inventory_fraction),
                 "protactinium_inventory_fraction": _round_float(protactinium_inventory_fraction),
@@ -540,6 +590,9 @@ def _integrate_transient(
         "peak_graphite_temperature_c": _round_float(peak_graphite_temp_c),
         "peak_coolant_temperature_c": _round_float(peak_coolant_temp_c),
         "minimum_precursor_core_fraction": _round_float(minimum_core_precursor_fraction),
+        "minimum_core_delayed_neutron_source_fraction": _round_float(minimum_core_delayed_neutron_source_fraction),
+        "final_core_delayed_neutron_source_fraction": _round_float(core_delayed_neutron_source_fraction),
+        "final_precursor_transport_loss_fraction": _round_float(precursor_transport_loss_fraction),
         "final_total_reactivity_pcm": _round_float(total_reactivity_pcm),
         "final_xenon_fraction": _round_float(xenon_fraction),
         "final_fissile_inventory_fraction": _round_float(fissile_inventory_fraction),
@@ -548,6 +601,24 @@ def _integrate_transient(
         "peak_corrosion_index": _round_float(peak_corrosion_index),
     }
     return history, metrics
+
+
+def _precursor_cleanup_rate_s(
+    *,
+    baseline: dict[str, Any],
+    depletion: dict[str, Any],
+    cleanup_multiplier: float,
+) -> float:
+    cleanup_rate_s = (
+        float(baseline["cleanup_removal_efficiency"])
+        * _clamp(float(cleanup_multiplier), 0.0, 2.5)
+        / max(float(baseline["cleanup_turnover_s"]), 1.0)
+    )
+    cleanup_rate_s += float(depletion["volatile_removal_efficiency"]) / max(
+        float(baseline["cleanup_turnover_s"]) * 6.0,
+        1.0,
+    )
+    return cleanup_rate_s
 
 
 def _first_order_step(current_value: float, target_value: float, dt: float, time_constant_s: float) -> float:

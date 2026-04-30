@@ -129,6 +129,7 @@ The benchmark layer now supports dataset-centric evidence, assumptions, target c
 
 - [docs/thermal-hydraulics-modeling-strategy.md](docs/thermal-hydraulics-modeling-strategy.md) describes the recommended analysis ladder for this repo: whole-loop reduced-order thermal-hydraulics first, porous or homogenized core models second, and local 3D CFD only where geometry controls the answer. It also lays out the additional precursor-transport and neutronics coupling needed for liquid-fueled MSR studies.
 - [docs/current-model-equations.md](docs/current-model-equations.md) documents the equations, correlations, supported property units, and OpenMC input assumptions used by the current reduced-order implementation.
+- [docs/recent-msr-simulation-literature.md](docs/recent-msr-simulation-literature.md) summarizes recent literature used to choose the current delayed-neutron precursor transport upgrade and the next realism steps.
 
 ## External Solver Hooks
 

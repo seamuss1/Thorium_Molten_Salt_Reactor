@@ -303,6 +303,14 @@ def generate_report(
         lines.append(f"- Peak graphite temperature (C): `{transient.get('peak_graphite_temperature_c', 'n/a')}`")
         lines.append(f"- Peak coolant temperature (C): `{transient.get('peak_coolant_temperature_c', 'n/a')}`")
         lines.append(f"- Minimum precursor core fraction: `{transient.get('minimum_precursor_core_fraction', 'n/a')}`")
+        lines.append(
+            "- Minimum core delayed neutron source fraction: "
+            f"`{transient.get('minimum_core_delayed_neutron_source_fraction', 'n/a')}`"
+        )
+        lines.append(
+            "- Final precursor transport loss fraction: "
+            f"`{transient.get('final_precursor_transport_loss_fraction', 'n/a')}`"
+        )
         lines.append(f"- Final total reactivity (pcm): `{transient.get('final_total_reactivity_pcm', 'n/a')}`")
         lines.append(f"- Depletion chain: `{transient.get('depletion_chain', 'n/a')}`")
         lines.append(f"- Cleanup scenario: `{transient.get('cleanup_scenario', 'n/a')}`")
@@ -332,6 +340,14 @@ def generate_report(
         lines.append(f"- Final power fraction p95: `{transient_sweep.get('final_power_fraction_p95', 'n/a')}`")
         lines.append(f"- Final total reactivity p50 (pcm): `{transient_sweep.get('final_total_reactivity_pcm_p50', 'n/a')}`")
         lines.append(f"- Final total reactivity p95 (pcm): `{transient_sweep.get('final_total_reactivity_pcm_p95', 'n/a')}`")
+        lines.append(
+            "- Final core delayed neutron source fraction p50: "
+            f"`{transient_sweep.get('final_core_delayed_neutron_source_fraction_p50', 'n/a')}`"
+        )
+        lines.append(
+            "- Minimum core delayed neutron source fraction p05: "
+            f"`{transient_sweep.get('minimum_core_delayed_neutron_source_fraction_p05', 'n/a')}`"
+        )
         lines.append(f"- Peak corrosion index p95: `{transient_sweep.get('peak_corrosion_index_p95', 'n/a')}`")
         lines.append(f"- Sweep history: `{transient_sweep.get('history_path', 'n/a')}`")
 
