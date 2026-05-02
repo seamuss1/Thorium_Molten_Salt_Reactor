@@ -343,6 +343,7 @@ mark,
   color: #26313d;
   padding: 12px;
   cursor: pointer;
+  overflow-wrap: anywhere;
 }
 
 .doc-links a:hover,
@@ -620,9 +621,12 @@ mark,
   grid-template-columns: minmax(0, 1fr) 260px;
   gap: 18px;
   align-items: start;
+  min-width: 0;
 }
 
 .markdown-body {
+  min-width: 0;
+  max-width: 100%;
   background: #ffffff;
   border: 1px solid #d8e0e7;
   border-radius: 8px;
@@ -646,14 +650,22 @@ mark,
   background: #edf2f6;
   border-radius: 4px;
   padding: 2px 4px;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body pre {
+  max-width: 100%;
   overflow: auto;
   background: #1f2934;
   color: #f7f9fb;
   border-radius: 6px;
   padding: 12px;
+}
+
+.markdown-body table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .toc {
@@ -753,6 +765,14 @@ mark,
   min-height: 320px;
 }
 
+.route-loading {
+  min-height: 60vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #667586;
+}
+
 @media (max-width: 1120px) {
   .app-shell,
   .split-page,
@@ -823,5 +843,9 @@ mark,
   .viewer-fallback {
     min-height: 380px;
     height: 62vh;
+  }
+
+  .markdown-body {
+    padding: 14px;
   }
 }

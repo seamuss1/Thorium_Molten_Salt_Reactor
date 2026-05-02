@@ -38,7 +38,7 @@ export function ModelViewer({ artifacts }: ModelViewerProps) {
           <Maximize2 aria-hidden="true" />
         </a>
       </div>
-      <Canvas camera={{ position: [4, 3, 5], fov: 42 }} dpr={[1, 1.75]}>
+      <Canvas camera={{ position: [4, 3, 5], fov: 42 }} dpr={[1, 1.75]} gl={{ antialias: true, preserveDrawingBuffer: true }}>
         <color attach="background" args={["#f6f8fa"]} />
         <ambientLight intensity={0.7} />
         <directionalLight position={[5, 8, 5]} intensity={1.6} />

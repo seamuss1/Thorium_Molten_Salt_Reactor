@@ -27,7 +27,13 @@ from thorium_reactor.web.schemas import (
 def create_app(repo_root: Path | None = None) -> FastAPI:
     repository = WebRepository(repo_root)
     jobs = JobManager(repository)
-    app = FastAPI(title="Thorium Reactor Lab", version="0.1.0")
+    app = FastAPI(
+        title="Thorium Reactor Lab",
+        version="0.1.0",
+        docs_url="/api/openapi",
+        redoc_url="/api/redoc",
+        openapi_url="/api/openapi.json",
+    )
     app.state.repository = repository
     app.state.jobs = jobs
 
@@ -114,6 +120,15 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
 
     dist_dir = repository.repo_root / "web" / "ui" / "dist"
     if dist_dir.exists():
-        app.mount("/", StaticFiles(directory=dist_dir, html=True), name="ui")
+        assets_dir = dist_dir / "assets"
+        if assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        def serve_spa(full_path: str) -> FileResponse:
+            candidate = (dist_dir / full_path).resolve()
+            if candidate.is_file() and candidate.is_relative_to(dist_dir.resolve()):
+                return FileResponse(candidate)
+            return FileResponse(dist_dir / "index.html")
 
     return app

@@ -1,12 +1,42 @@
 param(
     [string]$HostName = "0.0.0.0",
-    [int]$Port = 8000
+    [int]$Port = 8000,
+    [switch]$SkipUiBuild
 )
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$uiRoot = Join-Path $repoRoot "web\ui"
+$distIndex = Join-Path $uiRoot "dist\index.html"
+
+if (-not $SkipUiBuild -and -not (Test-Path $distIndex)) {
+    Push-Location $uiRoot
+    try {
+        if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
+            Write-Error "npm.cmd was not found. Install Node.js or run the backend API separately with uvicorn."
+            exit 1
+        }
+        & npm.cmd install
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+        & npm.cmd run build
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+$portArgs = @("--service-ports")
+if ($Port -ne 8000) {
+    $portArgs = @("-p", "${Port}:${Port}")
+}
+
 Push-Location $repoRoot
 try {
-    & docker compose run --rm --build --service-ports web uvicorn thorium_reactor.web.app:create_app --factory --host $HostName --port $Port
+    & docker compose run --rm --build @portArgs web uvicorn thorium_reactor.web.app:create_app --factory --host $HostName --port $Port
     exit $LASTEXITCODE
 }
 finally {

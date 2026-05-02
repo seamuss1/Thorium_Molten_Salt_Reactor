@@ -1,11 +1,13 @@
+import { Suspense, lazy } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { Activity, Atom, Box, BookOpen, Boxes, FlaskConical, Gauge, PlaySquare } from "lucide-react";
-import { Dashboard } from "./pages/Dashboard";
-import { Cases } from "./pages/Cases";
-import { Builder } from "./pages/Builder";
-import { Runs } from "./pages/Runs";
-import { Docs } from "./pages/Docs";
-import { Viewer } from "./pages/Viewer";
+
+const Dashboard = lazy(() => import("./pages/Dashboard").then((module) => ({ default: module.Dashboard })));
+const Cases = lazy(() => import("./pages/Cases").then((module) => ({ default: module.Cases })));
+const Builder = lazy(() => import("./pages/Builder").then((module) => ({ default: module.Builder })));
+const Runs = lazy(() => import("./pages/Runs").then((module) => ({ default: module.Runs })));
+const Docs = lazy(() => import("./pages/Docs").then((module) => ({ default: module.Docs })));
+const Viewer = lazy(() => import("./pages/Viewer").then((module) => ({ default: module.Viewer })));
 
 const navigation = [
   { to: "/", label: "Dashboard", icon: Gauge },
@@ -44,17 +46,19 @@ export function App() {
         </div>
       </aside>
       <main className="main-panel">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/cases" element={<Cases />} />
-          <Route path="/builder" element={<Builder />} />
-          <Route path="/runs" element={<Runs />} />
-          <Route path="/runs/:caseName/:runId" element={<Runs />} />
-          <Route path="/docs" element={<Docs />} />
-          <Route path="/docs/:slug" element={<Docs />} />
-          <Route path="/viewer" element={<Viewer />} />
-          <Route path="/viewer/:caseName/:runId" element={<Viewer />} />
-        </Routes>
+        <Suspense fallback={<div className="route-loading">Loading...</div>}>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/cases" element={<Cases />} />
+            <Route path="/builder" element={<Builder />} />
+            <Route path="/runs" element={<Runs />} />
+            <Route path="/runs/:caseName/:runId" element={<Runs />} />
+            <Route path="/docs" element={<Docs />} />
+            <Route path="/docs/:slug" element={<Docs />} />
+            <Route path="/viewer" element={<Viewer />} />
+            <Route path="/viewer/:caseName/:runId" element={<Viewer />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   );
