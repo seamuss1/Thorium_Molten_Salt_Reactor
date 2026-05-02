@@ -226,6 +226,7 @@ The transient state tracks:
 - representative fuel, graphite, and coolant temperatures,
 - delayed-neutron precursor inventories in core and external-loop regions,
 - core precursor fraction and core delayed-neutron source fraction,
+- the external-loop segment carrying the dominant delayed-neutron source,
 - and xenon-poison fraction.
 
 The implemented update pattern is first-order relaxation toward control-dependent targets:
@@ -314,6 +315,19 @@ dC_core,i/dt =
 Segment residence fractions are normalized from the case `loop_segments` block,
 or inferred from primary-loop pipe geometry when available. The update is solved
 implicitly so severe flow-reduction scenarios remain numerically stable.
+Transient history and report summaries also surface the dominant loop segment
+source:
+
+```text
+S_segment,j = sum_i lambda_i * C_j,i
+S_total = S_core + sum_j S_segment,j
+dominant_segment = argmax_j(S_segment,j)
+dominant_segment_fraction = max_j(S_segment,j) / S_total
+```
+
+This is a reporting diagnostic for source-term and component-activation
+handoffs. It does not replace shielding, decay-heat transport, or
+finite-volume species-transport calculations.
 
 The xenon piece remains an explicit proxy:
 

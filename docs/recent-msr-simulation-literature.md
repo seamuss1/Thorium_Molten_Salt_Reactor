@@ -32,11 +32,31 @@ lifetime screen now documented in `docs/current-model-equations.md`.
   finite-volume loop segments.
   Source: https://doi.org/10.13182/MC25-47271
 
+- Fei et al. used SAM and SPECTRA to verify MSR transient features against a
+  standard test problem and selected MSRE transients, including pump startup,
+  pump coastdown, reactivity insertion, frequency, and natural-convection
+  experiments. This supports keeping transient outputs tied to source-location
+  diagnostics that can be compared across system codes.
+  Source: https://doi.org/10.1080/00295450.2024.2337338
+
+- Jeong and Cho derived exact steady-state DNP distributions and effective
+  delayed-neutron fraction expressions for one-dimensional MSR verification
+  cases. This reinforces that reduced-order precursor models should expose
+  transport/source diagnostics, not just final power and temperature traces.
+  Source: https://doi.org/10.1016/j.net.2026.104160
+
 - Chen et al. developed and verified ThorFPMC for coupled fission-product
   transport, highlighting that source term, decay heat, shielding, xenon poison,
   and online removal are all affected by species migration. This points to a
   future replacement for the current xenon and cleanup proxies.
   Source: https://doi.org/10.3390/en17215448
+
+- Yang et al. implemented multiphase species transport in SAM for insoluble
+  fission products, including generation, decay, deposition, extraction, MMS
+  verification, and MSRE-data validation. That is beyond this repository's
+  current reduced-order chemistry proxy, but it supports surfacing where mobile
+  source terms concentrate before handing a case to SAM/MOOSE-class workflows.
+  Source: https://doi.org/10.1080/00295450.2024.2421678
 
 - Holler et al. presented a multiphysics and uncertainty framework for
   liquid-fueled MSRs using coupled thermal hydraulics, neutronics, inventory
@@ -104,7 +124,9 @@ The implemented models are intentionally reduced-order bridges:
 - residence-time scaling with transient flow fraction,
 - cleanup removal weighted by loop segment,
 - core delayed-neutron source fraction reported into transient history and
-  summaries.
+  summaries,
+- dominant external-loop segment delayed-neutron source reported into transient
+  history and reports for source-term handoff triage.
 - property uncertainty bands in run summaries and transient sweeps,
 - normalized tritium production/distribution accounting,
 - and graphite fast-flux/lifetime screening metrics.

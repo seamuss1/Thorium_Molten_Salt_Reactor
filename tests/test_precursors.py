@@ -3,6 +3,7 @@ import pytest
 from thorium_reactor.precursors import (
     TWO_REGION_PRECURSOR_TRANSPORT_MODEL,
     build_initial_precursor_state,
+    dominant_loop_segment_source,
     normalize_precursor_groups,
     precursor_loop_segment_summary,
     step_precursor_state,
@@ -92,3 +93,28 @@ def test_loop_segment_precursor_state_reports_external_segment_sources() -> None
 
     assert updated_summary["loop_segment_count"] == 3
     assert updated_summary["total_inventory"] > 0.0
+
+
+def test_dominant_loop_segment_source_reports_absolute_and_loop_fractions() -> None:
+    groups = normalize_precursor_groups(None)
+    loop_segments = [
+        {"id": "hot_leg", "residence_fraction": 0.50, "cleanup_weight": 0.2},
+        {"id": "heat_exchanger", "residence_fraction": 0.30, "cleanup_weight": 1.0},
+        {"id": "pump_return", "residence_fraction": 0.20, "cleanup_weight": 0.4},
+    ]
+    state = build_initial_precursor_state(
+        groups=groups,
+        core_residence_time_s=1.0,
+        loop_residence_time_s=8.0,
+        cleanup_rate_s=1.0e-4,
+        loop_segments=loop_segments,
+    )
+
+    dominant = dominant_loop_segment_source(state, groups)
+    summary = summarize_precursor_state(state, groups, steady_state=state["steady_state"])
+
+    assert dominant["id"] == "hot_leg"
+    assert dominant["delayed_neutron_source_fraction"] == summary[
+        "peak_loop_segment_delayed_neutron_source_fraction"
+    ]
+    assert 0.0 < dominant["loop_delayed_neutron_source_fraction"] <= 1.0

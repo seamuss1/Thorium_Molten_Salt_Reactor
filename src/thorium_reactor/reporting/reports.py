@@ -361,6 +361,24 @@ def generate_report(
             "- Final precursor transport loss fraction: "
             f"`{transient.get('final_precursor_transport_loss_fraction', 'n/a')}`"
         )
+        if transient.get("peak_loop_segment_delayed_neutron_source_fraction") is not None:
+            lines.append(
+                "- Peak external-loop delayed-neutron source segment: "
+                f"`{transient.get('peak_loop_segment_delayed_neutron_source_segment', 'n/a')}`"
+            )
+            lines.append(
+                "- Peak external-loop delayed-neutron source fraction: "
+                f"`{transient.get('peak_loop_segment_delayed_neutron_source_fraction', 'n/a')}`"
+            )
+        if transient.get("final_dominant_loop_segment_delayed_neutron_source_fraction") is not None:
+            lines.append(
+                "- Final dominant external-loop delayed-neutron source segment: "
+                f"`{transient.get('final_dominant_loop_segment_delayed_neutron_source_segment', 'n/a')}`"
+            )
+            lines.append(
+                "- Final dominant external-loop delayed-neutron source fraction: "
+                f"`{transient.get('final_dominant_loop_segment_delayed_neutron_source_fraction', 'n/a')}`"
+            )
         lines.append(f"- Final total reactivity (pcm): `{transient.get('final_total_reactivity_pcm', 'n/a')}`")
         lines.append(f"- Depletion chain: `{transient.get('depletion_chain', 'n/a')}`")
         lines.append(f"- Cleanup scenario: `{transient.get('cleanup_scenario', 'n/a')}`")

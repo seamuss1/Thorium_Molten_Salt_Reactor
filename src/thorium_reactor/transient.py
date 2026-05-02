@@ -11,6 +11,7 @@ from thorium_reactor.chemistry import (
 from thorium_reactor.capabilities import BALANCE_OF_PLANT, THERMAL_NETWORK, validate_case_capability
 from thorium_reactor.precursors import (
     build_initial_precursor_state,
+    dominant_loop_segment_source,
     precursor_group_summary,
     precursor_loop_segment_summary,
     resolve_precursor_transport,
@@ -115,6 +116,18 @@ def run_transient_case(
         "minimum_core_delayed_neutron_source_fraction": metrics["minimum_core_delayed_neutron_source_fraction"],
         "final_core_delayed_neutron_source_fraction": metrics["final_core_delayed_neutron_source_fraction"],
         "final_precursor_transport_loss_fraction": metrics["final_precursor_transport_loss_fraction"],
+        "peak_loop_segment_delayed_neutron_source_fraction": metrics[
+            "peak_loop_segment_delayed_neutron_source_fraction"
+        ],
+        "peak_loop_segment_delayed_neutron_source_segment": metrics[
+            "peak_loop_segment_delayed_neutron_source_segment"
+        ],
+        "final_dominant_loop_segment_delayed_neutron_source_fraction": metrics[
+            "final_dominant_loop_segment_delayed_neutron_source_fraction"
+        ],
+        "final_dominant_loop_segment_delayed_neutron_source_segment": metrics[
+            "final_dominant_loop_segment_delayed_neutron_source_segment"
+        ],
         "final_total_reactivity_pcm": metrics["final_total_reactivity_pcm"],
         "depletion_chain": depletion["chain"],
         "cleanup_scenario": depletion["cleanup_scenario"],
@@ -129,6 +142,9 @@ def run_transient_case(
     summary["metrics"]["transient_final_reactivity_pcm"] = metrics["final_total_reactivity_pcm"]
     summary["metrics"]["transient_final_core_delayed_neutron_source_fraction"] = metrics[
         "final_core_delayed_neutron_source_fraction"
+    ]
+    summary["metrics"]["transient_peak_loop_segment_delayed_neutron_source_fraction"] = metrics[
+        "peak_loop_segment_delayed_neutron_source_fraction"
     ]
     summary["metrics"]["transient_final_redox_state_ev"] = metrics["final_redox_state_ev"]
     summary["metrics"]["transient_final_fissile_inventory_fraction"] = metrics["final_fissile_inventory_fraction"]
@@ -351,6 +367,10 @@ def _integrate_transient(
         precursor_state,
         precursor_groups,
     )
+    baseline["dominant_loop_segment_delayed_neutron_source"] = dominant_loop_segment_source(
+        precursor_state,
+        precursor_groups,
+    )
 
     power_fraction = 1.0
     fuel_temp_c = steady_fuel_temp_c
@@ -380,6 +400,10 @@ def _integrate_transient(
     total_reactivity_pcm = 0.0
     peak_protactinium_inventory_fraction = protactinium_inventory_fraction
     peak_corrosion_index = corrosion_index
+    dominant_loop_segment = dominant_loop_segment_source(precursor_state, precursor_groups)
+    dominant_loop_segment_fraction = float(dominant_loop_segment["delayed_neutron_source_fraction"])
+    peak_loop_segment_delayed_neutron_source_fraction = dominant_loop_segment_fraction
+    peak_loop_segment_delayed_neutron_source_segment = str(dominant_loop_segment["id"])
 
     step_count = int(round(duration_s / dt))
     for step in range(step_count + 1):
@@ -462,6 +486,8 @@ def _integrate_transient(
             precursor_summary["core_delayed_neutron_source_fraction"]
         )
         precursor_transport_loss_fraction = float(precursor_summary["precursor_transport_loss_fraction"])
+        dominant_loop_segment = dominant_loop_segment_source(precursor_state, precursor_groups)
+        dominant_loop_segment_fraction = float(dominant_loop_segment["delayed_neutron_source_fraction"])
 
         xenon_target = max(power_fraction, 0.0)
         xenon_fraction = _first_order_step(
@@ -566,6 +592,9 @@ def _integrate_transient(
         )
         peak_protactinium_inventory_fraction = max(peak_protactinium_inventory_fraction, protactinium_inventory_fraction)
         peak_corrosion_index = max(peak_corrosion_index, corrosion_index)
+        if dominant_loop_segment_fraction > peak_loop_segment_delayed_neutron_source_fraction:
+            peak_loop_segment_delayed_neutron_source_fraction = dominant_loop_segment_fraction
+            peak_loop_segment_delayed_neutron_source_segment = str(dominant_loop_segment["id"])
 
         history.append(
             {
@@ -579,6 +608,10 @@ def _integrate_transient(
                 "precursor_total_fraction": _round_float(precursor_total),
                 "core_delayed_neutron_source_fraction": _round_float(core_delayed_neutron_source_fraction),
                 "precursor_transport_loss_fraction": _round_float(precursor_transport_loss_fraction),
+                "dominant_loop_segment_delayed_neutron_source_segment": str(dominant_loop_segment["id"]),
+                "dominant_loop_segment_delayed_neutron_source_fraction": _round_float(
+                    dominant_loop_segment_fraction
+                ),
                 "xenon_fraction": _round_float(xenon_fraction),
                 "fissile_inventory_fraction": _round_float(fissile_inventory_fraction),
                 "protactinium_inventory_fraction": _round_float(protactinium_inventory_fraction),
@@ -608,6 +641,14 @@ def _integrate_transient(
         "minimum_core_delayed_neutron_source_fraction": _round_float(minimum_core_delayed_neutron_source_fraction),
         "final_core_delayed_neutron_source_fraction": _round_float(core_delayed_neutron_source_fraction),
         "final_precursor_transport_loss_fraction": _round_float(precursor_transport_loss_fraction),
+        "peak_loop_segment_delayed_neutron_source_fraction": _round_float(
+            peak_loop_segment_delayed_neutron_source_fraction
+        ),
+        "peak_loop_segment_delayed_neutron_source_segment": peak_loop_segment_delayed_neutron_source_segment,
+        "final_dominant_loop_segment_delayed_neutron_source_fraction": _round_float(
+            dominant_loop_segment_fraction
+        ),
+        "final_dominant_loop_segment_delayed_neutron_source_segment": str(dominant_loop_segment["id"]),
         "final_total_reactivity_pcm": _round_float(total_reactivity_pcm),
         "final_xenon_fraction": _round_float(xenon_fraction),
         "final_fissile_inventory_fraction": _round_float(fissile_inventory_fraction),

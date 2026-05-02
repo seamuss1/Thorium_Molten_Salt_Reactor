@@ -323,6 +323,36 @@ def precursor_loop_segment_summary(
     return summary
 
 
+def dominant_loop_segment_source(
+    state: dict[str, Any],
+    groups: list[dict[str, float | str]],
+) -> dict[str, float | str]:
+    segments = normalize_loop_segments(state.get("loop_segments"))
+    segment_sources = _segment_delayed_sources(state, groups)
+    if not segment_sources:
+        return {
+            "id": "external_loop",
+            "delayed_neutron_source_fraction": 0.0,
+            "loop_delayed_neutron_source_fraction": 0.0,
+        }
+
+    dominant_index, dominant_source = max(
+        enumerate(segment_sources),
+        key=lambda item: item[1],
+    )
+    core_source = sum(
+        float(group["decay_constant_s"]) * float(state["core_inventories"][index])
+        for index, group in enumerate(groups)
+    )
+    loop_source = sum(segment_sources)
+    total_source = core_source + loop_source
+    return {
+        "id": str(segments[dominant_index]["id"]),
+        "delayed_neutron_source_fraction": _round_float(dominant_source / max(total_source, 1.0e-12)),
+        "loop_delayed_neutron_source_fraction": _round_float(dominant_source / max(loop_source, 1.0e-12)),
+    }
+
+
 def normalize_loop_segments(loop_segments: Any | None) -> list[dict[str, float | str]]:
     if not isinstance(loop_segments, list) or not loop_segments:
         return [{"id": "external_loop", "residence_fraction": 1.0, "cleanup_weight": 1.0}]

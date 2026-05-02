@@ -380,6 +380,10 @@ def test_report_includes_transient_and_depletion_sections() -> None:
                         "peak_graphite_temperature_c": 666.0,
                         "peak_coolant_temperature_c": 681.0,
                         "minimum_precursor_core_fraction": 0.34,
+                        "peak_loop_segment_delayed_neutron_source_fraction": 0.19,
+                        "peak_loop_segment_delayed_neutron_source_segment": "heat_exchanger_and_gas_contact",
+                        "final_dominant_loop_segment_delayed_neutron_source_fraction": 0.17,
+                        "final_dominant_loop_segment_delayed_neutron_source_segment": "core_to_hx_hot_leg",
                         "final_total_reactivity_pcm": -22.0,
                         "depletion_chain": "thorium_u233_cleanup_proxy",
                         "cleanup_scenario": "baseline_online_cleanup",
@@ -417,6 +421,8 @@ def test_report_includes_transient_and_depletion_sections() -> None:
         assert "partial_heat_sink_loss" in report
         assert "transient.json" in report
         assert "Final redox state" in report
+        assert "Peak external-loop delayed-neutron source segment" in report
+        assert "heat_exchanger_and_gas_contact" in report
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
