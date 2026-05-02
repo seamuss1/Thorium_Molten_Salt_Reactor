@@ -24,14 +24,14 @@ services:
     volumes:
       - ./:/workspace
     ports:
-      - "8000:8000"
+      - "18488:18488"
     environment:
       PYTHONPATH: /workspace/src
       THORIUM_REACTOR_RUNTIME_SERVICE: web
       THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-web:latest
       THORIUM_REACTOR_TOOL_RUNTIME: python
       THORIUM_REACTOR_TOOL_VERSION: python-container
-    command: ["uvicorn", "thorium_reactor.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "thorium_reactor.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "18488"]
 
   openmc:
     build:

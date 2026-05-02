@@ -1,6 +1,6 @@
 param(
     [string]$HostName = "0.0.0.0",
-    [int]$Port = 8000,
+    [int]$Port = 18488,
     [switch]$SkipUiBuild
 )
 
@@ -30,7 +30,7 @@ if (-not $SkipUiBuild -and -not (Test-Path $distIndex)) {
 }
 
 $portArgs = @("--service-ports")
-if ($Port -ne 8000) {
+if ($Port -ne 18488) {
     $portArgs = @("-p", "${Port}:${Port}")
 }
 

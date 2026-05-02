@@ -52,11 +52,26 @@ Windows-friendly wrappers target the same runtime:
 
 Host Python environments remain best-effort for local development, but they are no longer the documented default. `environment.yml` and `environment-openmc-linux.yml` remain in the repo as fallback/reference environments.
 
+## Browser Lab Interface
+
+The repository includes a browser front end for exploring cases, result bundles, reports, science notes, plots, and 3D geometry exports. The app uses one browser-facing port: FastAPI serves both `/api` and the production React build at `http://localhost:18488`.
+
+Start it on Windows with:
+
+```powershell
+.\scripts\Run-Web.cmd
+```
+
+The main views are Dashboard, Cases, Builder, Runs, Science, and 3D. Browser-launched runs use bundle-local snapshots under `results/<case>/<run_id>/` and leave canonical case YAML files untouched. The v1 browser command allowlist is deliberately limited to safe workflow phases: `build`, `run --no-solver`, `transient`, `transient-sweep`, `validate`, `render`, and `report`.
+
+The Science view automatically indexes `README.md` and `docs/*.md`. Markdown equations written with `$...$` or `$$...$$` render with KaTeX in both science documents and generated reports. See [docs/browser-front-end.md](docs/browser-front-end.md) for interface details and development notes.
+
 ## Docker Compose Layout
 
 The canonical runtime interface is [`docker-compose.yml`](docker-compose.yml). It defines:
 
 - `app`: default service for `build`, `run --no-solver`, `validate`, `report`, `render`, `transient`, `transient-sweep`, and `pytest`
+- `web`: single-port FastAPI + React browser lab interface on `18488`
 - `openmc`: solver-backed `run` and `benchmark`
 - `thermochimica`: chemistry/speciation integration service
 - `saltproc`: online-processing and inventory-accounting integration service

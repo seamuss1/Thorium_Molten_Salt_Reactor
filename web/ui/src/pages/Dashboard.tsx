@@ -9,6 +9,10 @@ export function Dashboard() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs, refetchInterval: 5000 });
   const docs = useQuery({ queryKey: ["docs"], queryFn: api.docs });
   const latest = runs.data?.[0];
+  const caseCount = cases.data?.length ?? 0;
+  const runCount = runs.data?.length ?? 0;
+  const completedCount = runs.data?.filter((run) => run.status === "completed").length ?? 0;
+  const docCount = docs.data?.length ?? 0;
   const featured =
     runs.data
       ?.flatMap((run) => run.artifacts)
@@ -32,14 +36,18 @@ export function Dashboard() {
         <div className="hero-copy">
           <h2>{String(latest?.reactor?.name ?? latest?.case_name ?? "Simulation workspace")}</h2>
           <div className="stat-row">
-            <Stat icon={Atom} label="Cases" value={cases.data?.length ?? 0} />
-            <Stat icon={Activity} label="Runs" value={runs.data?.length ?? 0} />
-            <Stat icon={CheckCircle2} label="Completed" value={runs.data?.filter((run) => run.status === "completed").length ?? 0} />
-            <Stat icon={FileText} label="Docs" value={docs.data?.length ?? 0} />
+            <Stat icon={Atom} label="Cases" value={caseCount} />
+            <Stat icon={Activity} label="Runs" value={runCount} />
+            <Stat icon={CheckCircle2} label="Completed" value={completedCount} />
+            <Stat icon={FileText} label="Docs" value={docCount} />
           </div>
         </div>
         <div className="hero-media">
-          {featured ? <img src={featured.url} alt={featured.label} /> : <div className="empty-panel tall">Run render output will appear here.</div>}
+          {featured ? (
+            <img src={featured.url} alt={featured.label} />
+          ) : (
+            <ReactorReadout cases={caseCount} docs={docCount} runs={runCount} completed={completedCount} />
+          )}
         </div>
       </section>
 
@@ -90,6 +98,39 @@ function Stat({ icon: Icon, label, value }: { icon: typeof Atom; label: string; 
       <Icon aria-hidden="true" />
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ReactorReadout({ cases, completed, docs, runs }: { cases: number; completed: number; docs: number; runs: number }) {
+  return (
+    <div className="reactor-readout" aria-label="Repository reactor readout">
+      <div className="readout-grid" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="readout-table">
+        <div>
+          <span>Case index</span>
+          <strong>{cases}</strong>
+        </div>
+        <div>
+          <span>Run bundles</span>
+          <strong>{runs}</strong>
+        </div>
+        <div>
+          <span>Validated</span>
+          <strong>{completed}</strong>
+        </div>
+        <div>
+          <span>Science notes</span>
+          <strong>{docs}</strong>
+        </div>
+      </div>
     </div>
   );
 }

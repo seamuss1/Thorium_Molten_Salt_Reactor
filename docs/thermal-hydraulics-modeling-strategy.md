@@ -38,39 +38,48 @@ For the fluid, the baseline equations are:
 
 - Continuity, low-Mach variable-density form:
 
-```text
-d(rho)/dt + div(rho*u) = 0
-```
+$$
+\frac{\partial \rho}{\partial t}+\nabla\cdot(\rho u)=0
+$$
 
 - If density variation is only needed for buoyancy, an acceptable first simplification is:
 
-```text
-div(u) = 0
-rho(T) = rho_ref * [1 - beta * (T - T_ref)]
-```
+$$
+\nabla\cdot u = 0,
+\qquad
+\rho(T)=\rho_{\mathrm{ref}}\left[1-\beta(T-T_{\mathrm{ref}})\right]
+$$
 
 - Momentum:
 
-```text
-rho * (du/dt + u.grad(u)) =
-  -grad(p) + div[ mu * (grad(u) + grad(u)^T ) ] + rho*g + S_mom
-```
+$$
+\rho\left(\frac{\partial u}{\partial t}+u\cdot\nabla u\right)
+=
+-\nabla p
++ \nabla\cdot\left[\mu\left(\nabla u+\nabla u^T\right)\right]
++ \rho g
++ S_{\mathrm{mom}}
+$$
 
 - Use `S_mom = 0` in open-fluid regions.
 - In porous-core regions, use a Darcy-Forchheimer sink such as:
 
-```text
-S_mom = -(mu/K)*u - C_F * rho * |u| * u / sqrt(K)
-```
+$$
+S_{\mathrm{mom}}
+=
+-\frac{\mu}{K}u
+- C_F \rho \frac{|u|u}{\sqrt K}
+$$
 
 where `K` is permeability and `C_F` is the inertial resistance coefficient.
 
 - Fluid energy:
 
-```text
-rho*cp * (dT/dt + u.grad(T)) =
-  div(k*grad(T)) + q_vol
-```
+$$
+\rho c_p\left(\frac{\partial T}{\partial t}+u\cdot\nabla T\right)
+=
+\nabla\cdot(k\nabla T)+q_{\mathrm{vol}}
+$$
 
 - Ignore viscous dissipation unless shear heating is shown to matter.
 - Use `q_vol` for fission heating, imposed volumetric heating, or zero depending on the region.
@@ -79,10 +88,10 @@ rho*cp * (dT/dt + u.grad(T)) =
 
 For molten salts, temperature-dependent properties are a requirement, not an optional refinement. Use explicit property models for:
 
-- `rho = rho(T, composition)`
-- `mu = mu(T, composition)`
-- `k = k(T, composition)`
-- `cp = cp(T, composition)`
+- $\rho=\rho(T,\mathrm{composition})$
+- $\mu=\mu(T,\mathrm{composition})$
+- $k=k(T,\mathrm{composition})$
+- $c_p=c_p(T,\mathrm{composition})$
 
 Constant properties are acceptable only for debugging, solver shakeout, or rough sensitivity checks.
 
@@ -90,22 +99,25 @@ Constant properties are acceptable only for debugging, solver shakeout, or rough
 
 For graphite, vessel shells, exchanger walls, and similar structures, solve:
 
-```text
-rho_s*cp_s * d(T_s)/dt = div(k_s*grad(T_s)) + q_s,vol
-```
+$$
+\rho_s c_{p,s}\frac{\partial T_s}{\partial t}
+=
+\nabla\cdot(k_s\nabla T_s)+q_{s,\mathrm{vol}}
+$$
 
 At fluid-solid interfaces in conjugate heat transfer:
 
-```text
-T_f = T_s
--k_f * grad(T_f).n = -k_s * grad(T_s).n
-```
+$$
+T_f=T_s,
+\qquad
+-k_f\nabla T_f\cdot n = -k_s\nabla T_s\cdot n
+$$
 
 For reduced-order models, it is usually enough to replace the resolved interface with:
 
-```text
-q" = h * (T_wall - T_bulk)
-```
+$$
+q''=h(T_{\mathrm{wall}}-T_{\mathrm{bulk}})
+$$
 
 ## Core Modeling Guidance
 
@@ -116,15 +128,22 @@ If the core contains many repeated passages, do not start with explicit 3D chann
 
 For LTNE porous modeling, solve:
 
-```text
-eps*rho_f*cp_f * (dT_f/dt + u.grad(T_f)) =
-  div(k_f,eff*grad(T_f)) + h_as*(T_s - T_f) + q_f,vol
-```
+$$
+\varepsilon\rho_f c_{p,f}
+\left(\frac{\partial T_f}{\partial t}+u\cdot\nabla T_f\right)
+=
+\nabla\cdot(k_{f,\mathrm{eff}}\nabla T_f)
++ h_{as}(T_s-T_f)
++ q_{f,\mathrm{vol}}
+$$
 
-```text
-(1-eps)*rho_s*cp_s * dT_s/dt =
-  div(k_s,eff*grad(T_s)) + h_as*(T_f - T_s) + q_s,vol
-```
+$$
+(1-\varepsilon)\rho_s c_{p,s}\frac{\partial T_s}{\partial t}
+=
+\nabla\cdot(k_{s,\mathrm{eff}}\nabla T_s)
++ h_{as}(T_f-T_s)
++ q_{s,\mathrm{vol}}
+$$
 
 where `eps` is porosity and `h_as` is interfacial heat transfer per bulk volume.
 
@@ -160,29 +179,36 @@ Expected outputs include:
 
 For a liquid-fueled MSR, add delayed neutron precursor transport for each precursor group `i`:
 
-```text
-d(C_i)/dt + div(u*C_i) =
-  div(D_i*grad(C_i)) + S_i,fission - lambda_i*C_i
-```
+$$
+\frac{\partial C_i}{\partial t}
++ \nabla\cdot(uC_i)
+=
+\nabla\cdot(D_i\nabla C_i)
++ S_{i,\mathrm{fission}}
+- \lambda_i C_i
+$$
 
 A common precursor source term is:
 
-```text
-S_i,fission = beta_i * sum_g(nu*Sigma_f,g*phi_g) / k_eff
-```
+$$
+S_{i,\mathrm{fission}}
+=
+\frac{\beta_i\sum_g \nu\Sigma_{f,g}\phi_g}{k_{\mathrm{eff}}}
+$$
 
 or the equivalent time-dependent source used by the neutronics solver.
 
 Neutronics must then be coupled back to flow and temperature. A representative multigroup diffusion form is:
 
-```text
-(1/v_g)*d(phi_g)/dt
-  - div(D_g*grad(phi_g))
-  + Sigma_r,g*phi_g
-  = sum_g'(Sigma_s,g'->g * phi_g')
-  + chi_p,g * (1-beta) * sum_g'(nu*Sigma_f,g' * phi_g')
-  + sum_i(chi_d,i,g * lambda_i * C_i)
-```
+$$
+\frac{1}{v_g}\frac{\partial \phi_g}{\partial t}
+- \nabla\cdot(D_g\nabla\phi_g)
++ \Sigma_{r,g}\phi_g
+=
+\sum_{g'}\Sigma_{s,g'\rightarrow g}\phi_{g'}
++ \chi_{p,g}(1-\beta)\sum_{g'}\nu\Sigma_{f,g'}\phi_{g'}
++ \sum_i \chi_{d,i,g}\lambda_iC_i
+$$
 
 Whether diffusion or transport is used, the coupling logic is the same:
 
@@ -232,9 +258,14 @@ For each branch, pipe, or component, solve:
 
 A representative momentum form is:
 
-```text
-Delta_p = f*(L/D)*(rho*u^2/2) + sum(K_j * rho*u^2/2) - pump_head_term + hydrostatic_terms
-```
+$$
+\Delta p
+=
+f\frac{L}{D}\frac{\rho u^2}{2}
++ \sum_j K_j\frac{\rho u^2}{2}
+- \Delta p_{\mathrm{pump}}
++ \Delta p_{\mathrm{hydrostatic}}
+$$
 
 Use this level for:
 

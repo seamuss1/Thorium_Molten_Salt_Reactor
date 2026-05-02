@@ -42,6 +42,29 @@ One-shot wrapper without entering an interactive shell:
 .\scripts\Run-Reactor.cmd render tmsr_lf1_core
 ```
 
+## Web Interface
+
+- The browser lab interface is a single-port FastAPI + React app at `http://localhost:18488`.
+- Start it with the Windows wrapper:
+
+```powershell
+.\scripts\Run-Web.cmd
+```
+
+- The wrapper builds `web/ui/dist` when needed, then starts the Docker Compose `web` service. Use `.\scripts\Run-Web.cmd -SkipUiBuild` only when the production UI build is already current.
+- Keep the normal browser runtime on one public port. Do not reintroduce a separate required browser-facing frontend port; Vite is only an optional hot-reload tool while editing `web/ui`, and it proxies `/api` to `http://localhost:18488`.
+- For frontend changes, run commands from `web/ui` with `npm.cmd`, especially:
+
+```powershell
+npm.cmd run build
+npm.cmd run test
+```
+
+- Browser-launched simulation runs must write isolated bundles under `results/<case>/<run_id>/` and must not modify canonical `configs/cases/*/case.yaml`.
+- The web job allowlist is intentionally limited to `build`, `run --no-solver`, `transient`, `transient-sweep`, `validate`, `render`, and `report`. Solver-backed OpenMC benchmarks and external integrations can be shown as artifacts, but should not be browser-launchable unless the safety model is deliberately expanded.
+- The Science view indexes `README.md` and `docs/*.md`. Use H1 headings for readable titles, and write formulas as Markdown math with `$...$` or `$$...$$` so the React/KaTeX renderer can display them.
+- After web UI changes, verify `http://localhost:18488/api/health` and click through Dashboard, Cases, Builder, Runs, Science, and 3D in the browser.
+
 ## Testing
 
 Run the full suite:

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import ReactMarkdown from "react-markdown";
 import { Database, FileJson, Image, ScrollText } from "lucide-react";
 import { fetchText } from "../api";
+import { Markdown } from "./Markdown";
 import type { ArtifactRef } from "../types";
 
 interface RunArtifactsProps {
@@ -26,7 +26,7 @@ export function RunArtifacts({ artifacts }: RunArtifactsProps) {
           <span>Report</span>
         </div>
         {report ? (
-          <ReactMarkdown className="markdown-body">{reportQuery.data ?? "Loading report..."}</ReactMarkdown>
+          <Markdown content={reportQuery.data ?? "Loading report..."} />
         ) : (
           <div className="empty-panel">No report artifact yet.</div>
         )}
