@@ -48,6 +48,39 @@ def generate_report(
         "",
     ]
 
+    classification = _classify_reactor_case(case_name, config)
+    lines.extend(
+        [
+            "## Reactor Classification",
+            "",
+            f"- Taxonomy role: `{classification['role']}`",
+            f"- Build candidate: `{classification['build_candidate']}`",
+            f"- Commercial finance subject: `{classification['commercial_finance_subject']}`",
+            f"- Description: {classification['description']}",
+            "",
+        ]
+    )
+    characteristics = config.get("reactor", {}).get("characteristics", {})
+    if isinstance(characteristics, dict) and characteristics:
+        lines.append("## Flagship Characteristics")
+        lines.append("")
+        for key in (
+            "reactor_class",
+            "licensing_basis",
+            "grid_role",
+            "module_count",
+            "net_electric_power_mwe",
+            "thermal_power_mwth",
+            "fuel_coolant_family",
+            "fuel_cycle",
+            "cleanup_strategy",
+        ):
+            if key in characteristics:
+                lines.append(f"- {key}: `{characteristics[key]}`")
+        if characteristics.get("end_goal"):
+            lines.append(f"- End goal: {characteristics['end_goal']}")
+        lines.append("")
+
     if model_validity:
         lines.extend(
             [
@@ -200,6 +233,57 @@ def generate_report(
 
     for key, value in summary.get("metrics", {}).items():
         lines.append(f"- {key}: `{value}`")
+
+    finance = summary.get("finance", {})
+    if finance:
+        lines.extend(["", "## Commercial Finance", ""])
+        lines.append(f"- Status: `{finance.get('status', 'n/a')}`")
+        if finance.get("status") == "completed":
+            lines.append(f"- Scenario: `{finance.get('scenario', 'n/a')}`")
+            lines.append(f"- Planning basis: `{finance.get('planning_basis', 'n/a')}`")
+            lines.append(f"- Currency basis: `{finance.get('source_year_usd', 'n/a')} USD`")
+            inputs = finance.get("inputs", {})
+            outputs = finance.get("outputs", {})
+            costs = finance.get("cost_breakdown_usd", {})
+            annual_costs = finance.get("annual_costs_usd_per_year", {})
+            lines.append(f"- Net capacity (MWe): `{inputs.get('net_capacity_mwe', 'n/a')}`")
+            lines.append(f"- Capacity factor: `{inputs.get('capacity_factor', 'n/a')}`")
+            lines.append(f"- Source OCC ($/kWe): `{inputs.get('source_occ_usd_per_kwe', 'n/a')}`")
+            lines.append(f"- FOAK overnight uplift: `{inputs.get('overnight_cost_uplift', 'n/a')}`")
+            lines.append(f"- Real WACC: `{inputs.get('real_wacc', 'n/a')}`")
+            lines.append(f"- Net overnight cost (USD): `{costs.get('net_overnight_cost', 'n/a')}`")
+            lines.append(f"- Interest during construction (USD): `{costs.get('interest_during_construction', 'n/a')}`")
+            lines.append(f"- Total capitalized cost (USD): `{costs.get('total_capitalized_cost', 'n/a')}`")
+            lines.append(f"- Annual generation (MWh): `{outputs.get('annual_generation_mwh', 'n/a')}`")
+            lines.append(f"- Annualized capital (USD/yr): `{annual_costs.get('annualized_capital', 'n/a')}`")
+            lines.append(f"- Annual total cost (USD/yr): `{annual_costs.get('total', 'n/a')}`")
+            lines.append(f"- LCOE ($/MWh): `{outputs.get('lcoe_usd_per_mwh', 'n/a')}`")
+            lines.append(f"- LCOE (cents/kWh): `{outputs.get('lcoe_cents_per_kwh', 'n/a')}`")
+            lines.append("- Caveat: Planning-grade estimate, not a vendor quote, EPC bid, or investment recommendation.")
+        elif finance.get("reason"):
+            lines.append(f"- Reason: {finance.get('reason')}")
+
+    schedule = summary.get("schedule", {})
+    if schedule:
+        lines.extend(["", "## Build Schedule", ""])
+        lines.append(f"- Status: `{schedule.get('status', 'n/a')}`")
+        if schedule.get("status") == "completed":
+            lines.append(f"- Planning basis: `{schedule.get('planning_basis', 'n/a')}`")
+            lines.append(f"- Project start: `{schedule.get('project_start_date', 'n/a')}`")
+            lines.append(f"- Construction start: `{schedule.get('construction_start_date', 'n/a')}`")
+            lines.append(f"- Commercial operation date: `{schedule.get('commercial_operation_date', 'n/a')}`")
+            lines.append(
+                f"- Total duration: `{schedule.get('total_months_to_commercial_operation', 'n/a')}` months "
+                f"(`{schedule.get('total_years_to_commercial_operation', 'n/a')}` years)"
+            )
+            for phase in schedule.get("phases", []):
+                lines.append(
+                    f"- `{phase.get('id', 'phase')}`: "
+                    f"{phase.get('start_date', 'n/a')} to {phase.get('end_date', 'n/a')} "
+                    f"({phase.get('duration_months', 'n/a')} months)"
+                )
+        elif schedule.get("reason"):
+            lines.append(f"- Reason: {schedule.get('reason')}")
 
     if "bop" in summary:
         lines.extend(["", "## Balance Of Plant", ""])
@@ -481,3 +565,58 @@ def generate_report(
     )
 
     return "\n".join(lines) + "\n"
+
+
+def _classify_reactor_case(case_name: str, config: dict[str, Any]) -> dict[str, str]:
+    reactor = config.get("reactor", {})
+    mode = str(reactor.get("mode", "modern_test_reactor"))
+    family = str(reactor.get("family", "")).lower()
+    stage = str(reactor.get("stage", "")).lower()
+    if case_name == "example_pin":
+        return {
+            "role": "smoke/regression pin",
+            "build_candidate": "false",
+            "commercial_finance_subject": "false",
+            "description": "PWR-inspired neutronics smoke case, not a molten-salt reactor build target.",
+        }
+    if case_name == "fuel_channel" or "channel" in stage:
+        return {
+            "role": "TMSR channel submodel",
+            "build_candidate": "false",
+            "commercial_finance_subject": "false",
+            "description": "Fuel-channel submodel for geometry and reaction-rate plumbing.",
+        }
+    if case_name.startswith("msre_") or mode == "historic_benchmark":
+        return {
+            "role": "historic MSRE benchmark harness",
+            "build_candidate": "false",
+            "commercial_finance_subject": "false",
+            "description": "Validation anchor for historical molten-salt reactor behavior, not a build candidate.",
+        }
+    if case_name == "flagship_grid_msr" or mode == "commercial_grid":
+        return {
+            "role": "commercial flagship grid reactor",
+            "build_candidate": "true",
+            "commercial_finance_subject": "true",
+            "description": "Final end-goal reactor case for cost, schedule, grid, and plant-planning outputs.",
+        }
+    if "immersed" in family:
+        return {
+            "role": "research/demonstrator primary-system reference",
+            "build_candidate": "false",
+            "commercial_finance_subject": "false",
+            "description": "Research-style primary-system demonstrator with richer loop and render behavior.",
+        }
+    if "tmsr" in family:
+        return {
+            "role": "modern test-reactor surrogate",
+            "build_candidate": "false",
+            "commercial_finance_subject": "false",
+            "description": "TMSR-LF1-inspired validation bridge and scale-up surrogate.",
+        }
+    return {
+        "role": "generic reactor model",
+        "build_candidate": "false",
+        "commercial_finance_subject": "false",
+        "description": "General repository case without commercial plant-planning status.",
+    }

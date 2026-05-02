@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import date
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,56 @@ def generate_summary_plots(bundle, summary: dict[str, Any]) -> dict[str, str]:
         bop_path = bundle.plots_dir / "bop_balance.svg"
         _write_bar_chart_svg(bop_numeric, bop_path, title=f"{summary['case']} balance of plant")
         assets["bop_balance"] = str(bop_path)
+
+    finance = summary.get("finance", {})
+    if isinstance(finance, dict) and finance.get("status") == "completed":
+        cost_breakdown = _coerce_numeric_mapping(finance.get("cost_breakdown_usd", {}))
+        if cost_breakdown:
+            cost_path = bundle.plots_dir / "finance_cost_waterfall.svg"
+            _write_bar_chart_svg(
+                {key: value / 1_000_000_000.0 for key, value in cost_breakdown.items()},
+                cost_path,
+                title=f"{summary['case']} capital cost breakdown (B USD)",
+                palette=["#2563eb", "#b45309", "#15803d", "#0f766e", "#7c3aed", "#334155"],
+            )
+            assets["finance_cost_waterfall"] = str(cost_path)
+
+        annual_costs = _coerce_numeric_mapping(finance.get("annual_costs_usd_per_year", {}))
+        if annual_costs:
+            annual_path = bundle.plots_dir / "finance_annual_cost_stack.svg"
+            _write_bar_chart_svg(
+                {key: value / 1_000_000.0 for key, value in annual_costs.items()},
+                annual_path,
+                title=f"{summary['case']} annualized cost stack (M USD/yr)",
+                palette=["#1d4ed8", "#047857", "#b45309", "#7c3aed", "#475569"],
+            )
+            assets["finance_annual_cost_stack"] = str(annual_path)
+
+        cash_flow_points = [
+            (float(item["month"]), float(item["cumulative_capitalized_cost_usd"]) / 1_000_000_000.0)
+            for item in finance.get("cash_flow", [])
+            if isinstance(item, dict)
+            and isinstance(item.get("month"), (int, float))
+            and isinstance(item.get("cumulative_capitalized_cost_usd"), (int, float))
+        ]
+        if cash_flow_points:
+            cash_flow_path = bundle.plots_dir / "finance_construction_cash_flow.svg"
+            _write_xy_line_chart_svg(
+                cash_flow_points,
+                cash_flow_path,
+                title=f"{summary['case']} construction cash flow (B USD)",
+                x_label="Construction month",
+                y_label="Capitalized cost (B USD)",
+            )
+            assets["finance_construction_cash_flow"] = str(cash_flow_path)
+
+    schedule = summary.get("schedule", {})
+    if isinstance(schedule, dict) and schedule.get("status") == "completed":
+        phases = schedule.get("phases", [])
+        if isinstance(phases, list) and phases:
+            schedule_path = bundle.plots_dir / "project_schedule_gantt.svg"
+            _write_schedule_gantt_svg(phases, schedule_path, title=f"{summary['case']} project schedule")
+            assets["project_schedule_gantt"] = str(schedule_path)
 
     flow_metrics = summary.get("flow", {}).get("interface_metrics", {})
     flow_numeric = _coerce_numeric_mapping(
@@ -543,6 +594,74 @@ def _write_uncertainty_band_chart_svg(
   <polyline fill="none" stroke="#60a5fa" stroke-width="2" points="{upper_polyline}" />
   <text x="{width / 2:.2f}" y="{height - 26}" text-anchor="middle" font-size="13" fill="#334155">{escape(x_label)}</text>
   <text x="24" y="{height / 2:.2f}" text-anchor="middle" font-size="13" fill="#334155" transform="rotate(-90 24 {height / 2:.2f})">{escape(y_label)}</text>
+</svg>
+"""
+    output_path.write_text(svg, encoding="utf-8")
+
+
+def _write_schedule_gantt_svg(phases: list[dict[str, Any]], output_path: Path, *, title: str) -> None:
+    parsed = []
+    for phase in phases:
+        try:
+            start = date.fromisoformat(str(phase["start_date"]))
+            end = date.fromisoformat(str(phase["end_date"]))
+        except (KeyError, ValueError):
+            continue
+        parsed.append((phase, start, end))
+    if not parsed:
+        return
+
+    start_date = min(item[1] for item in parsed)
+    end_date = max(item[2] for item in parsed)
+    total_days = max((end_date - start_date).days, 1)
+    width = 1100
+    row_height = 42
+    height = 120 + row_height * len(parsed)
+    left = 260
+    right = 50
+    top = 72
+    chart_width = width - left - right
+    colors = {
+        "planning": "#2563eb",
+        "licensing": "#7c3aed",
+        "procurement": "#b45309",
+        "construction": "#0f766e",
+        "commissioning": "#047857",
+    }
+
+    rows: list[str] = []
+    for index, (phase, start, end) in enumerate(parsed):
+        y = top + index * row_height
+        x = left + ((start - start_date).days / total_days) * chart_width
+        bar_width = max(((end - start).days / total_days) * chart_width, 4.0)
+        color = colors.get(str(phase.get("category", "project")), "#475569")
+        rows.append(
+            f'<text x="{left - 14}" y="{y + 22}" text-anchor="end" font-size="12" fill="#334155">'
+            f'{escape(str(phase.get("name", phase.get("id", "phase"))))}</text>'
+        )
+        rows.append(
+            f'<rect x="{x:.2f}" y="{y + 5}" width="{bar_width:.2f}" height="22" rx="4" fill="{color}" />'
+        )
+        rows.append(
+            f'<text x="{x + bar_width + 8:.2f}" y="{y + 22}" font-size="11" fill="#475569">'
+            f'{escape(str(phase.get("duration_months", "")))} mo</text>'
+        )
+
+    year_lines: list[str] = []
+    for year in range(start_date.year, end_date.year + 1):
+        year_start = date(year, 1, 1)
+        if year_start < start_date:
+            continue
+        x = left + ((year_start - start_date).days / total_days) * chart_width
+        year_lines.append(f'<line x1="{x:.2f}" y1="{top - 10}" x2="{x:.2f}" y2="{height - 35}" stroke="#d7dce2" />')
+        year_lines.append(f'<text x="{x + 4:.2f}" y="{height - 16}" font-size="11" fill="#64748b">{year}</text>')
+
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
+  <rect width="{width}" height="{height}" fill="#f8fafc" />
+  <text x="{left}" y="38" font-size="24" font-weight="700" fill="#0f172a">{escape(title)}</text>
+  <text x="{left}" y="58" font-size="12" fill="#475569">Planning-grade schedule from project start to commercial operation</text>
+  {''.join(year_lines)}
+  {''.join(rows)}
 </svg>
 """
     output_path.write_text(svg, encoding="utf-8")

@@ -9,6 +9,7 @@ from thorium_reactor.capabilities import get_case_capabilities
 from thorium_reactor.benchmarking import get_docker_runtime_status, run_solver_backed_benchmark
 from thorium_reactor.bundle_inputs import ensure_bundle_inputs, load_bundle_inputs
 from thorium_reactor.config import load_case_config
+from thorium_reactor.economics import run_economics_case
 from thorium_reactor.geometry.exporters import export_geometry
 from thorium_reactor.integrations import (
     persist_integration_result,
@@ -34,7 +35,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo-root", type=Path, default=None, help="Override the repository root.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    for command_name in ("build", "run", "validate", "report", "render", "benchmark", "transient", "transient-sweep", *INTEGRATION_COMMANDS):
+    for command_name in (
+        "build",
+        "run",
+        "validate",
+        "report",
+        "render",
+        "benchmark",
+        "transient",
+        "transient-sweep",
+        "economics",
+        *INTEGRATION_COMMANDS,
+    ):
         command = subparsers.add_parser(command_name, help=f"{command_name.capitalize()} a reactor case")
         command.add_argument("case", help="Case name under configs/cases")
         command.add_argument("--run-id", default=None, help="Reuse or create a specific results run id")
@@ -47,6 +59,14 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--samples", type=int, default=512, help="Number of ensemble trajectories to evaluate.")
             command.add_argument("--seed", type=int, default=42, help="Random seed for the ensemble perturbations.")
             command.add_argument("--prefer-gpu", action="store_true", help="Use CuPy when available for batched transient integration.")
+        if command_name == "economics":
+            command.add_argument("--scenario", default=None, help="Named economics scenario from the case config.")
+            command.add_argument("--project-start", default=None, help="Project start date in YYYY-MM-DD format.")
+            command.add_argument(
+                "--force",
+                action="store_true",
+                help="Calculate commercial economics even when the case is not marked reactor.mode=commercial_grid.",
+            )
         if command_name in INTEGRATION_COMMANDS:
             command.add_argument("--run-external", action="store_true", help="Attempt to execute the external code after exporting the input deck.")
         if command_name == "benchmark":
@@ -87,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = args.repo_root.resolve() if args.repo_root else discover_repo_root()
     config = load_case_config(case_config_path(repo_root, args.case))
 
-    if args.command in {"build", "run", "benchmark", "transient", "transient-sweep", *INTEGRATION_COMMANDS}:
+    if args.command in {"build", "run", "benchmark", "transient", "transient-sweep", "economics", *INTEGRATION_COMMANDS}:
         bundle = create_result_bundle(repo_root, config.name, args.run_id)
         inputs = ensure_bundle_inputs(repo_root, bundle, config)
     else:
@@ -181,6 +201,42 @@ def main(argv: list[str] | None = None) -> int:
         print(bundle.root)
         print(transient_sweep["backend"])
         print(transient_sweep["metrics"]["peak_power_fraction_p95"])
+        return 0
+
+    if args.command == "economics":
+        plan = run_economics_case(
+            config,
+            bundle,
+            scenario_name=args.scenario,
+            project_start=args.project_start,
+            force=args.force,
+        )
+        summary = json.loads((bundle.root / "summary.json").read_text(encoding="utf-8"))
+        generate_summary_plots(bundle, summary)
+        report_path = bundle.root / "report.md"
+        if report_path.exists():
+            validation_path = bundle.root / "validation.json"
+            geometry_assets = None
+            render_assets_path = bundle.root / "render_assets.json"
+            if render_assets_path.exists():
+                geometry_assets = json.loads(render_assets_path.read_text(encoding="utf-8"))
+            plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
+            report = generate_report(
+                config.name,
+                config.data,
+                bundle.root / "summary.json",
+                validation_path if validation_path.exists() else None,
+                geometry_assets,
+                benchmark,
+                plot_assets,
+                provenance=provenance,
+            )
+            bundle.write_text("report.md", report)
+        print(bundle.root)
+        print(plan["status"])
+        if plan["finance"].get("status") == "completed":
+            print(plan["finance"]["outputs"]["lcoe_usd_per_mwh"])
+            print(plan["schedule"]["commercial_operation_date"])
         return 0
 
     if args.command == "moose":

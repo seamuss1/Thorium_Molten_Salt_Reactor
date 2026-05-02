@@ -90,3 +90,23 @@ def test_cli_registers_transient_sweep_command() -> None:
     assert namespace.samples == 1024
     assert namespace.seed == 7
     assert namespace.prefer_gpu is True
+
+
+def test_cli_registers_economics_command() -> None:
+    parser = build_parser()
+    namespace = parser.parse_args(
+        [
+            "economics",
+            "flagship_grid_msr",
+            "--scenario",
+            "conservative_foak",
+            "--project-start",
+            "2026-05-02",
+        ]
+    )
+
+    assert namespace.command == "economics"
+    assert namespace.case == "flagship_grid_msr"
+    assert namespace.scenario == "conservative_foak"
+    assert namespace.project_start == "2026-05-02"
+    assert namespace.force is False

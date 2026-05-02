@@ -10,4 +10,7 @@ dependencies:
   - pytest>=8.0
   - ffmpeg
   - pip:
+      - fastapi>=0.110
+      - httpx>=0.27
+      - uvicorn[standard]>=0.29
       - -e .

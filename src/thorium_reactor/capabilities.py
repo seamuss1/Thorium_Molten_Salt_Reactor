@@ -8,6 +8,7 @@ THERMAL_NETWORK = "thermal_network"
 BALANCE_OF_PLANT = "balance_of_plant"
 MSR_PRIMARY_SYSTEM = "msr_primary_system"
 TRANSIENT_ANALYSIS = "transient_analysis"
+COMMERCIAL_PLANNING = "commercial_planning"
 
 
 class CapabilityConfigurationError(ValueError):
@@ -25,6 +26,8 @@ def get_case_capabilities(config: Any) -> set[str]:
         capabilities.add(MSR_PRIMARY_SYSTEM)
     if THERMAL_NETWORK in capabilities and BALANCE_OF_PLANT in capabilities:
         capabilities.add(TRANSIENT_ANALYSIS)
+    if config.reactor.get("mode") == "commercial_grid":
+        capabilities.add(COMMERCIAL_PLANNING)
 
     for capability, enabled in _capability_overrides(config).items():
         if enabled:
@@ -113,6 +116,17 @@ def validate_case_capability(config: Any, capability: str) -> None:
     if capability == TRANSIENT_ANALYSIS:
         validate_case_capability(config, BALANCE_OF_PLANT)
         validate_case_capability(config, THERMAL_NETWORK)
+        return
+
+    if capability == COMMERCIAL_PLANNING:
+        if config.reactor.get("mode") != "commercial_grid":
+            raise CapabilityConfigurationError(
+                _capability_message(capability, "requires reactor.mode='commercial_grid'.")
+            )
+        if not config.economics:
+            raise CapabilityConfigurationError(_capability_message(capability, "requires economics."))
+        if not config.project_schedule:
+            raise CapabilityConfigurationError(_capability_message(capability, "requires project_schedule."))
 
 
 def _capability_overrides(config: Any) -> dict[str, bool]:

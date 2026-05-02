@@ -11,6 +11,9 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
         "PyYAML>=6.0" \
         "numpy>=1.26" \
         "Pillow>=10.0" \
+        "fastapi>=0.110" \
+        "httpx>=0.27" \
+        "uvicorn[standard]>=0.29" \
         "matplotlib>=3.8" \
         "pytest>=8.0"
 

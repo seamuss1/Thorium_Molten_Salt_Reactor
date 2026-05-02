@@ -15,6 +15,24 @@ services:
       THORIUM_REACTOR_TOOL_VERSION: python-container
     command: ["python", "-m", "thorium_reactor.cli", "--help"]
 
+  web:
+    build:
+      context: .
+      dockerfile: docker/app-runner.Dockerfile
+    image: thorium-reactor-web:latest
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    ports:
+      - "8000:8000"
+    environment:
+      PYTHONPATH: /workspace/src
+      THORIUM_REACTOR_RUNTIME_SERVICE: web
+      THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-web:latest
+      THORIUM_REACTOR_TOOL_RUNTIME: python
+      THORIUM_REACTOR_TOOL_VERSION: python-container
+    command: ["uvicorn", "thorium_reactor.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+
   openmc:
     build:
       context: .

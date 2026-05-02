@@ -1,0 +1,239 @@
+name: flagship_grid_msr
+reactor:
+  name: Flagship Grid Thorium MSR
+  family: commercial grid-connected thorium molten-salt SMR
+  stage: commercial-planning
+  mode: commercial_grid
+  property_reference_temperature_c: 600.0
+  design_power_mwth: 792.242363
+  hot_leg_temp_c: 700.0
+  cold_leg_temp_c: 560.0
+  primary_cp_kj_kgk: 1.6
+  steam_generator_effectiveness: 0.92
+  turbine_efficiency: 0.42
+  generator_efficiency: 0.98
+  benchmark: benchmarks/tmsr_lf1/benchmark.yaml
+  characteristics:
+    role: flagship commercial end-goal
+    reactor_class: molten_salt_smr
+    licensing_basis: U.S. NRC Part 52 combined license
+    grid_role: firm zero-carbon grid generation
+    module_count: 1
+    net_electric_power_mwe: 300.0
+    thermal_power_mwth: 792.242363
+    reactor_module_thermal_power_mwth: 792.242363
+    fuel_coolant_family: circulating fluoride thorium fuel salt
+    fuel_cycle: thorium-U233 proxy breeding with online cleanup placeholder
+    cleanup_strategy: helium sparging, offgas holdup, configurable protactinium holdup
+    end_goal: >
+      Planning target for a U.S. grid-connected flagship plant that bridges the
+      repository's physics model into commercial cost, schedule, and reporting.
+materials:
+  fuel_salt:
+    name: fuel_salt
+    density: { units: g/cm3, value: 3.2 }
+    cp: { units: kj/kg-k, model: constant, value: 1.6 }
+    nuclides:
+      - { name: Li7, ao: 0.325 }
+      - { name: F19, ao: 0.5648333333 }
+      - { name: Be9, ao: 0.0966666667 }
+      - { name: Zr90, ao: 0.005145 }
+      - { name: Zr91, ao: 0.001122 }
+      - { name: Zr92, ao: 0.001715 }
+      - { name: Zr94, ao: 0.001738 }
+      - { name: Zr96, ao: 0.000280 }
+      - { name: Th232, ao: 0.001500 }
+      - { name: U233, ao: 0.000100 }
+      - { name: U238, ao: 0.001900 }
+  graphite:
+    name: graphite
+    density: { units: g/cm3, value: 1.8 }
+    elements:
+      - { name: C, ao: 1.0 }
+  pipe:
+    name: nickel_alloy
+    density: { units: g/cm3, value: 8.9 }
+    elements:
+      - { name: Ni, ao: 0.71 }
+      - { name: Mo, ao: 0.17 }
+      - { name: Cr, ao: 0.07 }
+      - { name: Fe, ao: 0.05 }
+  air:
+    name: helium_cover_gas
+    density: { units: g/cm3, value: 0.00018 }
+    elements:
+      - { name: He, ao: 1.0 }
+geometry:
+  kind: ring_lattice_core
+  style: detailed_msr
+  pitch: 203.2
+  boundary: reflective
+  axial_boundary: vacuum
+  core_radius: 50.8
+  plenum_radius: 34.5
+  reflector_outer_radius: 62.0
+  downcomer_liner_outer_radius: 63.4
+  downcomer_outer_radius: 70.6
+  vessel_outer_radius: 73.8
+  guard_gap_outer_radius: 76.8
+  guard_vessel_outer_radius: 79.4
+  matrix_material: graphite
+  salt_material: fuel_salt
+  structure_material: pipe
+  background_material: air
+  height_cm: 240.0
+  lower_plenum_height_cm: 24.0
+  active_core_height_cm: 192.0
+  upper_plenum_height_cm: 16.0
+  cover_gas_height_cm: 8.0
+  channel_layers:
+    - { name: moderator_center, material: graphite, inner_radius: 0.0, outer_radius: 0.25 }
+    - { name: fuel_annulus, material: fuel_salt, inner_radius: 0.2501, outer_radius: 0.39, tag_as: fuel }
+    - { name: gas_gap_inner, material: null, inner_radius: 0.39, outer_radius: 0.40 }
+    - { name: primary_pipe, material: pipe, inner_radius: 0.40, outer_radius: 0.46 }
+    - { name: gas_gap_outer, material: null, inner_radius: 0.4601, outer_radius: 0.60 }
+  special_channels:
+    control_guides:
+      ring_radius: 18.06
+      every: 2
+      layers:
+        - { name: control_void, material: air, inner_radius: 0.0, outer_radius: 0.16, tag_as: control }
+        - { name: guide_tube, material: pipe, inner_radius: 0.1601, outer_radius: 0.24 }
+        - { name: bypass_salt, material: fuel_salt, inner_radius: 0.2401, outer_radius: 0.34 }
+        - { name: guide_graphite, material: graphite, inner_radius: 0.3401, outer_radius: 0.60 }
+    instrumentation_wells:
+      ring_radius: 36.12
+      every: 4
+      start_index: 1
+      layers:
+        - { name: sensor_well, material: air, inner_radius: 0.0, outer_radius: 0.12, tag_as: instrumentation }
+        - { name: sensor_sheath, material: pipe, inner_radius: 0.1201, outer_radius: 0.18 }
+        - { name: purge_annulus, material: air, inner_radius: 0.1801, outer_radius: 0.26 }
+        - { name: shield_graphite, material: graphite, inner_radius: 0.2601, outer_radius: 0.60 }
+  rings:
+    - { radius: 0.0, count: 1 }
+    - { radius: 9.03, count: 6 }
+    - { radius: 18.06, count: 12 }
+    - { radius: 27.09, count: 18 }
+    - { radius: 36.12, count: 24 }
+    - { radius: 45.15, count: 30 }
+simulation:
+  mode: eigenvalue
+  particles: 100000
+  batches: 120
+  inactive: 20
+  source:
+    type: point
+    parameters: [0.0, 0.0, 0.0]
+  tallies:
+    - name: fuel_reaction_rates
+      cell: fuel
+      nuclides: [U233]
+      scores: [total, fission, absorption, "(n,gamma)"]
+    - name: core_flux
+      cell: core_matrix
+      scores: [flux]
+reporting:
+  plots:
+    - name: flagship_grid_msr_cross_section
+      kind: svg
+flow:
+  core_model:
+    kind: channelized_from_geometry
+    active_variants: [fuel, control_guides]
+    stagnant_variants: [instrumentation_wells]
+    family_split_weights:
+      fuel: 1.0
+      control_guides: 1.0
+  reduced_order:
+    allocation_rule: salt_area_weighted
+model_representation:
+  materials: isotopic_explicit
+  fuel_cycle: proxy_breeding
+properties:
+  provider: legacy_correlation
+processing:
+  volatile_removal: helium_sparging
+  noble_gas_path: offgas_hold_up
+  protactinium_strategy: configurable_holdup
+economics:
+  cost_basis: inl_2024_smr_conservative
+  default_scenario: conservative_foak
+  source_year_usd: 2022
+  target_year_usd: 2022
+  scenarios:
+    conservative_foak:
+      overnight_cost_uplift: 1.25
+      construction_duration_multiplier: 1.20
+      learning_cost_multiplier: 1.0
+      real_wacc: 0.08
+      analysis_life_years: 60
+      tax_credit_fraction: 0.0
+project_schedule:
+  planning_basis: U.S. NRC Part 52 grid-connected first commercial MSR project
+  project_start: 2026-05-02
+  phases:
+    - id: end_goal_definition_site_strategy
+      name: End-goal definition and site strategy
+      category: planning
+      duration_months: 12
+      depends_on: []
+      notes: Freeze commercial requirements, owner role, grid interconnection target, and candidate site envelope.
+    - id: preapplication_preliminary_design
+      name: NRC pre-application and preliminary design
+      category: licensing
+      duration_months: 24
+      depends_on: [end_goal_definition_site_strategy]
+      notes: Engage NRC, mature safety case, define principal design criteria, and prepare topical-report strategy.
+    - id: combined_license_application
+      name: Combined license application package
+      category: licensing
+      duration_months: 16
+      depends_on: [preapplication_preliminary_design]
+      notes: Complete FSAR, environmental report, financial qualifications, and ITAAC-ready project controls.
+    - id: nrc_col_review_hearing
+      name: NRC COL review and mandatory hearing
+      category: licensing
+      duration_months: 26
+      depends_on: [combined_license_application]
+      notes: Planning-grade review window for a sustained, well-resourced advanced-reactor application.
+    - id: long_lead_procurement
+      name: Long-lead procurement and supply chain readiness
+      category: procurement
+      duration_months: 28
+      depends_on: [combined_license_application]
+      notes: At-risk procurement of forgings, salt-processing equipment, graphite, heat exchangers, and controls.
+    - id: site_preparation_civil_enabling
+      name: Site preparation and civil enabling work
+      category: construction
+      duration_months: 20
+      depends_on: [combined_license_application]
+      notes: Limited-work site prep, laydown, grid upgrades, excavation, and non-safety civil packages.
+    - id: nuclear_construction
+      name: Nuclear island and power block construction
+      category: construction
+      duration_source: construction_months
+      depends_on: [nrc_col_review_hearing]
+      notes: Conservative FOAK construction duration derived from INL SMR conservative construction time with multiplier.
+    - id: startup_testing_grid_sync
+      name: Startup testing and grid synchronization
+      category: commissioning
+      duration_months: 10
+      depends_on: [nuclear_construction, long_lead_procurement, site_preparation_civil_enabling]
+      notes: Fuel loading readiness, preoperational tests, low-power tests, ascension testing, and commercial operation.
+validation_targets:
+  expected_cells:
+    metric: expected_cells
+    source: metrics
+    min: 456
+    max: 456
+  channel_count:
+    metric: channel_count
+    source: build_manifest
+    min: 91
+    max: 91
+  keff_core_band:
+    metric: keff
+    source: metrics
+    min: 0.98
+    max: 1.08

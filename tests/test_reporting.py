@@ -675,3 +675,100 @@ def test_report_surfaces_model_validity_and_validation_maturity() -> None:
         assert "Validation gap" in report
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_report_includes_flagship_finance_schedule_and_taxonomy() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-finance" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "case": "flagship_grid_msr",
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "not_run"},
+                    "metrics": {"finance_lcoe_usd_per_mwh": 190.0},
+                    "finance": {
+                        "status": "completed",
+                        "scenario": "conservative_foak",
+                        "planning_basis": "planning_grade_not_vendor_quote",
+                        "source_year_usd": 2022,
+                        "inputs": {
+                            "net_capacity_mwe": 300.0,
+                            "capacity_factor": 0.93,
+                            "source_occ_usd_per_kwe": 10000.0,
+                            "overnight_cost_uplift": 1.25,
+                            "real_wacc": 0.08,
+                        },
+                        "cost_breakdown_usd": {
+                            "net_overnight_cost": 3_750_000_000.0,
+                            "interest_during_construction": 1_000_000_000.0,
+                            "total_capitalized_cost": 4_750_000_000.0,
+                        },
+                        "annual_costs_usd_per_year": {
+                            "annualized_capital": 380_000_000.0,
+                            "total": 480_000_000.0,
+                        },
+                        "outputs": {
+                            "annual_generation_mwh": 2_444_040.0,
+                            "lcoe_usd_per_mwh": 190.0,
+                            "lcoe_cents_per_kwh": 19.0,
+                        },
+                    },
+                    "schedule": {
+                        "status": "completed",
+                        "planning_basis": "U.S. NRC Part 52",
+                        "project_start_date": "2026-05-02",
+                        "construction_start_date": "2032-11-02",
+                        "commercial_operation_date": "2040-11-02",
+                        "total_months_to_commercial_operation": 174,
+                        "total_years_to_commercial_operation": 14.5,
+                        "phases": [
+                            {
+                                "id": "nuclear_construction",
+                                "start_date": "2032-11-02",
+                                "end_date": "2040-01-02",
+                                "duration_months": 86,
+                            }
+                        ],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "flagship_grid_msr",
+            {
+                "reactor": {
+                    "name": "Flagship Grid Thorium MSR",
+                    "family": "commercial grid-connected thorium molten-salt SMR",
+                    "stage": "commercial-planning",
+                    "mode": "commercial_grid",
+                    "design_power_mwth": 792.242363,
+                    "benchmark": "benchmarks/tmsr_lf1/benchmark.yaml",
+                    "characteristics": {
+                        "reactor_class": "molten_salt_smr",
+                        "licensing_basis": "U.S. NRC Part 52 combined license",
+                        "grid_role": "firm zero-carbon grid generation",
+                        "module_count": 1,
+                        "net_electric_power_mwe": 300.0,
+                        "thermal_power_mwth": 792.242363,
+                    },
+                }
+            },
+            summary_path,
+            None,
+            None,
+        )
+
+        assert "## Reactor Classification" in report
+        assert "commercial flagship grid reactor" in report
+        assert "## Flagship Characteristics" in report
+        assert "## Commercial Finance" in report
+        assert "conservative_foak" in report
+        assert "## Build Schedule" in report
+        assert "2040-11-02" in report
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)

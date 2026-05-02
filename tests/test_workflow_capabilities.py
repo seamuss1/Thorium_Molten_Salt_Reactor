@@ -8,6 +8,7 @@ import pytest
 
 from thorium_reactor.capabilities import (
     BALANCE_OF_PLANT,
+    COMMERCIAL_PLANNING,
     MSR_PRIMARY_SYSTEM,
     NEUTRONICS_ONLY,
     THERMAL_NETWORK,
@@ -56,8 +57,8 @@ def test_example_pin_run_no_solver_succeeds_end_to_end() -> None:
         assert "primary_system" not in summary
         assert "flow" not in summary
         assert "transient" not in summary
-        assert runtime_context["service"] == "host"
-        assert runtime_context["containerized"] is False
+        assert runtime_context["service"] in {"host", "app"}
+        assert runtime_context["containerized"] is (runtime_context["service"] != "host")
         assert runtime_context["command"] == ["run", "example_pin"]
         assert state_store["runtime_context"]["command"] == ["run", "example_pin"]
         assert isinstance(validation["checks"], list)
@@ -110,10 +111,18 @@ def test_capability_inference_distinguishes_generic_and_msr_cases() -> None:
     example_pin = _load_case("example_pin")
     tmsr_core = _load_case("tmsr_lf1_core")
     immersed_pool = _load_case("immersed_pool_reference")
+    flagship = _load_case("flagship_grid_msr")
 
     assert get_case_capabilities(example_pin) == {NEUTRONICS_ONLY}
     assert get_case_capabilities(tmsr_core) == {NEUTRONICS_ONLY, BALANCE_OF_PLANT, THERMAL_NETWORK, TRANSIENT_ANALYSIS}
     assert get_case_capabilities(immersed_pool) == {NEUTRONICS_ONLY, BALANCE_OF_PLANT, THERMAL_NETWORK, MSR_PRIMARY_SYSTEM, TRANSIENT_ANALYSIS}
+    assert get_case_capabilities(flagship) == {
+        NEUTRONICS_ONLY,
+        BALANCE_OF_PLANT,
+        THERMAL_NETWORK,
+        TRANSIENT_ANALYSIS,
+        COMMERCIAL_PLANNING,
+    }
 
 
 def test_explicit_capability_override_can_disable_primary_system_logic() -> None:
@@ -270,7 +279,7 @@ def test_external_integration_commands_export_inputs_and_update_summary() -> Non
         assert saltproc_handoff["tool"] == "saltproc"
         assert moltres_handoff["tool"] == "moltres"
         assert moose_payload["provenance"]["runtime_context"]["command"] == ["moose", "immersed_pool_reference"]
-        assert thermochimica_payload["provenance"]["runtime_context"]["tool_version"] is None
+        assert thermochimica_payload["provenance"]["runtime_context"]["tool_version"] in {None, "python-container"}
         assert thermochimica_handoff["provenance"]["runtime_context"]["command"] == ["thermochimica", "immersed_pool_reference"]
         assert moose_handoff["geometry"]["channel_count"] == summary["metrics"]["channel_count"]
         assert scale_handoff["materials"]["fuel_salt"]["nuclide_count"] > 0

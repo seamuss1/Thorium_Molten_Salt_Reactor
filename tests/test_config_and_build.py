@@ -31,6 +31,15 @@ def test_msre_benchmark_case_uses_historic_mode_and_resolves_benchmark() -> None
     assert config.benchmark_file.exists()
 
 
+def test_flagship_case_declares_commercial_grid_characteristics() -> None:
+    config = _load_case("flagship_grid_msr")
+
+    assert config.reactor["mode"] == "commercial_grid"
+    assert config.reactor["characteristics"]["net_electric_power_mwe"] == 300.0
+    assert config.economics["default_scenario"] == "conservative_foak"
+    assert str(config.project_schedule["project_start"]) == "2026-05-02"
+
+
 def test_core_case_manifest_has_expected_channel_count() -> None:
     config = _load_case("tmsr_lf1_core")
     built = build_case(config)
@@ -262,6 +271,51 @@ def test_case_loader_rejects_non_list_integration_args() -> None:
         case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
         with pytest.raises(ConfigError, match="integrations.moose.args"):
+            load_case_config(case_path)
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_case_loader_rejects_invalid_commercial_grid_characteristics() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-commercial-grid-config" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "flagship_grid_msr" / "case.yaml").read_text(encoding="utf-8"))
+        payload["reactor"]["characteristics"].pop("net_electric_power_mwe")
+        case_path = scratch_root / "case.yaml"
+        case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="net_electric_power_mwe"):
+            load_case_config(case_path)
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_case_loader_rejects_invalid_economics_default_scenario() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-economics-config" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "flagship_grid_msr" / "case.yaml").read_text(encoding="utf-8"))
+        payload["economics"]["default_scenario"] = "missing"
+        case_path = scratch_root / "case.yaml"
+        case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="default_scenario"):
+            load_case_config(case_path)
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_case_loader_rejects_invalid_project_schedule_date() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-project-schedule-config" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "flagship_grid_msr" / "case.yaml").read_text(encoding="utf-8"))
+        payload["project_schedule"]["project_start"] = "soon"
+        case_path = scratch_root / "case.yaml"
+        case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="project_schedule.project_start"):
             load_case_config(case_path)
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)

@@ -20,7 +20,8 @@ def missing_openmc_runtime_message(command_name: str = "run", *, system_name: st
     else:
         message += (
             " Solver-backed runs require either the Docker Compose `openmc` service or an environment with OpenMC "
-            "installed, such as `environment-openmc-linux.yml`."
+            "installed, such as `environment-openmc-linux.yml`. A typical container command is "
+            "`docker compose run --rm openmc python -m thorium_reactor.cli run <case>`."
         )
     if command_name == "benchmark":
         message += (

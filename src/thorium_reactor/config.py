@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -36,7 +37,7 @@ PROPERTY_MODEL_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
 }
 SUPPORTED_BOUNDARY_TYPES = {"reflective", "vacuum", "periodic", "transmission", "white"}
 SUPPORTED_SOURCE_TYPES = {"point"}
-SUPPORTED_REACTOR_MODES = {"historic_benchmark", "modern_test_reactor", "aspirational_breeder"}
+SUPPORTED_REACTOR_MODES = {"historic_benchmark", "modern_test_reactor", "aspirational_breeder", "commercial_grid"}
 SUPPORTED_PROPERTY_PROVIDERS = {"legacy_correlation", "evaluated_table", "thermochemical_equilibrium"}
 SUPPORTED_INTEGRATIONS = ("moose", "scale", "thermochimica", "saltproc", "moltres")
 
@@ -70,6 +71,14 @@ class CaseConfig:
     @property
     def reporting(self) -> dict[str, Any]:
         return self.data["reporting"]
+
+    @property
+    def economics(self) -> dict[str, Any]:
+        return self.data.get("economics", {})
+
+    @property
+    def project_schedule(self) -> dict[str, Any]:
+        return self.data.get("project_schedule", {})
 
     @property
     def flow(self) -> dict[str, Any]:
@@ -133,6 +142,14 @@ def _validate_case_schema(path: Path, raw: Mapping[str, Any]) -> None:
     _validate_optional_flow_settings(path, raw.get("flow"))
     _validate_optional_model_representation(path, raw.get("model_representation"))
     _validate_optional_integrations(path, raw.get("integrations"))
+    _validate_optional_economics_settings(path, raw.get("economics"))
+    _validate_optional_project_schedule_settings(path, raw.get("project_schedule"))
+    reactor = raw.get("reactor", {})
+    if isinstance(reactor, Mapping) and reactor.get("mode") == "commercial_grid":
+        if raw.get("economics") is None:
+            raise ConfigError(f"Case config {path} reactor.mode 'commercial_grid' requires economics.")
+        if raw.get("project_schedule") is None:
+            raise ConfigError(f"Case config {path} reactor.mode 'commercial_grid' requires project_schedule.")
 
 
 def _validate_reactor_settings(path: Path, reactor: Any) -> None:
@@ -144,6 +161,20 @@ def _validate_reactor_settings(path: Path, reactor: Any) -> None:
         raise ConfigError(
             f"Case config {path} reactor.mode '{mode}' is unsupported. Supported values: {supported}."
         )
+    if mode == "commercial_grid":
+        characteristics = reactor.get("characteristics")
+        if not isinstance(characteristics, Mapping):
+            raise ConfigError(
+                f"Case config {path} reactor.mode 'commercial_grid' requires reactor.characteristics."
+            )
+        for field_name in ("net_electric_power_mwe", "thermal_power_mwth", "module_count"):
+            if field_name not in characteristics:
+                raise ConfigError(
+                    f"Case config {path} reactor.characteristics.{field_name} is required for commercial_grid cases."
+                )
+        _require_number(path, "reactor.characteristics.net_electric_power_mwe", characteristics["net_electric_power_mwe"])
+        _require_number(path, "reactor.characteristics.thermal_power_mwth", characteristics["thermal_power_mwth"])
+        _require_positive_int(path, "reactor.characteristics.module_count", characteristics["module_count"])
 
 
 def _validate_material_properties(path: Path, materials: Any) -> None:
@@ -607,3 +638,85 @@ def _validate_optional_integrations(path: Path, integrations: Any) -> None:
         args = settings.get("args")
         if args is not None and not isinstance(args, list):
             raise ConfigError(f"Case config {path} integrations.{integration_name}.args must be a list.")
+
+
+def _validate_optional_economics_settings(path: Path, economics: Any) -> None:
+    if economics is None:
+        return
+    if not isinstance(economics, Mapping):
+        raise ConfigError(f"Case config {path} optional 'economics' section must be a mapping.")
+    if not str(economics.get("cost_basis", "")).strip():
+        raise ConfigError(f"Case config {path} economics.cost_basis must be a non-empty string.")
+    if not str(economics.get("default_scenario", "")).strip():
+        raise ConfigError(f"Case config {path} economics.default_scenario must be a non-empty string.")
+    scenarios = economics.get("scenarios")
+    if not isinstance(scenarios, Mapping) or not scenarios:
+        raise ConfigError(f"Case config {path} economics.scenarios must define at least one scenario.")
+    default_scenario = str(economics["default_scenario"])
+    if default_scenario not in scenarios:
+        raise ConfigError(
+            f"Case config {path} economics.default_scenario '{default_scenario}' is not present in economics.scenarios."
+        )
+    for scenario_name, scenario in scenarios.items():
+        if not isinstance(scenario, Mapping):
+            raise ConfigError(f"Case config {path} economics.scenarios.{scenario_name} must be a mapping.")
+        for field_name in (
+            "overnight_cost_uplift",
+            "construction_duration_multiplier",
+            "real_wacc",
+            "analysis_life_years",
+            "tax_credit_fraction",
+        ):
+            if field_name in scenario:
+                value = _require_number(path, f"economics.scenarios.{scenario_name}.{field_name}", scenario[field_name])
+                if field_name != "tax_credit_fraction" and value <= 0.0:
+                    raise ConfigError(
+                        f"Case config {path} economics.scenarios.{scenario_name}.{field_name} must be positive."
+                    )
+                if field_name == "tax_credit_fraction" and value < 0.0:
+                    raise ConfigError(
+                        f"Case config {path} economics.scenarios.{scenario_name}.tax_credit_fraction must be non-negative."
+                    )
+
+
+def _validate_optional_project_schedule_settings(path: Path, project_schedule: Any) -> None:
+    if project_schedule is None:
+        return
+    if not isinstance(project_schedule, Mapping):
+        raise ConfigError(f"Case config {path} optional 'project_schedule' section must be a mapping.")
+    project_start = project_schedule.get("project_start")
+    if project_start is not None:
+        try:
+            date.fromisoformat(str(project_start))
+        except ValueError as exc:
+            raise ConfigError(f"Case config {path} project_schedule.project_start must be YYYY-MM-DD.") from exc
+    phases = project_schedule.get("phases")
+    if not isinstance(phases, list) or not phases:
+        raise ConfigError(f"Case config {path} project_schedule.phases must define at least one phase.")
+    phase_ids: set[str] = set()
+    for index, phase in enumerate(phases, start=1):
+        if not isinstance(phase, Mapping):
+            raise ConfigError(f"Case config {path} project_schedule.phases[{index}] must be a mapping.")
+        phase_id = str(phase.get("id", "")).strip()
+        if not phase_id:
+            raise ConfigError(f"Case config {path} project_schedule.phases[{index}].id must be non-empty.")
+        if phase_id in phase_ids:
+            raise ConfigError(f"Case config {path} project_schedule phase id '{phase_id}' is duplicated.")
+        phase_ids.add(phase_id)
+        if "duration_months" in phase:
+            _require_positive_int(path, f"project_schedule.phases[{index}].duration_months", phase["duration_months"])
+        elif phase.get("duration_source") != "construction_months":
+            raise ConfigError(
+                f"Case config {path} project_schedule.phases[{index}] requires duration_months or "
+                "duration_source: construction_months."
+            )
+        depends_on = phase.get("depends_on", [])
+        if depends_on is None:
+            continue
+        if not isinstance(depends_on, list):
+            raise ConfigError(f"Case config {path} project_schedule.phases[{index}].depends_on must be a list.")
+        for dependency in depends_on:
+            if not str(dependency).strip():
+                raise ConfigError(
+                    f"Case config {path} project_schedule.phases[{index}].depends_on entries must be non-empty strings."
+                )

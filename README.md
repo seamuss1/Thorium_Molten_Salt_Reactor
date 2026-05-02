@@ -28,6 +28,7 @@ The `tmsr_lf1_core` case now resolves to a detailed CSG reactor stack with activ
 - `msre_u233_zero_power`: historic-benchmark harness for U-233-focused zero-power studies
 - `tmsr_lf1_core`: detailed OpenMC CSG core with vessel stack and specialized channel families inspired by the TMSR-LF1 concept
 - `immersed_pool_reference`: reference-inspired immersed-pool concept with offset core enclosure, primary-loop hardware, and animated flow render output
+- `flagship_grid_msr`: 300 MWe net U.S. NRC grid-connected thorium MSR planning target with finance and build-schedule outputs
 
 ## Supported Runtime
 
@@ -83,6 +84,7 @@ reactor report example_pin
 reactor render tmsr_lf1_core
 reactor transient immersed_pool_reference --scenario partial_heat_sink_loss
 reactor transient-sweep immersed_pool_reference --scenario partial_heat_sink_loss --samples 2048 --prefer-gpu
+reactor economics flagship_grid_msr --scenario conservative_foak --project-start 2026-05-02
 reactor moose immersed_pool_reference
 reactor scale tmsr_lf1_core
 reactor thermochimica tmsr_lf1_core
@@ -100,6 +102,7 @@ Command behavior:
 - `reactor render <case>` writes procedural geometry exports for visualization workflows, including OBJ, STL, watertight mesh validation JSON, a rendered PNG, animated GIF flow output, and MP4 video output when a case defines flow-animation paths and `ffmpeg` is available.
 - `reactor transient <case>` runs a reduced-order nodal transient proxy from the steady-state summary, writes `transient.json`, updates `summary.json`, and emits transient plots when the case defines transient scenarios.
 - `reactor transient-sweep <case>` runs an uncertainty ensemble around the reduced-order transient model, writes `transient_sweep.json`, updates `summary.json` with p50/p95 envelope metrics, and carries molten-salt property uncertainty bands into the ensemble defaults. It prefers CuPy when `--prefer-gpu` is supplied and a CUDA device is available; otherwise it uses the built-in CPU backend.
+- `reactor economics <case>` runs the commercial finance and build-schedule workflow, writes `finance.json`, `schedule.json`, `cash_flow.csv`, `cost_breakdown.csv`, and `project_plan.json`, and marks non-commercial cases as `not_applicable` unless `--force` is supplied.
 - `reactor moose <case>`, `reactor scale <case>`, `reactor thermochimica <case>`, `reactor saltproc <case>`, and `reactor moltres <case>` export integration inputs plus handoff metadata into the current bundle, and can optionally attempt external execution with `--run-external`.
 
 ## Result Bundle Contract
@@ -116,6 +119,7 @@ Each active run is written to `results/<case>/<run_id>/` and is expected to cont
 - `validation.json` after validation
 - `report.md` after report generation
 - `transient.json` and/or `transient_sweep.json` when transient studies are run
+- `finance.json`, `schedule.json`, `cash_flow.csv`, `cost_breakdown.csv`, and `project_plan.json` when commercial economics are run
 - benchmark traceability in `build_manifest.json` and `summary.json` when a case is linked to benchmark metadata
 - `*_integration.json` and `*_handoff.json` for external tool exports
 - `openmc/` for solver XML and statepoints
@@ -130,6 +134,7 @@ The benchmark layer now supports dataset-centric evidence, assumptions, target c
 - [docs/thermal-hydraulics-modeling-strategy.md](docs/thermal-hydraulics-modeling-strategy.md) describes the recommended analysis ladder for this repo: whole-loop reduced-order thermal-hydraulics first, porous or homogenized core models second, and local 3D CFD only where geometry controls the answer. It also lays out the additional precursor-transport and neutronics coupling needed for liquid-fueled MSR studies.
 - [docs/current-model-equations.md](docs/current-model-equations.md) documents the equations, correlations, supported property units, and OpenMC input assumptions used by the current reduced-order implementation.
 - [docs/recent-msr-simulation-literature.md](docs/recent-msr-simulation-literature.md) summarizes recent literature used to choose the current delayed-neutron precursor transport upgrade and the next realism steps.
+- [docs/reactor-taxonomy-and-flagship.md](docs/reactor-taxonomy-and-flagship.md) defines the difference between benchmark, research, submodel, and commercial-planning cases, and documents the `flagship_grid_msr` end goal.
 
 ## External Solver Hooks
 

@@ -1,0 +1,32 @@
+sources:
+  - id: inl_advanced_reactor_cost_meta_analysis_2024
+    title: INL/RPT-24-77048 Meta-Analysis of Advanced Nuclear Reactor Cost Estimations
+    url: https://gain.inl.gov/content/uploads/4/2024/11/INL-RPT-24-77048-Meta-Analysis-of-Adv-Nuclear-Reactor-Cost-Estimations.pdf
+    note: Source for SMR conservative BOAK OCC, O&M, fuel, capacity factor, and construction duration.
+  - id: iaea_milestones_approach
+    title: IAEA Milestones Approach
+    url: https://www.iaea.org/topics/infrastructure-development/milestones-approach
+    note: Source for phase-based nuclear programme framing and 10-15 year planning context.
+  - id: nrc_power_plant_licensing_process
+    title: NRC Backgrounder on Nuclear Power Plant Licensing Process
+    url: https://www.nrc.gov/reading-rm/doc-collections/fact-sheets/licensing-process-fs
+    note: Source for Part 50 and Part 52 licensing route descriptions.
+  - id: nrel_lcoe_calculator
+    title: NREL Levelized Cost of Energy Calculator
+    url: https://www.nrel.gov/analysis/tech-lcoe
+    note: Source for LCOE framing around capital cost, O&M, performance, and fuel.
+cost_bases:
+  inl_2024_smr_conservative:
+    reactor_class: smr
+    maturity: boak_conservative_reference
+    source_year_usd: 2022
+    source_refs:
+      - inl_advanced_reactor_cost_meta_analysis_2024
+    net_capacity_mwe: 300.0
+    overnight_capital_cost_usd_per_kwe: 10000.0
+    fixed_om_usd_per_kw_year: 216.0
+    variable_om_usd_per_mwh: 2.8
+    fuel_usd_per_mwh: 12.1
+    capacity_factor: 0.93
+    construction_months: 71
+    ramp_rate_percent_power_per_min: 10.0
