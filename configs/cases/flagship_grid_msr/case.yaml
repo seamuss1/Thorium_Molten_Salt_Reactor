@@ -9,7 +9,42 @@ reactor:
   hot_leg_temp_c: 700.0
   cold_leg_temp_c: 560.0
   primary_cp_kj_kgk: 1.6
+  primary_dynamic_viscosity_pa_s: 0.0085
+  primary_thermal_conductivity_w_mk: 1.05
+  primary_pump_efficiency: 0.76
+  primary_elbow_loss_coefficient: 0.9
+  primary_terminal_loss_coefficient: 1.6
+  primary_loop_ambient_temp_c: 470.0
+  primary_pipe_overall_u_w_m2k: 7.5
   steam_generator_effectiveness: 0.92
+  steam_generator_overall_u_w_m2k: 820.0
+  hx_primary_hydraulic_diameter_m: 0.42
+  hx_secondary_hydraulic_diameter_m: 0.30
+  hx_primary_flow_area_m2: 0.34
+  hx_secondary_flow_area_m2: 0.42
+  secondary_inlet_temp_c: 430.0
+  secondary_outlet_temp_c: 585.0
+  secondary_density:
+    units: kg/m3
+    model: linear
+    reference_value: 3025.0
+    reference_temperature_c: 500.0
+    slope_per_c: -0.62
+  secondary_cp:
+    units: j/kg-k
+    model: linear
+    reference_value: 1650.0
+    reference_temperature_c: 500.0
+    slope_per_c: 0.28
+  secondary_dynamic_viscosity:
+    units: pa-s
+    model: arrhenius
+    pre_exponential: 0.0019
+    activation_temperature_k: 1080.0
+  secondary_thermal_conductivity:
+    units: w/m-k
+    model: constant
+    value: 0.88
   turbine_efficiency: 0.42
   generator_efficiency: 0.98
   benchmark: benchmarks/tmsr_lf1/benchmark.yaml
@@ -33,6 +68,8 @@ materials:
     name: fuel_salt
     density: { units: g/cm3, value: 3.2 }
     cp: { units: kj/kg-k, model: constant, value: 1.6 }
+    dynamic_viscosity: { units: pa-s, model: constant, value: 0.0085 }
+    thermal_conductivity: { units: w/m-k, model: constant, value: 1.05 }
     nuclides:
       - { name: Li7, ao: 0.325 }
       - { name: F19, ao: 0.5648333333 }
@@ -63,6 +100,51 @@ materials:
     density: { units: g/cm3, value: 0.00018 }
     elements:
       - { name: He, ao: 1.0 }
+  secondary_salt:
+    name: secondary_heat_transport_salt
+    density: { units: kg/m3, model: linear, reference_value: 3025.0, reference_temperature_c: 500.0, slope_per_c: -0.62 }
+    cp: { units: j/kg-k, model: linear, reference_value: 1650.0, reference_temperature_c: 500.0, slope_per_c: 0.28 }
+    elements:
+      - { name: Li, ao: 0.44 }
+      - { name: F, ao: 0.42 }
+      - { name: Be, ao: 0.14 }
+  steam:
+    name: steam_water_working_fluid
+    density: { units: kg/m3, value: 35.0 }
+    elements:
+      - { name: H, ao: 2.0 }
+      - { name: O, ao: 1.0 }
+  water:
+    name: cooling_water
+    density: { units: kg/m3, value: 997.0 }
+    elements:
+      - { name: H, ao: 2.0 }
+      - { name: O, ao: 1.0 }
+  offgas:
+    name: helium_xenon_offgas
+    density: { units: kg/m3, value: 0.8 }
+    elements:
+      - { name: He, ao: 0.98 }
+      - { name: Xe, ao: 0.02 }
+  concrete:
+    name: concrete
+    density: { units: g/cm3, value: 2.35 }
+    elements:
+      - { name: O, ao: 0.52 }
+      - { name: Si, ao: 0.31 }
+      - { name: Ca, ao: 0.17 }
+  turbine_alloy:
+    name: turbine_alloy
+    density: { units: g/cm3, value: 8.1 }
+    elements:
+      - { name: Ni, ao: 0.50 }
+      - { name: Fe, ao: 0.30 }
+      - { name: Cr, ao: 0.20 }
+  electric_bus:
+    name: copper_grid_bus
+    density: { units: g/cm3, value: 8.96 }
+    elements:
+      - { name: Cu, ao: 1.0 }
 geometry:
   kind: ring_lattice_core
   style: detailed_msr
@@ -117,6 +199,237 @@ geometry:
     - { radius: 27.09, count: 18 }
     - { radius: 36.12, count: 24 }
     - { radius: 45.15, count: 30 }
+  render_layout:
+    type: plant_schematic
+    basis: commercial_grid_full_plant_process_schematic
+    core_offset_x_cm: -260.0
+    core_offset_y_cm: 0.0
+    show_core_detail: true
+    animation_frame_count: 32
+    animation_fps: 12
+    plant_components:
+      - { id: reactor_containment, label: Reactor containment, kind: containment, role: nuclear_island, shape: box, material: concrete, x_min_cm: -370.0, x_max_cm: -150.0, y_min_cm: -92.0, y_max_cm: 92.0, z_min_cm: -155.0, z_max_cm: 185.0, opacity: 0.28 }
+      - { id: primary_heat_exchanger, label: Primary heat exchanger / steam generator, kind: heat_sink, role: primary_to_secondary_heat_transfer, shape: box, material: insulation, x_min_cm: -70.0, x_max_cm: 35.0, y_min_cm: -45.0, y_max_cm: 45.0, z_min_cm: -70.0, z_max_cm: 125.0, opacity: 0.95 }
+      - { id: primary_pump, label: Primary salt pump, kind: pump, role: forced_primary_circulation, shape: cylinder, axis: z, material: pipe, x_cm: -120.0, y_cm: 0.0, z_min_cm: -20.0, z_max_cm: 80.0, radius_cm: 22.0, opacity: 0.98 }
+      - { id: drain_tank_shell, label: Freeze-drain tank, kind: drain_tank, role: passive_drain_inventory, shape: cylinder, axis: x, material: pipe, x_min_cm: -335.0, x_max_cm: -230.0, y_cm: -150.0, z_cm: -150.0, radius_cm: 28.0, opacity: 0.92 }
+      - { id: drain_tank_fill, label: Drained fuel salt inventory, kind: drain_tank_fill, role: passive_drain_inventory, shape: cylinder, axis: x, material: fuel_salt, x_min_cm: -332.0, x_max_cm: -233.0, y_cm: -150.0, z_cm: -150.0, radius_cm: 21.0, opacity: 0.58 }
+      - { id: offgas_separator, label: Off-gas separator, kind: gas_cleanup, role: volatile_removal, shape: cylinder, axis: z, material: offgas, x_cm: -260.0, y_cm: 126.0, z_min_cm: 55.0, z_max_cm: 130.0, radius_cm: 18.0, opacity: 0.72 }
+      - { id: chemical_processing, label: Salt cleanup and Pa hold-up, kind: chemical_processing, role: online_cleanup, shape: box, material: insulation, x_min_cm: -345.0, x_max_cm: -250.0, y_min_cm: 155.0, y_max_cm: 230.0, z_min_cm: -20.0, z_max_cm: 70.0, opacity: 0.95 }
+      - { id: secondary_pump, label: Secondary loop pump, kind: pump, role: secondary_heat_transport, shape: cylinder, axis: z, material: pipe, x_cm: 70.0, y_cm: 0.0, z_min_cm: -25.0, z_max_cm: 65.0, radius_cm: 18.0, opacity: 0.95 }
+      - { id: turbine, label: Turbine, kind: turbine, role: power_conversion, shape: cylinder, axis: x, material: turbine_alloy, x_min_cm: 140.0, x_max_cm: 230.0, y_cm: 55.0, z_cm: 95.0, radius_cm: 24.0, opacity: 0.98 }
+      - { id: generator, label: Generator, kind: generator, role: power_conversion, shape: cylinder, axis: x, material: electric_bus, x_min_cm: 238.0, x_max_cm: 314.0, y_cm: 55.0, z_cm: 95.0, radius_cm: 28.0, opacity: 0.98 }
+      - { id: condenser, label: Condenser, kind: condenser, role: heat_rejection, shape: box, material: water, x_min_cm: 145.0, x_max_cm: 225.0, y_min_cm: -96.0, y_max_cm: -36.0, z_min_cm: 15.0, z_max_cm: 72.0, opacity: 0.72 }
+      - { id: cooling_tower_a, label: Cooling tower A, kind: cooling_tower, role: ultimate_heat_sink, shape: cylinder, axis: z, material: concrete, x_cm: 180.0, y_cm: -185.0, z_min_cm: 0.0, z_max_cm: 118.0, radius_cm: 30.0, inner_radius_cm: 22.0, opacity: 0.44 }
+      - { id: cooling_tower_b, label: Cooling tower B, kind: cooling_tower, role: ultimate_heat_sink, shape: cylinder, axis: z, material: concrete, x_cm: 252.0, y_cm: -185.0, z_min_cm: 0.0, z_max_cm: 118.0, radius_cm: 30.0, inner_radius_cm: 22.0, opacity: 0.44 }
+      - { id: transformer, label: Main transformer, kind: transformer, role: grid_interface, shape: box, material: electric_bus, x_min_cm: 340.0, x_max_cm: 398.0, y_min_cm: 44.0, y_max_cm: 106.0, z_min_cm: 30.0, z_max_cm: 104.0, opacity: 0.95 }
+      - { id: switchyard, label: Switchyard bus, kind: switchyard, role: grid_interface, shape: box, material: electric_bus, x_min_cm: 418.0, x_max_cm: 470.0, y_min_cm: 56.0, y_max_cm: 94.0, z_min_cm: 54.0, z_max_cm: 82.0, opacity: 0.88 }
+    primary_loop:
+      material: fuel_salt
+      components:
+        - id: heat_exchanger
+          kind: heat_sink
+        - id: pump
+          kind: pump
+        - id: core
+          kind: heat_source
+      connections:
+        - id: hx_to_pump
+          from: heat_exchanger
+          to: pump
+          leg: cold_leg
+        - id: pump_to_core
+          from: pump
+          to: core
+          leg: cold_leg
+        - id: core_to_hx
+          from: core
+          to: heat_exchanger
+          leg: hot_leg
+      heat_exchanger:
+        material: insulation
+        x_min_cm: -70.0
+        x_max_cm: 35.0
+        y_cm: 0.0
+        z_cm: 60.0
+        radius_cm: 22.0
+      pump:
+        material: pipe
+        x_cm: -120.0
+        y_cm: 0.0
+        z_min_cm: -20.0
+        z_max_cm: 80.0
+        radius_cm: 22.0
+        header_radius_cm: 28.0
+      pipes:
+        - id: hx_to_pump
+          radius_cm: 24.0
+          material: fuel_salt
+          points:
+            - [-20.0, 0.0, -45.0]
+            - [-120.0, 0.0, -45.0]
+            - [-120.0, 0.0, -20.0]
+        - id: pump_to_core
+          radius_cm: 24.0
+          material: fuel_salt
+          points:
+            - [-120.0, 0.0, 70.0]
+            - [-190.0, 0.0, 70.0]
+            - [-190.0, 0.0, -65.0]
+        - id: core_to_hx
+          radius_cm: 24.0
+          material: fuel_salt
+          points:
+            - [-190.0, 0.0, 80.0]
+            - [-70.0, 0.0, 80.0]
+    secondary_loop:
+      kind: steam_and_secondary_heat_transport
+      material: secondary_salt
+      components:
+        - { id: heat_exchanger, kind: steam_generator }
+        - { id: secondary_pump, kind: pump }
+        - { id: turbine, kind: turbine }
+        - { id: condenser, kind: condenser }
+      pipes:
+        - id: steam_to_turbine
+          radius_cm: 12.0
+          material: steam
+          points:
+            - [35.0, 24.0, 108.0]
+            - [135.0, 24.0, 108.0]
+            - [135.0, 55.0, 108.0]
+            - [140.0, 55.0, 108.0]
+        - id: turbine_to_condenser
+          radius_cm: 13.0
+          material: steam
+          points:
+            - [230.0, 55.0, 95.0]
+            - [230.0, -65.0, 95.0]
+            - [200.0, -65.0, 95.0]
+            - [200.0, -65.0, 72.0]
+        - id: condenser_to_secondary_pump
+          radius_cm: 14.0
+          material: secondary_salt
+          points:
+            - [145.0, -65.0, 42.0]
+            - [70.0, -65.0, 42.0]
+            - [70.0, 0.0, 42.0]
+        - id: secondary_pump_to_steam_generator
+          radius_cm: 14.0
+          material: secondary_salt
+          points:
+            - [70.0, 0.0, 62.0]
+            - [35.0, 0.0, 62.0]
+            - [35.0, 24.0, 62.0]
+    offgas_system:
+      kind: helium_sparging_and_hold_up
+      material: offgas
+      components:
+        - { id: offgas_separator, kind: separator }
+        - { id: chemical_processing, kind: cleanup }
+      pipes:
+        - id: core_to_offgas_separator
+          radius_cm: 4.0
+          material: offgas
+          points:
+            - [-260.0, 0.0, 126.0]
+            - [-260.0, 126.0, 126.0]
+        - id: offgas_to_cleanup
+          radius_cm: 4.0
+          material: offgas
+          points:
+            - [-260.0, 126.0, 92.0]
+            - [-300.0, 126.0, 92.0]
+            - [-300.0, 155.0, 62.0]
+    drain_system:
+      kind: freeze_valve_gravity_drain
+      material: fuel_salt
+      components:
+        - { id: reactor_core, kind: drain_source }
+        - { id: drain_tank_shell, kind: drain_tank }
+      pipes:
+        - id: reactor_to_freeze_drain_tank
+          radius_cm: 8.0
+          material: fuel_salt
+          points:
+            - [-260.0, 0.0, -120.0]
+            - [-260.0, -150.0, -120.0]
+            - [-300.0, -150.0, -120.0]
+    chemical_processing:
+      kind: fuel_cleanup_return
+      material: fuel_salt
+      components:
+        - { id: chemical_processing, kind: cleanup }
+        - { id: reactor_core, kind: cleanup_return }
+      pipes:
+        - id: cleanup_return_to_core
+          radius_cm: 5.0
+          material: fuel_salt
+          points:
+            - [-250.0, 190.0, 20.0]
+            - [-210.0, 190.0, 20.0]
+            - [-210.0, 60.0, 20.0]
+            - [-260.0, 60.0, 20.0]
+    power_conversion:
+      kind: turbine_generator_grid_train
+      material: electric_bus
+      links:
+        - id: turbine_generator_shaft
+          radius_cm: 9.0
+          material: turbine_alloy
+          points:
+            - [230.0, 55.0, 95.0]
+            - [238.0, 55.0, 95.0]
+        - id: generator_to_transformer
+          radius_cm: 5.0
+          material: electric_bus
+          points:
+            - [314.0, 55.0, 95.0]
+            - [350.0, 55.0, 95.0]
+            - [350.0, 75.0, 95.0]
+        - id: transformer_to_switchyard
+          radius_cm: 5.0
+          material: electric_bus
+          points:
+            - [398.0, 75.0, 70.0]
+            - [418.0, 75.0, 70.0]
+    grid_interface:
+      kind: switchyard_export
+      material: electric_bus
+      links:
+        - id: switchyard_to_grid
+          radius_cm: 4.0
+          material: electric_bus
+          points:
+            - [470.0, 75.0, 68.0]
+            - [520.0, 75.0, 68.0]
+    plant_pipes:
+      - id: primary_heat_exchanger_serpentine
+        radius_cm: 6.0
+        material: fuel_salt
+        packet_count: 8
+        points:
+          - [-54.0, -28.0, 96.0]
+          - [-54.0, -28.0, 36.0]
+          - [-34.0, -28.0, 36.0]
+          - [-34.0, -28.0, 96.0]
+          - [-14.0, -28.0, 96.0]
+          - [-14.0, -28.0, 36.0]
+          - [6.0, -28.0, 36.0]
+          - [6.0, -28.0, 96.0]
+      - id: secondary_heat_exchanger_serpentine
+        radius_cm: 5.0
+        material: secondary_salt
+        packet_count: 8
+        phase_offset: 0.45
+        points:
+          - [-54.0, 28.0, 30.0]
+          - [-54.0, 28.0, 92.0]
+          - [-34.0, 28.0, 92.0]
+          - [-34.0, 28.0, 30.0]
+          - [-14.0, 28.0, 30.0]
+          - [-14.0, 28.0, 92.0]
+          - [6.0, 28.0, 92.0]
+          - [6.0, 28.0, 30.0]
 simulation:
   mode: eigenvalue
   particles: 100000
@@ -139,12 +452,10 @@ reporting:
       kind: svg
 flow:
   core_model:
-    kind: channelized_from_geometry
-    active_variants: [fuel, control_guides]
-    stagnant_variants: [instrumentation_wells]
-    family_split_weights:
-      fuel: 1.0
-      control_guides: 1.0
+    kind: homogenized_core
+    effective_flow_area_cm2: 2800.0
+    active_salt_volume_cm3: 20000000.0
+    hydraulic_diameter_cm: 14.0
   reduced_order:
     allocation_rule: salt_area_weighted
 model_representation:

@@ -420,6 +420,8 @@ def run_case(
                 )
                 if primary_system:
                     summary["primary_system"] = primary_system
+                    if primary_system.get("plant_system"):
+                        summary["plant_system"] = _json_copy(primary_system["plant_system"])
                     summary["fuel_cycle"] = _json_copy(primary_system["fuel_cycle"])
                     summary["chemistry"] = _json_copy(primary_system["chemistry"])
                     summary["tritium"] = build_tritium_transport_summary(

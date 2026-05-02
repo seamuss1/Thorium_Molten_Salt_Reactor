@@ -21,10 +21,17 @@ SVG_COLORS = {
     "h2o": "#5bb8ff",
     "fuel_salt": "#f4a259",
     "coolant_salt": "#4f78c4",
+    "secondary_salt": "#78b7ff",
+    "steam": "#f7f9fc",
+    "water": "#4aa3df",
+    "offgas": "#b7f0d8",
     "graphite": "#2c313a",
     "graphite_shell": "#3f4856",
     "pipe": "#8ea4ba",
     "insulation": "#f1f4f8",
+    "concrete": "#9aa3ad",
+    "electric_bus": "#f7d154",
+    "turbine_alloy": "#b7c0cc",
     "air": "#9ed8f7",
     "void": "#f6f7fb",
 }
@@ -32,9 +39,16 @@ SVG_COLORS = {
 MATERIAL_STYLES = {
     "fuel_salt": {"fill": "#f4a259", "edge": "#ffd8a8", "glow": "#ffb870"},
     "coolant_salt": {"fill": "#4f78c4", "edge": "#b8cbff", "glow": "#8ab4ff"},
+    "secondary_salt": {"fill": "#78b7ff", "edge": "#d7ecff", "glow": "#93c8ff"},
+    "steam": {"fill": "#f7f9fc", "edge": "#ffffff", "glow": "#f3fbff"},
+    "water": {"fill": "#4aa3df", "edge": "#c8efff", "glow": "#74c4ef"},
+    "offgas": {"fill": "#b7f0d8", "edge": "#e6fff3", "glow": "#91eac4"},
     "graphite": {"fill": "#2c313a", "edge": "#5f6c7b", "glow": "#3d4756"},
     "pipe": {"fill": "#8ea4ba", "edge": "#d8e5f0", "glow": "#9cb0c4"},
     "insulation": {"fill": "#f1f4f8", "edge": "#ffffff", "glow": "#f8fbff"},
+    "concrete": {"fill": "#9aa3ad", "edge": "#d8dee5", "glow": "#aeb7c0"},
+    "electric_bus": {"fill": "#f7d154", "edge": "#fff0a6", "glow": "#ffe17a"},
+    "turbine_alloy": {"fill": "#b7c0cc", "edge": "#edf2f8", "glow": "#c5d0dd"},
     "air": {"fill": "#9ed8f7", "edge": "#d7f3ff", "glow": "#b8eeff"},
     "void": {"fill": "#f6f7fb", "edge": "#f6f7fb", "glow": "#ffffff"},
 }
@@ -70,6 +84,46 @@ GLTF_MATERIALS = {
         "doubleSided": True,
         "name": "coolant_salt",
     },
+    "secondary_salt": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.47, 0.72, 1.0, 0.62],
+            "metallicFactor": 0.02,
+            "roughnessFactor": 0.16,
+        },
+        "alphaMode": "BLEND",
+        "doubleSided": True,
+        "name": "secondary_salt",
+    },
+    "steam": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.96, 0.98, 1.0, 0.5],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.08,
+        },
+        "alphaMode": "BLEND",
+        "doubleSided": True,
+        "name": "steam",
+    },
+    "water": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.29, 0.64, 0.87, 0.68],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.14,
+        },
+        "alphaMode": "BLEND",
+        "doubleSided": True,
+        "name": "water",
+    },
+    "offgas": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.72, 0.94, 0.85, 0.58],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.18,
+        },
+        "alphaMode": "BLEND",
+        "doubleSided": True,
+        "name": "offgas",
+    },
     "graphite": {
         "pbrMetallicRoughness": {
             "baseColorFactor": [0.16, 0.18, 0.22, 1.0],
@@ -101,6 +155,33 @@ GLTF_MATERIALS = {
             "roughnessFactor": 0.88,
         },
         "name": "insulation",
+    },
+    "concrete": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.60, 0.64, 0.68, 0.42],
+            "metallicFactor": 0.0,
+            "roughnessFactor": 0.92,
+        },
+        "alphaMode": "BLEND",
+        "doubleSided": True,
+        "name": "concrete",
+    },
+    "electric_bus": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.97, 0.82, 0.33, 1.0],
+            "metallicFactor": 0.32,
+            "roughnessFactor": 0.34,
+        },
+        "emissiveFactor": [0.35, 0.24, 0.02],
+        "name": "electric_bus",
+    },
+    "turbine_alloy": {
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [0.72, 0.75, 0.80, 1.0],
+            "metallicFactor": 0.64,
+            "roughnessFactor": 0.22,
+        },
+        "name": "turbine_alloy",
     },
     "air": {
         "pbrMetallicRoughness": {
@@ -1254,7 +1335,7 @@ def _scaled_alpha(solid: dict[str, Any], base_alpha: int) -> int:
 
 
 def _glow_alpha(material: str, solid: dict[str, Any]) -> int:
-    if material in {"fuel_salt", "coolant_salt"}:
+    if material in {"fuel_salt", "coolant_salt", "secondary_salt", "steam", "water", "offgas", "electric_bus"}:
         return _scaled_alpha(solid, 72)
     if material == "air":
         return _scaled_alpha(solid, 32)
@@ -1416,7 +1497,7 @@ def _shade_color(hex_color: str, factor: float, alpha: int) -> tuple[int, int, i
 
 
 def _maybe_glow(hex_color: str, material: str, alpha: int) -> tuple[int, int, int, int] | None:
-    if alpha <= 0 or material not in {"fuel_salt", "coolant_salt", "air"}:
+    if alpha <= 0 or material not in {"fuel_salt", "coolant_salt", "secondary_salt", "steam", "water", "offgas", "electric_bus", "air"}:
         return None
     red, green, blue = ImageColor.getrgb(hex_color)
     return (red, green, blue, alpha)
@@ -1825,9 +1906,18 @@ def _build_gltf_scene_extras(description: dict[str, Any], solids: list[dict[str,
     animation_path_count = 0
     if isinstance(animation, dict):
         animation_path_count = len(animation.get("paths", []))
-    return {
+    extras = {
         "source_type": str(description.get("type", "unknown")),
         "render_layout": description.get("render_layout"),
         "animation_path_count": animation_path_count,
         "bounds_cm": {key: round(float(value), 6) for key, value in bounds.items()},
     }
+    plant_system = description.get("plant_system")
+    if isinstance(plant_system, dict):
+        extras["plant_system"] = {
+            "type": plant_system.get("type"),
+            "basis": plant_system.get("basis"),
+            "component_count": len(plant_system.get("components", [])),
+            "network_count": len(plant_system.get("networks", [])),
+        }
+    return extras

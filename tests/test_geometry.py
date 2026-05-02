@@ -1,3 +1,4 @@
+import json
 import shutil
 from pathlib import Path
 
@@ -81,3 +82,25 @@ def test_immersed_pool_reference_export_supports_box_and_horizontal_primitives()
     mesh_checks = validate_watertight_meshes(built.geometry_description)
     assert mesh_checks
     assert all(check["watertight"] for check in mesh_checks)
+
+
+def test_flagship_plant_schematic_exports_gltf_plant_model() -> None:
+    config = load_case_config(REPO_ROOT / "configs" / "cases" / "flagship_grid_msr" / "case.yaml")
+    built = build_case(config)
+    output_dir = REPO_ROOT / ".tmp" / "flagship-plant-geometry-export-test"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    assets = export_geometry(built.geometry_description, output_dir)
+    obj_text = Path(assets["obj"]).read_text(encoding="utf-8")
+    gltf_payload = json.loads(Path(assets["gltf"]).read_text(encoding="utf-8"))
+
+    assert Path(assets["png"]).exists()
+    assert Path(assets["gltf"]).exists()
+    assert Path(assets["gltf_bin"]).exists()
+    assert "plant_primary_heat_exchanger" in obj_text
+    assert "plant_generator" in obj_text
+    assert "primary_loop_core_to_hx_segment_0" in obj_text
+    scene_extras = gltf_payload["scenes"][0]["extras"]
+    assert scene_extras["render_layout"] == "plant_schematic"
+    assert scene_extras["plant_system"]["type"] == "plant_schematic"
+    assert scene_extras["plant_system"]["component_count"] >= 12

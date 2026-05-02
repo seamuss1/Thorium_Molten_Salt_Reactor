@@ -32,6 +32,9 @@ web = [
 openmc = [
   "openmc>=0.14; platform_system != 'Windows'"
 ]
+gpu-intel = [
+  "torch>=2.7"
+]
 
 [project.scripts]
 reactor = "thorium_reactor.cli:main"

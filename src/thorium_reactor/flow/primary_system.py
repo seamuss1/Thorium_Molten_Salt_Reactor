@@ -24,7 +24,7 @@ def build_primary_system_summary(
     bop: dict[str, Any],
 ) -> dict[str, Any]:
     render_layout = config.geometry.get("render_layout") or {}
-    if render_layout.get("type") != "immersed_pool_reference":
+    if render_layout.get("type") not in {"immersed_pool_reference", "plant_schematic"}:
         return {}
 
     primary_loop = render_layout.get("primary_loop") or {}
@@ -139,7 +139,7 @@ def build_primary_system_summary(
     hydraulic_power_kw = required_pump_pressure_pa * volumetric_flow_m3_s / 1000.0
     shaft_power_kw = hydraulic_power_kw / pump_efficiency if pump_efficiency > 0.0 else 0.0
 
-    return {
+    summary = {
         "model": "reduced_order_primary_system",
         "bulk_temperature_c": _round_float(bulk_temperature_c),
         "salt_density_kg_m3": _round_float(salt_density_kg_m3),
@@ -187,6 +187,98 @@ def build_primary_system_summary(
             thermal_profile,
             inventory_summary,
         ),
+    }
+    plant_system = _build_plant_schematic_system_summary(
+        config,
+        geometry_description,
+        primary_loop,
+        bop,
+        heat_exchanger_summary,
+        thermal_profile,
+        inventory_summary,
+    )
+    if plant_system:
+        summary["plant_system"] = plant_system
+    return summary
+
+
+def _build_plant_schematic_system_summary(
+    config: Any,
+    geometry_description: dict[str, Any],
+    primary_loop: dict[str, Any],
+    bop: dict[str, Any],
+    heat_exchanger_summary: dict[str, Any],
+    thermal_profile: dict[str, Any],
+    inventory_summary: dict[str, Any],
+) -> dict[str, Any]:
+    plant_system = geometry_description.get("plant_system") or {}
+    if plant_system.get("type") != "plant_schematic":
+        return {}
+
+    components = list(plant_system.get("components", []))
+    networks = list(plant_system.get("networks", []))
+    network_summary = [
+        {
+            "id": str(network.get("id", "")),
+            "kind": str(network.get("kind", "flow")),
+            "material": str(network.get("material", "")),
+            "pipe_ids": list(network.get("pipe_ids", [])),
+            "component_ids": list(network.get("component_ids", [])),
+        }
+        for network in networks
+    ]
+    characteristics = config.reactor.get("characteristics") or {}
+    thermal_power_mw = float(bop.get("thermal_power_mw", config.reactor.get("design_power_mwth", 0.0)))
+    electric_power_mw = float(
+        bop.get(
+            "electric_power_mw",
+            characteristics.get("net_electric_power_mwe", 0.0),
+        )
+    )
+    steam_generator_duty_mw = float(bop.get("steam_generator_duty_mw", 0.0))
+    case_data = getattr(config, "data", {})
+    processing = case_data.get("processing", {}) if isinstance(case_data, dict) else {}
+    cleanup_strategy = str(
+        characteristics.get(
+            "cleanup_strategy",
+            processing.get("volatile_removal", "not_declared"),
+        )
+    )
+
+    return {
+        "model": "full_plant_reduced_order_schematic",
+        "scope": "reactor_core_primary_loop_heat_rejection_cleanup_power_conversion_grid_interface",
+        "component_count": len(components),
+        "network_count": len(network_summary),
+        "primary_loop_pipe_count": len(primary_loop.get("pipes", [])),
+        "components": components,
+        "networks": network_summary,
+        "design_basis": {
+            "thermal_power_mw": _round_float(thermal_power_mw),
+            "gross_electric_power_mw": _round_float(electric_power_mw),
+            "net_electric_power_mwe": _round_float(float(characteristics.get("net_electric_power_mwe", electric_power_mw))),
+            "steam_generator_duty_mw": _round_float(steam_generator_duty_mw),
+            "overall_thermal_efficiency": _round_float(electric_power_mw / thermal_power_mw) if thermal_power_mw > 0.0 else 0.0,
+            "hot_leg_temp_c": _round_float(float(config.reactor.get("hot_leg_temp_c", 0.0))),
+            "cold_leg_temp_c": _round_float(float(config.reactor.get("cold_leg_temp_c", 0.0))),
+        },
+        "primary_loop": {
+            "solved_mass_flow_kg_s": _round_float(float(thermal_profile.get("solved_primary_mass_flow_kg_s", 0.0))),
+            "estimated_hot_leg_temp_c": _round_float(float(thermal_profile.get("estimated_hot_leg_temp_c", 0.0))),
+            "estimated_cold_leg_temp_c": _round_float(float(thermal_profile.get("estimated_cold_leg_temp_c", 0.0))),
+            "heat_exchanger_area_m2": _round_float(float(heat_exchanger_summary.get("required_area_m2", 0.0))),
+            "heat_exchanger_duty_mw": _round_float(float(heat_exchanger_summary.get("duty_mw", 0.0))),
+        },
+        "inventories": {
+            "fuel_salt_m3": inventory_summary.get("fuel_salt", {}).get("total_m3", 0.0),
+            "coolant_salt_m3": inventory_summary.get("coolant_salt", {}).get("net_pool_inventory_m3", 0.0),
+        },
+        "processing": {
+            "cleanup_strategy": cleanup_strategy,
+            "volatile_removal": processing.get("volatile_removal"),
+            "noble_gas_path": processing.get("noble_gas_path"),
+            "protactinium_strategy": processing.get("protactinium_strategy"),
+        },
     }
 
 
@@ -1220,8 +1312,12 @@ def _build_inventory_summary(
     total_displacement_m3 = core_box_displacement_m3 + barrel_displacement_m3 + hardware_displacement_m3
     net_pool_volume_m3 = max(gross_pool_volume_m3 - total_displacement_m3, 0.0)
 
-    coolant_material = pool.get("material", "coolant_salt")
-    coolant_density_kg_m3 = float(evaluate_fluid_properties(config.materials[coolant_material], temperature_c=bulk_temperature_c)["density_kg_m3"])
+    coolant_material = pool.get("material")
+    coolant_density_kg_m3 = (
+        float(evaluate_fluid_properties(config.materials[coolant_material], temperature_c=bulk_temperature_c)["density_kg_m3"])
+        if coolant_material in config.materials
+        else 0.0
+    )
 
     return {
         "fuel_salt": {
@@ -1905,6 +2001,9 @@ def _build_primary_system_checks(
 ) -> list[dict[str, Any]]:
     active_flow_velocity_m_s = float(reduced_order_flow.get("active_flow", {}).get("representative_velocity_m_s", 0.0))
     heat_exchanger_duty_error_mw = abs(float(thermal_profile.get("heat_exchanger_duty_error_mw", 0.0)))
+    heat_exchanger_area_m2 = float(heat_exchanger_summary.get("required_area_m2", 0.0))
+    heat_exchanger_duty_mw = float(heat_exchanger_summary.get("duty_mw", 0.0))
+    heat_exchanger_area_upper_bound_m2 = max(250.0, heat_exchanger_duty_mw * 15.0)
     checks = [
         (
             "primary_system::loop_reynolds_reasonable",
@@ -1927,9 +2026,12 @@ def _build_primary_system_checks(
         ),
         (
             "primary_system::heat_exchanger_area_reasonable",
-            1.0 <= float(heat_exchanger_summary.get("required_area_m2", 0.0)) <= 250.0,
-            f"Required heat exchanger area is {float(heat_exchanger_summary.get('required_area_m2', 0.0)):.2f} m2.",
-            "Required heat exchanger area should stay between 1 and 250 m2 for this demonstrator-scale concept.",
+            1.0 <= heat_exchanger_area_m2 <= heat_exchanger_area_upper_bound_m2,
+            f"Required heat exchanger area is {heat_exchanger_area_m2:.2f} m2.",
+            (
+                "Required heat exchanger area should stay within a reduced-order screening envelope "
+                f"up to {heat_exchanger_area_upper_bound_m2:.0f} m2 for this duty."
+            ),
         ),
         (
             "primary_system::fuel_inventory_positive",

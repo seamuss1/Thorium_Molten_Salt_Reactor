@@ -36,6 +36,9 @@ def test_flagship_case_declares_commercial_grid_characteristics() -> None:
 
     assert config.reactor["mode"] == "commercial_grid"
     assert config.reactor["characteristics"]["net_electric_power_mwe"] == 300.0
+    assert config.geometry["render_layout"]["type"] == "plant_schematic"
+    assert config.flow["core_model"]["kind"] == "homogenized_core"
+    assert config.geometry["render_layout"]["primary_loop"]["pipes"]
     assert config.economics["default_scenario"] == "conservative_foak"
     assert str(config.project_schedule["project_start"]) == "2026-05-02"
 
@@ -169,6 +172,24 @@ def test_immersed_pool_reference_case_builds_with_reference_render_layout() -> N
         "physics::loop_pipe_velocity_reasonable": True,
         "physics::pool_circulation_velocity_reasonable": True,
     }
+
+
+def test_flagship_case_builds_with_full_plant_schematic_layout() -> None:
+    config = _load_case("flagship_grid_msr")
+    built = build_case(config)
+
+    assert built.geometry_description["render_layout"] == "plant_schematic"
+    assert built.geometry_description["plant_system"]["type"] == "plant_schematic"
+    assert built.geometry_description["plant_system"]["design_basis"]["net_electric_power_mwe"] == 300.0
+    assert len(built.geometry_description["plant_system"]["components"]) >= 12
+    network_ids = {network["id"] for network in built.geometry_description["plant_system"]["networks"]}
+    assert {"primary_loop", "secondary_loop", "offgas_system", "drain_system", "power_conversion", "grid_interface"} <= network_ids
+    solid_names = {solid["name"] for solid in built.geometry_description["render_solids"]}
+    assert "plant_primary_heat_exchanger" in solid_names
+    assert "plant_turbine" in solid_names
+    assert any(name.startswith("primary_loop_core_to_hx") for name in solid_names)
+    animation_path_names = {path["name"] for path in built.geometry_description["animation"]["paths"]}
+    assert {"core_upflow", "core_to_hx", "steam_to_turbine", "reactor_to_freeze_drain_tank"} <= animation_path_names
 
 
 def test_isotopically_explicit_thorium_case_requires_th232_in_fuel_salt() -> None:

@@ -102,6 +102,7 @@ def resolve_msr_geometry(config: Any) -> ResolvedMSRGeometry:
 def build_msr_geometry_description(config: Any, resolved: ResolvedMSRGeometry | None = None) -> dict[str, Any]:
     geometry = config.geometry
     resolved = resolved or resolve_msr_geometry(config)
+    render_layout = geometry.get("render_layout") or {}
     channel_flow_interfaces = {
         channel["name"]: channel for channel in _build_channel_flow_interfaces(geometry, resolved)
     }
@@ -124,7 +125,7 @@ def build_msr_geometry_description(config: Any, resolved: ResolvedMSRGeometry | 
         for channel in resolved.channels
     ]
     render_solids = _build_render_solids(geometry, resolved, shells, channels)
-    return {
+    description = {
         "name": config.name,
         "type": "detailed_molten_salt_reactor",
         "pitch": geometry["pitch"],
@@ -141,9 +142,13 @@ def build_msr_geometry_description(config: Any, resolved: ResolvedMSRGeometry | 
         "shells": shells,
         "channels": channels,
         "render_solids": render_solids,
-        "render_layout": geometry.get("render_layout", {}).get("type"),
+        "render_layout": render_layout.get("type"),
         "animation": _build_render_animation(config, resolved),
     }
+    plant_system = _build_plant_system_description(config, resolved, render_layout)
+    if plant_system:
+        description["plant_system"] = plant_system
+    return description
 
 
 def build_msr_invariants(config: Any, resolved: ResolvedMSRGeometry | None = None) -> list[dict[str, Any]]:
@@ -541,6 +546,8 @@ def _build_render_solids(
     layout_type = render_layout.get("type")
     if layout_type == "immersed_pool_reference":
         return _build_immersed_pool_render_solids(geometry, resolved, channels, render_layout)
+    if layout_type == "plant_schematic":
+        return _build_plant_schematic_render_solids(geometry, resolved, shells, channels, render_layout)
     return shells + _build_channel_render_solids(channels)
 
 
@@ -548,6 +555,8 @@ def _build_render_animation(config: Any, resolved: ResolvedMSRGeometry) -> dict[
     render_layout = config.geometry.get("render_layout") or {}
     if render_layout.get("type") == "immersed_pool_reference":
         return _build_immersed_pool_render_animation(config, resolved, render_layout)
+    if render_layout.get("type") == "plant_schematic":
+        return _build_plant_schematic_render_animation(config, resolved, render_layout)
     return None
 
 
@@ -678,6 +687,302 @@ def _build_immersed_pool_render_solids(
     primary_loop_solids = _build_primary_loop_render_solids(loop, core_offset_x, core_offset_y, resolved)
 
     return containment_solids + pool_solids + core_box_solids + core_scene_solids + shifted_channels + primary_loop_solids
+
+
+def _build_plant_system_description(
+    config: Any,
+    resolved: ResolvedMSRGeometry,
+    render_layout: dict[str, Any],
+) -> dict[str, Any] | None:
+    if render_layout.get("type") != "plant_schematic":
+        return None
+
+    components = []
+    for component in render_layout.get("plant_components", []):
+        if not component.get("id"):
+            continue
+        components.append(
+            {
+                "id": str(component["id"]),
+                "kind": str(component.get("kind", "plant_component")),
+                "label": str(component.get("label", component["id"])),
+                "role": str(component.get("role", component.get("kind", "plant_component"))),
+                "material": str(component.get("material", "pipe")),
+            }
+        )
+
+    reactor = config.reactor
+    characteristics = reactor.get("characteristics") or {}
+    return {
+        "type": "plant_schematic",
+        "basis": str(render_layout.get("basis", "full_plant_process_schematic")),
+        "core_model": {
+            "kind": config.flow.get("core_model", {}).get("kind", "channelized_from_geometry"),
+            "active_height_cm": resolved.active_height,
+            "core_radius_cm": resolved.core_radius,
+        },
+        "design_basis": {
+            "thermal_power_mwth": float(reactor.get("design_power_mwth", 0.0)),
+            "net_electric_power_mwe": float(characteristics.get("net_electric_power_mwe", 0.0)),
+            "hot_leg_temp_c": float(reactor.get("hot_leg_temp_c", 0.0)),
+            "cold_leg_temp_c": float(reactor.get("cold_leg_temp_c", 0.0)),
+            "module_count": int(characteristics.get("module_count", 1)),
+        },
+        "components": components,
+        "networks": _build_plant_network_descriptions(render_layout),
+    }
+
+
+def _build_plant_network_descriptions(render_layout: dict[str, Any]) -> list[dict[str, Any]]:
+    networks: list[dict[str, Any]] = []
+    primary_loop = render_layout.get("primary_loop") or {}
+    if primary_loop:
+        networks.append(
+            {
+                "id": "primary_loop",
+                "kind": "fuel_salt_heat_transport",
+                "material": str(primary_loop.get("material", "fuel_salt")),
+                "pipe_ids": [str(pipe.get("id", "")) for pipe in primary_loop.get("pipes", []) if pipe.get("id")],
+                "component_ids": [
+                    str(component.get("id", ""))
+                    for component in primary_loop.get("components", [])
+                    if component.get("id")
+                ],
+            }
+        )
+
+    for section_name, kind in (
+        ("secondary_loop", "secondary_heat_transport"),
+        ("power_conversion", "power_conversion"),
+        ("offgas_system", "offgas_cleanup"),
+        ("drain_system", "drain_and_freeze_protection"),
+        ("chemical_processing", "fuel_salt_cleanup"),
+        ("grid_interface", "grid_interface"),
+    ):
+        section = render_layout.get(section_name) or {}
+        if not section:
+            continue
+        pipe_ids = [
+            str(pipe.get("id", ""))
+            for pipe in list(section.get("pipes", [])) + list(section.get("links", []))
+            if pipe.get("id")
+        ]
+        component_ids = [
+            str(component.get("id", ""))
+            for component in section.get("components", [])
+            if component.get("id")
+        ]
+        networks.append(
+            {
+                "id": section_name,
+                "kind": str(section.get("kind", kind)),
+                "material": str(section.get("material", "pipe")),
+                "pipe_ids": pipe_ids,
+                "component_ids": component_ids,
+            }
+        )
+    return networks
+
+
+def _build_plant_schematic_render_solids(
+    geometry: dict[str, Any],
+    resolved: ResolvedMSRGeometry,
+    shells: list[dict[str, Any]],
+    channels: list[dict[str, Any]],
+    render_layout: dict[str, Any],
+) -> list[dict[str, Any]]:
+    core_offset_x = float(render_layout.get("core_offset_x_cm", 0.0))
+    core_offset_y = float(render_layout.get("core_offset_y_cm", 0.0))
+    core_solids = []
+    if bool(render_layout.get("show_core_detail", True)):
+        core_solids = _shift_render_solids(
+            shells + _build_channel_render_solids(channels),
+            core_offset_x,
+            core_offset_y,
+        )
+
+    component_solids = _build_configured_plant_component_solids(render_layout)
+    pipe_solids: list[dict[str, Any]] = []
+    for group_name, pipe_run in _iter_plant_pipe_runs(render_layout):
+        radius = float(pipe_run.get("radius_cm", 1.0))
+        material = str(pipe_run.get("material", geometry.get("structure_material", "pipe")))
+        points = [tuple(float(value) for value in point) for point in pipe_run.get("points", [])]
+        pipe_name = f"{_slug_identifier(group_name)}_{_slug_identifier(str(pipe_run.get('id', 'pipe')))}"
+        pipe_solids.extend(_build_pipe_run_solids(pipe_name, points, radius, material))
+
+    return component_solids + core_solids + pipe_solids
+
+
+def _build_configured_plant_component_solids(render_layout: dict[str, Any]) -> list[dict[str, Any]]:
+    solids: list[dict[str, Any]] = []
+    for component in render_layout.get("plant_components", []):
+        shape = str(component.get("shape", "box"))
+        if shape == "box":
+            solid = _configured_box_solid(component)
+        elif shape == "cylinder":
+            solid = _configured_cylinder_solid(component)
+        else:
+            continue
+        if solid is not None:
+            solids.append(solid)
+    return solids
+
+
+def _configured_box_solid(component: dict[str, Any]) -> dict[str, Any] | None:
+    component_id = str(component.get("id", "component"))
+    if all(key in component for key in ("x_min_cm", "x_max_cm", "y_min_cm", "y_max_cm", "z_min_cm", "z_max_cm")):
+        x_min = float(component["x_min_cm"])
+        x_max = float(component["x_max_cm"])
+        y_min = float(component["y_min_cm"])
+        y_max = float(component["y_max_cm"])
+        z_min = float(component["z_min_cm"])
+        z_max = float(component["z_max_cm"])
+    else:
+        center_x = float(component.get("x_cm", 0.0))
+        center_y = float(component.get("y_cm", 0.0))
+        center_z = float(component.get("z_cm", 0.0))
+        width = float(component.get("width_cm", 20.0))
+        depth = float(component.get("depth_cm", 20.0))
+        height = float(component.get("height_cm", 20.0))
+        x_min = center_x - width / 2.0
+        x_max = center_x + width / 2.0
+        y_min = center_y - depth / 2.0
+        y_max = center_y + depth / 2.0
+        z_min = center_z - height / 2.0
+        z_max = center_z + height / 2.0
+    if x_max <= x_min or y_max <= y_min or z_max <= z_min:
+        return None
+    return {
+        "name": f"plant_{_slug_identifier(component_id)}",
+        "type": "box",
+        "material": str(component.get("material", "pipe")),
+        "x_min": x_min,
+        "x_max": x_max,
+        "y_min": y_min,
+        "y_max": y_max,
+        "z_min": z_min,
+        "z_max": z_max,
+        "opacity": float(component.get("opacity", 0.96)),
+    }
+
+
+def _configured_cylinder_solid(component: dict[str, Any]) -> dict[str, Any] | None:
+    component_id = str(component.get("id", "component"))
+    radius = float(component.get("radius_cm", component.get("outer_radius_cm", 1.0)))
+    if radius <= 0.0:
+        return None
+    axis = str(component.get("axis", "z"))
+    solid: dict[str, Any] = {
+        "name": f"plant_{_slug_identifier(component_id)}",
+        "material": str(component.get("material", "pipe")),
+        "outer_radius": radius,
+        "inner_radius": float(component.get("inner_radius_cm", 0.0)),
+        "opacity": float(component.get("opacity", 0.96)),
+    }
+    if axis == "x":
+        x_min = float(component.get("x_min_cm", float(component.get("x_cm", 0.0)) - float(component.get("length_cm", 20.0)) / 2.0))
+        x_max = float(component.get("x_max_cm", float(component.get("x_cm", 0.0)) + float(component.get("length_cm", 20.0)) / 2.0))
+        if x_max <= x_min:
+            return None
+        solid.update({"axis": "x", "x_min": x_min, "x_max": x_max, "y": float(component.get("y_cm", 0.0)), "z": float(component.get("z_cm", 0.0))})
+    elif axis == "y":
+        y_min = float(component.get("y_min_cm", float(component.get("y_cm", 0.0)) - float(component.get("length_cm", 20.0)) / 2.0))
+        y_max = float(component.get("y_max_cm", float(component.get("y_cm", 0.0)) + float(component.get("length_cm", 20.0)) / 2.0))
+        if y_max <= y_min:
+            return None
+        solid.update({"axis": "y", "y_min": y_min, "y_max": y_max, "x": float(component.get("x_cm", 0.0)), "z": float(component.get("z_cm", 0.0))})
+    else:
+        z_min = float(component.get("z_min_cm", float(component.get("z_cm", 0.0)) - float(component.get("height_cm", 20.0)) / 2.0))
+        z_max = float(component.get("z_max_cm", float(component.get("z_cm", 0.0)) + float(component.get("height_cm", 20.0)) / 2.0))
+        if z_max <= z_min:
+            return None
+        solid.update({"z_min": z_min, "z_max": z_max, "x": float(component.get("x_cm", 0.0)), "y": float(component.get("y_cm", 0.0))})
+    return solid
+
+
+def _iter_plant_pipe_runs(render_layout: dict[str, Any]):
+    primary_loop = render_layout.get("primary_loop") or {}
+    for pipe_run in primary_loop.get("pipes", []):
+        yield "primary_loop", pipe_run
+    for section_name in (
+        "secondary_loop",
+        "power_conversion",
+        "offgas_system",
+        "drain_system",
+        "chemical_processing",
+        "grid_interface",
+    ):
+        section = render_layout.get(section_name) or {}
+        for pipe_run in section.get("pipes", []):
+            yield section_name, pipe_run
+        for pipe_run in section.get("links", []):
+            yield section_name, pipe_run
+    for pipe_run in render_layout.get("plant_pipes", []):
+        yield "plant_pipe", pipe_run
+
+
+def _build_plant_schematic_render_animation(
+    config: Any,
+    resolved: ResolvedMSRGeometry,
+    render_layout: dict[str, Any],
+) -> dict[str, Any] | None:
+    core_offset_x = float(render_layout.get("core_offset_x_cm", 0.0))
+    core_offset_y = float(render_layout.get("core_offset_y_cm", 0.0))
+    paths: list[dict[str, Any]] = [
+        {
+            "name": "core_upflow",
+            "material": config.geometry.get("salt_material", "fuel_salt"),
+            "width_cm": 3.8,
+            "packet_count": 10,
+            "packet_length_cm": 22.0,
+            "speed": 1.0,
+            "points": [
+                (core_offset_x, core_offset_y, resolved.active_bottom_z - 8.0),
+                (core_offset_x, core_offset_y, resolved.active_top_z + 8.0),
+            ],
+        }
+    ]
+
+    for index, (group_name, pipe_run) in enumerate(_iter_plant_pipe_runs(render_layout)):
+        if pipe_run.get("animate", True) is False:
+            continue
+        points = [tuple(float(value) for value in point) for point in pipe_run.get("points", [])]
+        if len(points) < 2:
+            continue
+        radius = float(pipe_run.get("radius_cm", 1.0))
+        paths.append(
+            {
+                "name": str(pipe_run.get("id", f"{group_name}_{index}")),
+                "material": str(pipe_run.get("animation_material", pipe_run.get("material", "pipe"))),
+                "width_cm": float(pipe_run.get("animation_width_cm", max(radius * 0.35, 1.0))),
+                "packet_count": int(pipe_run.get("packet_count", 6)),
+                "packet_length_cm": float(pipe_run.get("packet_length_cm", max(radius * 4.0, 12.0))),
+                "speed": float(pipe_run.get("animation_speed", 0.7)),
+                "phase_offset": float(pipe_run.get("phase_offset", (index % 5) * 0.13)),
+                "loop": bool(pipe_run.get("loop", False)),
+                "points": points,
+            }
+        )
+
+    if not paths:
+        return None
+
+    reactor = config.reactor
+    thermal_power_mw = float(reactor.get("design_power_mwth", 0.0))
+    delta_t_c = max(float(reactor.get("hot_leg_temp_c", 700.0)) - float(reactor.get("cold_leg_temp_c", 560.0)), 1.0)
+    cp_kj_kgk = float(reactor.get("primary_cp_kj_kgk", 1.6))
+    primary_mass_flow_kg_s = thermal_power_mw * 1000.0 / (cp_kj_kgk * delta_t_c) if cp_kj_kgk > 0.0 else 0.0
+    return {
+        "frame_count": max(int(render_layout.get("animation_frame_count", 32)), 2),
+        "fps": max(int(render_layout.get("animation_fps", 12)), 1),
+        "physics": {
+            "thermal_power_mw": _round_metric(thermal_power_mw),
+            "primary_mass_flow_kg_s": _round_metric(primary_mass_flow_kg_s),
+            "plant_pipe_path_count": len(paths) - 1,
+            "render_layout": "plant_schematic",
+        },
+        "paths": paths,
+    }
 
 
 def _build_immersed_pool_render_animation(
@@ -1389,6 +1694,12 @@ def _build_pipe_run_solids(
                 }
             )
     return solids
+
+
+def _slug_identifier(value: str) -> str:
+    slug = "".join(character.lower() if character.isalnum() else "_" for character in value)
+    slug = "_".join(part for part in slug.split("_") if part)
+    return slug or "item"
 
 
 def _shift_render_solids(solids: list[dict[str, Any]], offset_x: float, offset_y: float) -> list[dict[str, Any]]:

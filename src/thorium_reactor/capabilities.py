@@ -22,7 +22,7 @@ def get_case_capabilities(config: Any) -> set[str]:
 
     if geometry.get("kind") == "ring_lattice_core" and geometry.get("style") == "detailed_msr":
         capabilities.update({BALANCE_OF_PLANT, THERMAL_NETWORK})
-    if render_layout.get("type") == "immersed_pool_reference":
+    if render_layout.get("type") in {"immersed_pool_reference", "plant_schematic"}:
         capabilities.add(MSR_PRIMARY_SYSTEM)
     if THERMAL_NETWORK in capabilities and BALANCE_OF_PLANT in capabilities:
         capabilities.add(TRANSIENT_ANALYSIS)

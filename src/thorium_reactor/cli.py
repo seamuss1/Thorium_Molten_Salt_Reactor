@@ -44,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
         "benchmark",
         "transient",
         "transient-sweep",
+        "runtime-benchmark",
         "economics",
         *INTEGRATION_COMMANDS,
     ):
@@ -58,7 +59,16 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--scenario", default=None, help="Named transient scenario from the case config.")
             command.add_argument("--samples", type=int, default=512, help="Number of ensemble trajectories to evaluate.")
             command.add_argument("--seed", type=int, default=42, help="Random seed for the ensemble perturbations.")
-            command.add_argument("--prefer-gpu", action="store_true", help="Use CuPy when available for batched transient integration.")
+            command.add_argument("--prefer-gpu", action="store_true", help="Deprecated alias for --backend auto.")
+            command.add_argument("--backend", default="auto", choices=["auto", "python", "numpy", "torch-cpu", "torch-xpu"], help="Array backend for transient ensemble integration.")
+            command.add_argument("--dtype", default="float32", choices=["float32", "float64"], help="Array dtype for vector backends.")
+        if command_name == "runtime-benchmark":
+            command.add_argument("--scenario", default=None, help="Named transient scenario from the case config.")
+            command.add_argument("--samples", type=int, default=1048576, help="Number of ensemble trajectories per backend.")
+            command.add_argument("--seed", type=int, default=42, help="Random seed for identical backend ensembles.")
+            command.add_argument("--backends", default="python,numpy,torch-xpu", help="Comma-separated backends to benchmark.")
+            command.add_argument("--dtype", default="float32", choices=["float32", "float64"], help="Array dtype for vector backends.")
+            command.add_argument("--fail-on-gpu-fallback", action="store_true", help="Fail if a GPU backend reports PyTorch XPU fallback enabled.")
         if command_name == "economics":
             command.add_argument("--scenario", default=None, help="Named economics scenario from the case config.")
             command.add_argument("--project-start", default=None, help="Project start date in YYYY-MM-DD format.")
@@ -107,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = args.repo_root.resolve() if args.repo_root else discover_repo_root()
     config = load_case_config(case_config_path(repo_root, args.case))
 
-    if args.command in {"build", "run", "benchmark", "transient", "transient-sweep", "economics", *INTEGRATION_COMMANDS}:
+    if args.command in {"build", "run", "benchmark", "transient", "transient-sweep", "runtime-benchmark", "economics", *INTEGRATION_COMMANDS}:
         bundle = create_result_bundle(repo_root, config.name, args.run_id)
         inputs = ensure_bundle_inputs(repo_root, bundle, config)
     else:
@@ -194,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
             samples=args.samples,
             seed=args.seed,
             prefer_gpu=args.prefer_gpu,
+            backend=args.backend,
+            dtype=args.dtype,
             provenance=provenance,
         )
         bundle.write_json("summary.json", summary)
@@ -201,6 +213,37 @@ def main(argv: list[str] | None = None) -> int:
         print(bundle.root)
         print(transient_sweep["backend"])
         print(transient_sweep["metrics"]["peak_power_fraction_p95"])
+        return 0
+
+    if args.command == "runtime-benchmark":
+        from thorium_reactor.runtime_benchmark import parse_backend_list, run_runtime_benchmark_case
+
+        summary_path = bundle.root / "summary.json"
+        if summary_path.exists():
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        else:
+            summary = run_case(
+                config,
+                bundle,
+                benchmark=benchmark,
+                solver_enabled=False,
+                provenance=provenance,
+            )
+        runtime_benchmark = run_runtime_benchmark_case(
+            config,
+            bundle,
+            summary,
+            scenario_name=args.scenario,
+            samples=args.samples,
+            seed=args.seed,
+            backends=parse_backend_list(args.backends),
+            dtype=args.dtype,
+            fail_on_gpu_fallback=args.fail_on_gpu_fallback,
+            provenance=provenance,
+        )
+        print(bundle.root)
+        print(runtime_benchmark["recommendation"].get("backend"))
+        print(runtime_benchmark["recommendation"].get("speedup_vs_reference"))
         return 0
 
     if args.command == "economics":

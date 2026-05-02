@@ -82,6 +82,8 @@ def test_cli_registers_transient_sweep_command() -> None:
         "--seed",
         "7",
         "--prefer-gpu",
+        "--backend",
+        "numpy",
     ])
 
     assert namespace.command == "transient-sweep"
@@ -90,6 +92,26 @@ def test_cli_registers_transient_sweep_command() -> None:
     assert namespace.samples == 1024
     assert namespace.seed == 7
     assert namespace.prefer_gpu is True
+    assert namespace.backend == "numpy"
+
+
+def test_cli_registers_runtime_benchmark_command() -> None:
+    parser = build_parser()
+    namespace = parser.parse_args([
+        "runtime-benchmark",
+        "immersed_pool_reference",
+        "--samples",
+        "128",
+        "--backends",
+        "python,numpy",
+        "--fail-on-gpu-fallback",
+    ])
+
+    assert namespace.command == "runtime-benchmark"
+    assert namespace.case == "immersed_pool_reference"
+    assert namespace.samples == 128
+    assert namespace.backends == "python,numpy"
+    assert namespace.fail_on_gpu_fallback is True
 
 
 def test_cli_registers_economics_command() -> None:

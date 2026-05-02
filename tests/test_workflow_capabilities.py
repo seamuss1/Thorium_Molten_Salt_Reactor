@@ -120,9 +120,33 @@ def test_capability_inference_distinguishes_generic_and_msr_cases() -> None:
         NEUTRONICS_ONLY,
         BALANCE_OF_PLANT,
         THERMAL_NETWORK,
+        MSR_PRIMARY_SYSTEM,
         TRANSIENT_ANALYSIS,
         COMMERCIAL_PLANNING,
     }
+
+
+def test_flagship_run_produces_full_plant_primary_system_summary() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-flagship-plant-run" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        config = _load_case("flagship_grid_msr")
+        bundle = create_result_bundle(scratch_root, config.name, "plant-run")
+
+        summary = run_case(config, bundle, solver_enabled=False)
+
+        assert MSR_PRIMARY_SYSTEM in summary["workflow_capabilities"]
+        assert "primary_system" in summary
+        assert "plant_system" in summary
+        assert summary["plant_system"]["model"] == "full_plant_reduced_order_schematic"
+        assert summary["plant_system"]["component_count"] >= 12
+        assert summary["plant_system"]["design_basis"]["net_electric_power_mwe"] == 300.0
+        assert summary["primary_system"]["loop_hydraulics"]["limiting_velocity_m_s"] > 1.0
+        assert summary["primary_system"]["heat_exchanger"]["required_area_m2"] > 250.0
+        assert summary["flow"]["reduced_order"]["core_model"]["kind"] == "homogenized_core"
+        assert summary["flow"]["reduced_order"]["active_flow"]["representative_velocity_m_s"] <= 12.0
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
 
 
 def test_explicit_capability_override_can_disable_primary_system_logic() -> None:
