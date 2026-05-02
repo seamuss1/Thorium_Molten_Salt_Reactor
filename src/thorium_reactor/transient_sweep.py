@@ -39,6 +39,8 @@ from thorium_reactor.transient import (
 
 
 DEFAULT_TRANSIENT_SWEEP_MODEL = "reduced_order_transient_proxy_ensemble"
+DEFAULT_TRANSIENT_SWEEP_SAMPLES = 65_536
+MIN_TRANSIENT_SWEEP_SAMPLES = 32
 
 
 def run_transient_sweep_case(
@@ -47,7 +49,7 @@ def run_transient_sweep_case(
     summary: dict[str, Any],
     *,
     scenario_name: str | None = None,
-    samples: int = 512,
+    samples: int = DEFAULT_TRANSIENT_SWEEP_SAMPLES,
     seed: int = 42,
     prefer_gpu: bool = False,
     backend: str = "auto",
@@ -82,7 +84,7 @@ def build_transient_sweep_payload(
     summary: dict[str, Any],
     *,
     scenario_name: str | None = None,
-    samples: int = 512,
+    samples: int = DEFAULT_TRANSIENT_SWEEP_SAMPLES,
     seed: int = 42,
     prefer_gpu: bool = False,
     backend: str = "auto",
@@ -108,7 +110,7 @@ def build_transient_sweep_payload(
         transient_config,
         property_uncertainty=property_uncertainty,
     )
-    sample_count = max(int(samples), 32)
+    sample_count = max(int(samples), MIN_TRANSIENT_SWEEP_SAMPLES)
     requested_backend = "auto" if backend == "auto" else backend
     if prefer_gpu and backend == "auto":
         requested_backend = "auto"

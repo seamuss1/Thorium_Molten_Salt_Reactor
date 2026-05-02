@@ -91,6 +91,36 @@ def test_physics_core_honors_configured_method_and_mesh_counts() -> None:
     assert physics_core["precursor_transport"]["loop_cell_count"] == 3
 
 
+def test_physics_core_uses_defaults_for_null_optional_salt_properties() -> None:
+    config = load_case_config(REPO_ROOT / "configs" / "cases" / "tmsr_lf1_core" / "case.yaml")
+    summary = {
+        "bop": {"thermal_power_mw": 250.0, "primary_mass_flow_kg_s": 1200.0, "primary_cp_kj_kgk": 1.6},
+        "flow": {
+            "reduced_order": {
+                "salt_density_kg_m3": 3200.0,
+                "salt_properties": {"dynamic_viscosity_pa_s": None, "thermal_conductivity_w_mk": None},
+                "active_flow": {
+                    "total_flow_area_cm2": 1800.0,
+                    "total_salt_volume_cm3": 250000.0,
+                    "hydraulic_diameter_cm": 8.0,
+                },
+            }
+        },
+        "primary_system": {
+            "thermal_profile": {"estimated_hot_leg_temp_c": 704.0, "estimated_cold_leg_temp_c": 566.0},
+            "loop_hydraulics": {"pump_head_m": 8.0, "buoyancy_driving_pressure_kpa": 1.0},
+        },
+        "metrics": {},
+        "neutronics": {"status": "dry-run"},
+    }
+
+    physics_core = build_physics_core_summary(config, summary)
+
+    assert physics_core["thermal_hydraulics"]["fluid_properties"]["dynamic_viscosity_pa_s"] == 0.006
+    assert physics_core["thermal_hydraulics"]["fluid_properties"]["thermal_conductivity_w_mk"] == 1.0
+    assert physics_core["integrity_checks"]["status"] == "ok"
+
+
 def test_case_loader_rejects_invalid_physics_core_method(tmp_path: Path) -> None:
     source = REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml"
     case_dir = tmp_path / "configs" / "cases" / "bad"

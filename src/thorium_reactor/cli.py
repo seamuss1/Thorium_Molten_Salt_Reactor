@@ -25,6 +25,7 @@ from thorium_reactor.neutronics.workflows import _build_visualization_state, bui
 from thorium_reactor.paths import ResultBundle, case_config_path, create_result_bundle, discover_repo_root, existing_result_bundle, latest_result_bundle
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot, load_plot_manifest
 from thorium_reactor.reporting.reports import generate_report
+from thorium_reactor.transient_sweep import DEFAULT_TRANSIENT_SWEEP_SAMPLES
 
 
 INTEGRATION_COMMANDS = ("moose", "scale", "thermochimica", "saltproc", "moltres")
@@ -59,7 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--scenario", default=None, help="Named transient scenario from the case config.")
         if command_name == "transient-sweep":
             command.add_argument("--scenario", default=None, help="Named transient scenario from the case config.")
-            command.add_argument("--samples", type=int, default=512, help="Number of ensemble trajectories to evaluate.")
+            command.add_argument(
+                "--samples",
+                type=int,
+                default=DEFAULT_TRANSIENT_SWEEP_SAMPLES,
+                help="Number of ensemble trajectories to evaluate.",
+            )
             command.add_argument("--seed", type=int, default=42, help="Random seed for the ensemble perturbations.")
             command.add_argument("--prefer-gpu", action="store_true", help="Deprecated alias for --backend auto.")
             command.add_argument("--backend", default="auto", choices=["auto", "python", "numpy", "torch-cpu", "torch-xpu"], help="Array backend for transient ensemble integration.")

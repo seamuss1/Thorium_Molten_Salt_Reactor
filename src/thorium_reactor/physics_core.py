@@ -161,8 +161,15 @@ def build_finite_volume_thermal_hydraulics(
     hot_leg_temp_c = float(profile.get("estimated_hot_leg_temp_c", reactor.get("hot_leg_temp_c", 700.0)))
     cold_leg_temp_c = float(profile.get("estimated_cold_leg_temp_c", reactor.get("cold_leg_temp_c", 560.0)))
     density_kg_m3 = float(reduced.get("salt_density_kg_m3", 3100.0))
-    viscosity_pa_s = float(reduced.get("salt_properties", {}).get("dynamic_viscosity_pa_s", 0.006))
-    conductivity_w_mk = float(reduced.get("salt_properties", {}).get("thermal_conductivity_w_mk", 1.0))
+    salt_properties = reduced.get("salt_properties", {})
+    viscosity_pa_s = _finite_float_or_default(
+        salt_properties.get("dynamic_viscosity_pa_s") if isinstance(salt_properties, dict) else None,
+        float(reactor.get("primary_dynamic_viscosity_pa_s", 0.006)),
+    )
+    conductivity_w_mk = _finite_float_or_default(
+        salt_properties.get("thermal_conductivity_w_mk") if isinstance(salt_properties, dict) else None,
+        1.0,
+    )
     flow_area_m2 = max(float(active_flow.get("total_flow_area_cm2", 1.0)) * 1.0e-4, 1.0e-8)
     hydraulic_diameter_m = max(float(active_flow.get("hydraulic_diameter_cm", geometry.get("channel_layers", [{}])[-1].get("outer_radius", 3.0))) * 0.01, 1.0e-4)
     active_volume_m3 = max(float(active_flow.get("total_salt_volume_cm3", 0.0)) * 1.0e-6, flow_area_m2)
@@ -945,3 +952,15 @@ def _physics_core_checks(
 
 def _round_float(value: float) -> float:
     return round(float(value), 6)
+
+
+def _finite_float_or_default(value: Any, default: float) -> float:
+    if value is None:
+        return float(default)
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    if not math.isfinite(result):
+        return float(default)
+    return result

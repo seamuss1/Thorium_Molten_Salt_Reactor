@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from thorium_reactor.transient_sweep import DEFAULT_TRANSIENT_SWEEP_SAMPLES
+
 
 class ArtifactRef(BaseModel):
     label: str
@@ -77,9 +79,9 @@ class SimulationDraft(BaseModel):
     patch: dict[str, Any] = Field(default_factory=dict)
     phases: list[str] = Field(default_factory=lambda: ["run", "validate", "report"])
     scenario: str | None = None
-    sweep_samples: int = Field(default=512, ge=1, le=65536)
+    sweep_samples: int = Field(default=DEFAULT_TRANSIENT_SWEEP_SAMPLES, ge=1, le=65536)
     sweep_seed: int = Field(default=42, ge=0, le=4294967295)
-    prefer_gpu: bool = False
+    prefer_gpu: bool = True
 
 
 class DraftValidationRequest(BaseModel):

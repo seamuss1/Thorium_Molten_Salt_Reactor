@@ -356,23 +356,22 @@ def resolve_runtime_backend(
         create_array_backend(requested, dtype=dtype, seed=seed)
         return BackendSelection(requested=requested, selected=requested, reason="explicit backend requested", dtype=dtype)
 
-    if samples >= GPU_SAMPLE_THRESHOLD:
-        try:
-            create_array_backend("torch-xpu", dtype=dtype, seed=seed)
-            return BackendSelection(
-                requested=requested,
-                selected="torch-xpu",
-                reason=f"samples >= {GPU_SAMPLE_THRESHOLD} and torch-xpu is available",
-                dtype=dtype,
-            )
-        except Exception:
-            pass
+    try:
+        create_array_backend("torch-xpu", dtype=dtype, seed=seed)
+        return BackendSelection(
+            requested=requested,
+            selected="torch-xpu",
+            reason="auto mode prefers torch-xpu when available",
+            dtype=dtype,
+        )
+    except Exception as exc:
+        gpu_error = exc
     try:
         create_array_backend("numpy", dtype=dtype, seed=seed)
         return BackendSelection(
             requested=requested,
             selected="numpy",
-            reason="numpy CPU vector backend is available",
+            reason=f"torch-xpu unavailable ({gpu_error}); numpy CPU vector backend is available",
             dtype=dtype,
         )
     except Exception:

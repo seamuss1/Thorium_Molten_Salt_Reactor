@@ -4,6 +4,7 @@ import pytest
 
 from thorium_reactor.cli import _load_or_create_bundle, build_parser, resolve_benchmark_runtime
 from thorium_reactor.paths import create_result_bundle
+from thorium_reactor.transient_sweep import DEFAULT_TRANSIENT_SWEEP_SAMPLES
 
 
 def test_cli_registers_all_commands() -> None:
@@ -98,6 +99,14 @@ def test_cli_registers_transient_sweep_command() -> None:
     assert namespace.seed == 7
     assert namespace.prefer_gpu is True
     assert namespace.backend == "numpy"
+
+
+def test_cli_transient_sweep_defaults_to_gpu_sized_ensemble() -> None:
+    parser = build_parser()
+    namespace = parser.parse_args(["transient-sweep", "immersed_pool_reference"])
+
+    assert namespace.samples == DEFAULT_TRANSIENT_SWEEP_SAMPLES
+    assert namespace.backend == "auto"
 
 
 def test_cli_registers_runtime_benchmark_command() -> None:

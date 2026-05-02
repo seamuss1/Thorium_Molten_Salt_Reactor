@@ -1,8 +1,13 @@
+import inspect
 from pathlib import Path
 
 from thorium_reactor.config import load_case_config
 from thorium_reactor.paths import create_result_bundle
-from thorium_reactor.transient_sweep import run_transient_sweep_case
+from thorium_reactor.transient_sweep import (
+    DEFAULT_TRANSIENT_SWEEP_SAMPLES,
+    build_transient_sweep_payload,
+    run_transient_sweep_case,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -39,7 +44,7 @@ def _minimal_summary() -> dict:
     }
 
 
-def test_run_transient_sweep_case_produces_cpu_backed_bundle(tmp_path: Path) -> None:
+def test_run_transient_sweep_case_produces_accelerated_bundle(tmp_path: Path) -> None:
     config = load_case_config(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml")
     bundle = create_result_bundle(tmp_path, config.name, "run")
     summary = _minimal_summary()
@@ -54,7 +59,7 @@ def test_run_transient_sweep_case_produces_cpu_backed_bundle(tmp_path: Path) -> 
         prefer_gpu=True,
     )
 
-    assert payload["backend"] in {"python", "numpy"}
+    assert payload["backend"] in {"python", "numpy", "torch-xpu"}
     assert payload["samples"] == 128
     assert len(payload["history"]) >= 100
     assert payload["metrics"]["peak_power_fraction_p95"] >= 1.0
@@ -63,7 +68,7 @@ def test_run_transient_sweep_case_produces_cpu_backed_bundle(tmp_path: Path) -> 
     assert payload["runtime_performance"]["sample_steps_per_s"] > 0.0
     assert payload["numerical_checks"]["status"] == "ok"
     assert summary["transient_sweep"]["samples"] == 128
-    assert summary["transient_sweep"]["backend"] in {"python", "numpy"}
+    assert summary["transient_sweep"]["backend"] in {"python", "numpy", "torch-xpu"}
     assert summary["transient_sweep"]["final_core_delayed_neutron_source_fraction_p50"] > 0.0
     assert summary["transient_sweep"]["numerical_checks"]["status"] == "ok"
     assert (bundle.root / "transient_sweep.json").exists()
@@ -86,6 +91,14 @@ def test_run_transient_sweep_case_enforces_minimum_sample_floor(tmp_path: Path) 
 
     assert payload["samples"] == 32
     assert summary["transient_sweep"]["samples"] == 32
+
+
+def test_transient_sweep_defaults_to_gpu_sized_ensemble() -> None:
+    run_default = inspect.signature(run_transient_sweep_case).parameters["samples"].default
+    payload_default = inspect.signature(build_transient_sweep_payload).parameters["samples"].default
+
+    assert run_default == DEFAULT_TRANSIENT_SWEEP_SAMPLES
+    assert payload_default == DEFAULT_TRANSIENT_SWEEP_SAMPLES
 
 
 def test_numpy_transient_sweep_matches_python_reference(tmp_path: Path) -> None:

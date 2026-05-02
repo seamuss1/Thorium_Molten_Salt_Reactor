@@ -23,9 +23,9 @@ export function Builder() {
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [phases, setPhases] = useState(["run", "validate", "report"]);
   const [scenario, setScenario] = useState("");
-  const [sweepSamples, setSweepSamples] = useState(512);
+  const [sweepSamples, setSweepSamples] = useState(65536);
   const [sweepSeed, setSweepSeed] = useState(42);
-  const [preferGpu, setPreferGpu] = useState(false);
+  const [preferGpu, setPreferGpu] = useState(true);
 
   useEffect(() => {
     if (!caseName && cases.data?.[0]) {
@@ -115,7 +115,7 @@ export function Builder() {
             </label>
             <label className="field">
               <span>Sweep samples</span>
-              <input type="number" min={1} value={sweepSamples} onChange={(event) => setSweepSamples(Number(event.target.value))} />
+              <input type="number" min={1} max={65536} value={sweepSamples} onChange={(event) => setSweepSamples(Number(event.target.value))} />
             </label>
             <label className="field">
               <span>Sweep seed</span>
@@ -123,7 +123,7 @@ export function Builder() {
             </label>
             <label className="check-line">
               <input type="checkbox" checked={preferGpu} onChange={(event) => setPreferGpu(event.target.checked)} />
-              <span>Prefer GPU for sweep</span>
+              <span>Use GPU for sweep</span>
             </label>
           </div>
           <button className="primary-action wide" type="submit" disabled={createRun.isPending || !caseName}>
