@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+import thorium_reactor.runtime_benchmark as runtime_benchmark
 from thorium_reactor.accelerators import available_backend_report
 from thorium_reactor.config import load_case_config
 from thorium_reactor.paths import create_result_bundle
@@ -29,9 +32,9 @@ def test_backend_discovery_uses_isolated_subprocesses() -> None:
     assert all(item["available"] is True for item in report)
 
 
-def test_runtime_benchmark_compares_cpu_and_numpy_backends() -> None:
+def test_runtime_benchmark_compares_cpu_and_numpy_backends(tmp_path: Path) -> None:
     config = load_case_config(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml")
-    bundle = create_result_bundle(REPO_ROOT / ".tmp" / "runtime-benchmark-test", config.name, "run")
+    bundle = create_result_bundle(tmp_path, config.name, "run")
     summary = _minimal_summary()
 
     payload = run_runtime_benchmark_case(
@@ -51,3 +54,31 @@ def test_runtime_benchmark_compares_cpu_and_numpy_backends() -> None:
     assert all(item["comparison_to_reference"]["status"] == "ok" for item in payload["results"] if item["status"] == "completed")
     assert summary["runtime_benchmark"]["status"] == "completed"
     assert (bundle.root / "runtime_benchmark.json").exists()
+
+
+def test_runtime_benchmark_propagates_process_control_exceptions(monkeypatch, tmp_path: Path) -> None:
+    config = load_case_config(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml")
+    bundle = create_result_bundle(tmp_path, config.name, "run")
+
+    monkeypatch.setattr(
+        runtime_benchmark,
+        "available_backend_report",
+        lambda **_kwargs: [{"name": "python", "available": True}],
+    )
+
+    def raise_keyboard_interrupt(*_args, **_kwargs):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(runtime_benchmark, "build_transient_sweep_payload", raise_keyboard_interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        runtime_benchmark.run_runtime_benchmark_case(
+            config,
+            bundle,
+            _minimal_summary(),
+            samples=64,
+            seed=19,
+            backends=["python"],
+        )
+
+    assert not (bundle.root / "runtime_benchmark.json").exists()

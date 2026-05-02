@@ -22,12 +22,13 @@ from thorium_reactor.integrations import (
 )
 from thorium_reactor.neutronics.openmc_compat import missing_openmc_runtime_message, openmc
 from thorium_reactor.neutronics.workflows import _build_visualization_state, build_case, run_case, validate_case
-from thorium_reactor.paths import ResultBundle, case_config_path, create_result_bundle, discover_repo_root, latest_result_bundle
+from thorium_reactor.paths import ResultBundle, case_config_path, create_result_bundle, discover_repo_root, existing_result_bundle, latest_result_bundle
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot, load_plot_manifest
 from thorium_reactor.reporting.reports import generate_report
 
 
 INTEGRATION_COMMANDS = ("moose", "scale", "thermochimica", "saltproc", "moltres")
+EXTEND_EXISTING_RUN_COMMANDS = ("transient", "transient-sweep", "runtime-benchmark", "economics", *INTEGRATION_COMMANDS)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,7 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         command = subparsers.add_parser(command_name, help=f"{command_name.capitalize()} a reactor case")
         command.add_argument("case", help="Case name under configs/cases")
-        command.add_argument("--run-id", default=None, help="Reuse or create a specific results run id")
+        command.add_argument("--run-id", default=None, help="Create or select a specific results run id")
+        command.add_argument("--reuse-run-id", action="store_true", help=argparse.SUPPRESS)
         if command_name == "run":
             command.add_argument("--no-solver", action="store_true", help="Skip calling the OpenMC solver")
         if command_name == "transient":
@@ -118,7 +120,8 @@ def main(argv: list[str] | None = None) -> int:
     config = load_case_config(case_config_path(repo_root, args.case))
 
     if args.command in {"build", "run", "benchmark", "transient", "transient-sweep", "runtime-benchmark", "economics", *INTEGRATION_COMMANDS}:
-        bundle = create_result_bundle(repo_root, config.name, args.run_id)
+        allow_existing = bool(args.reuse_run_id or (args.run_id is not None and args.command in EXTEND_EXISTING_RUN_COMMANDS))
+        bundle = _load_or_create_bundle(repo_root, config.name, args.run_id, allow_existing=allow_existing)
         inputs = ensure_bundle_inputs(repo_root, bundle, config)
     else:
         bundle = latest_result_bundle(repo_root, config.name) if args.run_id is None else _load_existing_bundle(repo_root, config.name, args.run_id)
@@ -510,19 +513,19 @@ def main(argv: list[str] | None = None) -> int:
 
     return 1
 
+def _load_or_create_bundle(repo_root: Path, case_name: str, run_id: str | None, *, allow_existing: bool = False) -> ResultBundle:
+    if run_id is None:
+        return create_result_bundle(repo_root, case_name)
+    if allow_existing:
+        try:
+            return existing_result_bundle(repo_root, case_name, run_id)
+        except FileNotFoundError:
+            pass
+    return create_result_bundle(repo_root, case_name, run_id)
+
+
 def _load_existing_bundle(repo_root: Path, case_name: str, run_id: str) -> ResultBundle:
-    root = repo_root / "results" / case_name / run_id
-    if not root.exists():
-        raise FileNotFoundError(f"Run '{run_id}' for case '{case_name}' does not exist.")
-    return ResultBundle(
-        case_name=case_name,
-        run_id=run_id,
-        root=root,
-        openmc_dir=root / "openmc",
-        plots_dir=root / "plots",
-        images_dir=root / "images",
-        geometry_dir=root / "geometry",
-    )
+    return existing_result_bundle(repo_root, case_name, run_id)
 
 
 if __name__ == "__main__":

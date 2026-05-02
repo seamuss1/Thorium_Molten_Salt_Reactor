@@ -84,7 +84,7 @@ def run_runtime_benchmark_case(
                 dtype=dtype,
                 provenance=provenance,
             )
-        except BaseException as exc:
+        except Exception as exc:
             failure = {
                 "backend": backend_name,
                 "status": "failed",

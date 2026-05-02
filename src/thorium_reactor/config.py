@@ -40,6 +40,7 @@ SUPPORTED_SOURCE_TYPES = {"point"}
 SUPPORTED_REACTOR_MODES = {"historic_benchmark", "modern_test_reactor", "aspirational_breeder", "commercial_grid"}
 SUPPORTED_PROPERTY_PROVIDERS = {"legacy_correlation", "evaluated_table", "thermochemical_equilibrium"}
 SUPPORTED_INTEGRATIONS = ("moose", "scale", "thermochimica", "saltproc", "moltres")
+SUPPORTED_DETERMINISTIC_NEUTRONICS_METHODS = {"diffusion", "sp3", "transport"}
 
 
 class ConfigError(ValueError):
@@ -141,6 +142,7 @@ def _validate_case_schema(path: Path, raw: Mapping[str, Any]) -> None:
     _validate_validation_targets_settings(path, raw.get("validation_targets"))
     _validate_optional_flow_settings(path, raw.get("flow"))
     _validate_optional_model_representation(path, raw.get("model_representation"))
+    _validate_optional_physics_core_settings(path, raw.get("physics_core"))
     _validate_optional_integrations(path, raw.get("integrations"))
     _validate_optional_economics_settings(path, raw.get("economics"))
     _validate_optional_project_schedule_settings(path, raw.get("project_schedule"))
@@ -616,6 +618,56 @@ def _validate_optional_model_representation(path: Path, model_representation: An
         raise ConfigError(
             f"Case config {path} model_representation.fuel_cycle '{fuel_cycle}' is unsupported. Supported values: {supported}."
         )
+
+
+def _validate_optional_physics_core_settings(path: Path, physics_core: Any) -> None:
+    if physics_core is None:
+        return
+    if not isinstance(physics_core, Mapping):
+        raise ConfigError(f"Case config {path} optional 'physics_core' section must be a mapping.")
+    neutronics = physics_core.get("neutronics")
+    if neutronics is not None:
+        if not isinstance(neutronics, Mapping):
+            raise ConfigError(f"Case config {path} physics_core.neutronics must be a mapping.")
+        if "group_count" in neutronics:
+            _require_positive_int(path, "physics_core.neutronics.group_count", neutronics["group_count"])
+        methods = neutronics.get("deterministic_methods")
+        if methods is not None:
+            if not isinstance(methods, list) or not methods:
+                raise ConfigError(f"Case config {path} physics_core.neutronics.deterministic_methods must be a non-empty list.")
+            for index, method in enumerate(methods, start=1):
+                if method not in SUPPORTED_DETERMINISTIC_NEUTRONICS_METHODS:
+                    supported = ", ".join(sorted(SUPPORTED_DETERMINISTIC_NEUTRONICS_METHODS))
+                    raise ConfigError(
+                        f"Case config {path} physics_core.neutronics.deterministic_methods[{index}] '{method}' "
+                        f"is unsupported. Supported values: {supported}."
+                    )
+        temperature_grid = neutronics.get("temperature_grid_c")
+        if temperature_grid is not None:
+            if not isinstance(temperature_grid, list) or len(temperature_grid) < 2:
+                raise ConfigError(f"Case config {path} physics_core.neutronics.temperature_grid_c must contain at least two points.")
+            for index, value in enumerate(temperature_grid, start=1):
+                _require_number(path, f"physics_core.neutronics.temperature_grid_c[{index}]", value)
+    thermal_hydraulics = physics_core.get("thermal_hydraulics")
+    if thermal_hydraulics is not None:
+        if not isinstance(thermal_hydraulics, Mapping):
+            raise ConfigError(f"Case config {path} physics_core.thermal_hydraulics must be a mapping.")
+        if "axial_nodes" in thermal_hydraulics:
+            _require_positive_int(path, "physics_core.thermal_hydraulics.axial_nodes", thermal_hydraulics["axial_nodes"])
+    precursor_transport = physics_core.get("precursor_transport")
+    if precursor_transport is not None:
+        if not isinstance(precursor_transport, Mapping):
+            raise ConfigError(f"Case config {path} physics_core.precursor_transport must be a mapping.")
+        if "loop_cells" in precursor_transport:
+            _require_positive_int(path, "physics_core.precursor_transport.loop_cells", precursor_transport["loop_cells"])
+        if "diffusion_coefficient_m2_s" in precursor_transport:
+            value = _require_number(
+                path,
+                "physics_core.precursor_transport.diffusion_coefficient_m2_s",
+                precursor_transport["diffusion_coefficient_m2_s"],
+            )
+            if value < 0.0:
+                raise ConfigError(f"Case config {path} physics_core.precursor_transport.diffusion_coefficient_m2_s must be non-negative.")
 
 
 def _require_number(path: Path, field_name: str, value: Any) -> float:

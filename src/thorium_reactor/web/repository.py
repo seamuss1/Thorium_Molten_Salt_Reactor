@@ -8,7 +8,7 @@ import re
 import shutil
 import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping
 
 import yaml
@@ -16,7 +16,7 @@ import yaml
 from thorium_reactor.bundle_inputs import BENCHMARK_SNAPSHOT_NAME, CASE_SNAPSHOT_NAME, PROVENANCE_NAME
 from thorium_reactor.capabilities import get_case_capabilities
 from thorium_reactor.config import CaseConfig, load_case_config, resolve_benchmark_path
-from thorium_reactor.paths import ResultBundle, case_config_path, create_result_bundle, discover_repo_root
+from thorium_reactor.paths import ResultBundle, case_config_path, create_result_bundle, default_run_id, discover_repo_root, safe_path_segment
 from thorium_reactor.web.schemas import (
     ArtifactRef,
     CaseDetail,
@@ -40,6 +40,7 @@ RAW_ARTIFACTS = (
     "runtime_context.json",
     "property_audit.json",
     "benchmark_residuals.json",
+    "physics_core.json",
     "build_manifest.json",
     "geometry_description.json",
     "validation.json",
@@ -90,8 +91,10 @@ class WebRepository:
         )
 
     def prepare_run_bundle(self, draft: SimulationDraft) -> ResultBundle:
+        case_name = safe_segment(draft.case_name)
+        base_config = load_case_config(case_config_path(self.repo_root, case_name))
         config, normalized_yaml = self._load_draft_config(
-            draft.case_name,
+            case_name,
             draft_yaml=draft.draft_yaml,
             patch=draft.patch,
         )
@@ -99,7 +102,6 @@ class WebRepository:
         bundle = create_result_bundle(self.repo_root, config.name, run_id)
         (bundle.root / CASE_SNAPSHOT_NAME).write_text(normalized_yaml, encoding="utf-8")
 
-        base_config = load_case_config(case_config_path(self.repo_root, draft.case_name))
         benchmark_path = resolve_benchmark_path(self.repo_root, config.data) or resolve_benchmark_path(self.repo_root, base_config.data)
         if benchmark_path and benchmark_path.exists():
             shutil.copy2(benchmark_path, bundle.root / BENCHMARK_SNAPSHOT_NAME)
@@ -126,17 +128,20 @@ class WebRepository:
             return records
         for case_dir in sorted([path for path in results_root.iterdir() if path.is_dir()]):
             for run_dir in sorted([path for path in case_dir.iterdir() if path.is_dir()], key=lambda path: path.stat().st_mtime, reverse=True):
-                records.append(self._run_record(case_dir.name, run_dir.name, run_dir))
+                try:
+                    records.append(self._run_record(case_dir.name, run_dir.name, run_dir))
+                except ValueError:
+                    continue
         return records
 
     def get_run(self, case_name: str, run_id: str) -> RunRecord:
-        run_dir = self.repo_root / "results" / safe_segment(case_name) / safe_segment(run_id)
+        run_dir = self._run_dir(case_name, run_id)
         if not run_dir.exists():
             raise FileNotFoundError(f"Run '{run_id}' for case '{case_name}' was not found.")
         return self._run_record(case_name, run_id, run_dir)
 
     def read_events(self, case_name: str, run_id: str) -> list[RunEvent]:
-        path = self.repo_root / "results" / safe_segment(case_name) / safe_segment(run_id) / "job_events.ndjson"
+        path = self._run_dir(case_name, run_id) / "job_events.ndjson"
         if not path.exists():
             return []
         events: list[RunEvent] = []
@@ -164,15 +169,22 @@ class WebRepository:
                 return DocRecord(**model_to_dict(summary), content=path.read_text(encoding="utf-8"))
         raise FileNotFoundError(f"Document '{slug}' was not found.")
 
-    def resolve_artifact_path(self, artifact_path: str) -> Path:
-        normalized = artifact_path.replace("\\", "/").lstrip("/")
-        if not normalized or normalized.startswith("../") or "/../" in normalized or normalized == ".." or re.match(r"^[A-Za-z]:/", normalized):
-            raise ValueError("Artifact path must stay inside the repository.")
-        path = (self.repo_root / normalized).resolve()
-        if not path.is_relative_to(self.repo_root.resolve()):
-            raise ValueError("Artifact path must stay inside the repository.")
+    def resolve_artifact_path(self, case_name: str, run_id: str, artifact_path: str) -> Path:
+        run_dir = self._run_dir(case_name, run_id)
+        if not run_dir.exists():
+            raise FileNotFoundError(f"Run '{run_id}' for case '{case_name}' was not found.")
+        run_relative_path = normalize_artifact_path(artifact_path)
+        path = (run_dir / run_relative_path).resolve()
+        if not path.is_relative_to(run_dir.resolve()):
+            raise ValueError("Artifact path must stay inside the run artifact directory.")
         if not path.is_file():
             raise FileNotFoundError(f"Artifact '{artifact_path}' was not found.")
+        allowed_paths = {
+            (self.repo_root / ref.path).resolve()
+            for ref in self._artifacts_for_run(safe_segment(case_name), safe_segment(run_id), run_dir)
+        }
+        if path not in allowed_paths:
+            raise FileNotFoundError(f"Artifact '{artifact_path}' is not available for this run.")
         return path
 
     def _case_summary(self, config: CaseConfig) -> CaseSummary:
@@ -187,16 +199,19 @@ class WebRepository:
         )
 
     def _latest_run(self, case_name: str) -> RunRecord | None:
-        case_results = self.repo_root / "results" / case_name
+        safe_case_name = safe_segment(case_name)
+        case_results = self.repo_root / "results" / safe_case_name
         if not case_results.exists():
             return None
         candidates = [path for path in case_results.iterdir() if path.is_dir()]
         if not candidates:
             return None
         latest = max(candidates, key=lambda path: path.stat().st_mtime)
-        return self._run_record(case_name, latest.name, latest)
+        return self._run_record(safe_case_name, latest.name, latest)
 
     def _run_record(self, case_name: str, run_id: str, run_dir: Path) -> RunRecord:
+        safe_case_name = safe_segment(case_name)
+        safe_run_id = safe_segment(run_id)
         status_payload = read_json(run_dir / "job_status.json", {})
         summary = read_json(run_dir / "summary.json", {})
         validation = read_json(run_dir / "validation.json", {})
@@ -209,8 +224,8 @@ class WebRepository:
         reactor = state_store.get("reactor") or summary.get("reactor") or build_manifest.get("reactor") or {}
         capabilities = summary.get("workflow_capabilities") or build_manifest.get("workflow_capabilities") or []
         return RunRecord(
-            case_name=case_name,
-            run_id=run_id,
+            case_name=safe_case_name,
+            run_id=safe_run_id,
             status=str(status),
             phase=status_payload.get("phase"),
             command_plan=[str(item) for item in status_payload.get("command_plan", [])],
@@ -222,37 +237,42 @@ class WebRepository:
             provenance=provenance if isinstance(provenance, dict) else {},
             reactor=reactor if isinstance(reactor, dict) else {},
             capabilities=[str(item) for item in capabilities],
-            artifacts=self._artifacts_for_run(run_dir),
+            artifacts=self._artifacts_for_run(safe_case_name, safe_run_id, run_dir),
             latest_event=events[-1] if events else None,
         )
 
-    def _artifacts_for_run(self, run_dir: Path) -> list[ArtifactRef]:
+    def _artifacts_for_run(self, case_name: str, run_id: str, run_dir: Path) -> list[ArtifactRef]:
         refs: dict[str, ArtifactRef] = {}
         for name in RAW_ARTIFACTS:
             path = run_dir / name
             if path.exists() and path.is_file():
-                ref = self._artifact_ref(path, label=name, kind=artifact_kind(path))
+                ref = self._artifact_ref(path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=name, kind=artifact_kind(path))
                 refs[ref.path] = ref
 
         for manifest_name, kind in (("plots_manifest.json", "plot"), ("render_assets.json", "geometry")):
             manifest = read_json(run_dir / manifest_name, {})
             if isinstance(manifest, dict):
                 for label, raw_path in manifest.items():
-                    path = self._resolve_recorded_path(raw_path)
+                    path = self._resolve_recorded_path(raw_path, run_dir=run_dir)
                     if path and path.exists() and path.is_file():
-                        ref = self._artifact_ref(path, label=str(label), kind=kind)
+                        ref = self._artifact_ref(path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=str(label), kind=kind)
                         refs[ref.path] = ref
 
         exports_dir = run_dir / "geometry" / "exports"
         if exports_dir.exists():
             for path in sorted(exports_dir.glob("*")):
                 if path.is_file() and path.suffix.lower() in {".gltf", ".bin", ".obj", ".stl", ".png", ".svg", ".json", ".mp4", ".gif"}:
-                    ref = self._artifact_ref(path, label=path.name, kind=artifact_kind(path))
+                    ref = self._artifact_ref(path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=path.name, kind=artifact_kind(path))
                     refs[ref.path] = ref
         return sorted(refs.values(), key=lambda ref: (ref.kind, ref.label))
 
-    def _artifact_ref(self, path: Path, *, label: str, kind: str) -> ArtifactRef:
-        rel = self._display_path(path)
+    def _artifact_ref(self, path: Path, *, run_dir: Path, case_name: str, run_id: str, label: str, kind: str) -> ArtifactRef:
+        resolved = path.resolve()
+        run_root = run_dir.resolve()
+        if not resolved.is_relative_to(run_root):
+            raise ValueError("Run artifact references must stay inside the run directory.")
+        rel = self._display_path(resolved)
+        run_rel = resolved.relative_to(run_root).as_posix()
         mime_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
         return ArtifactRef(
             label=label,
@@ -260,44 +280,55 @@ class WebRepository:
             mime_type=mime_type,
             size=path.stat().st_size,
             path=rel,
-            url=f"/api/runs/_/_/artifacts/{rel}",
+            url=f"/api/runs/{case_name}/{run_id}/artifacts/{run_rel}",
         )
 
-    def _resolve_recorded_path(self, value: Any) -> Path | None:
+    def _resolve_recorded_path(self, value: Any, *, run_dir: Path) -> Path | None:
         if not isinstance(value, str) or not value:
             return None
         normalized = value.replace("\\", "/")
         if normalized.startswith("/workspace/"):
-            return (self.repo_root / normalized.removeprefix("/workspace/")).resolve()
+            return self._artifact_candidate_within_run(self.repo_root / normalized.removeprefix("/workspace/"), run_dir)
         path = Path(value)
         if path.is_absolute():
             try:
                 resolved = path.resolve()
             except OSError:
                 return None
-            if resolved.is_relative_to(self.repo_root.resolve()):
-                return resolved
-            return None
-        return (self.repo_root / normalized).resolve()
+            return resolved if resolved.is_relative_to(run_dir.resolve()) else None
+        return self._artifact_candidate_within_run(self.repo_root / normalized, run_dir)
 
     def _load_draft_config(self, case_name: str, *, draft_yaml: str | None, patch: Mapping[str, Any]) -> tuple[CaseConfig, str]:
-        base_path = case_config_path(self.repo_root, case_name)
+        safe_case_name = safe_segment(case_name)
+        base_path = case_config_path(self.repo_root, safe_case_name)
+        if not base_path.exists():
+            raise FileNotFoundError(f"Case '{safe_case_name}' was not found.")
         if draft_yaml:
             payload = yaml.safe_load(draft_yaml) or {}
         else:
             payload = yaml.safe_load(base_path.read_text(encoding="utf-8")) or {}
             deep_merge(payload, patch)
-        payload["name"] = case_name
+        payload["name"] = safe_case_name
         normalized_yaml = yaml.safe_dump(payload, sort_keys=False)
         tmp_parent = self.repo_root / ".tmp" / "web-validation"
         tmp_parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=str(tmp_parent)) as tmp_name:
-            case_dir = Path(tmp_name) / "configs" / "cases" / case_name
+            case_dir = Path(tmp_name) / "configs" / "cases" / safe_case_name
             case_dir.mkdir(parents=True, exist_ok=True)
             draft_path = case_dir / "case.yaml"
             draft_path.write_text(normalized_yaml, encoding="utf-8")
             config = load_case_config(draft_path)
         return config, normalized_yaml
+
+    def _run_dir(self, case_name: str, run_id: str) -> Path:
+        return self.repo_root / "results" / safe_segment(case_name) / safe_segment(run_id)
+
+    def _artifact_candidate_within_run(self, path: Path, run_dir: Path) -> Path | None:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return None
+        return resolved if resolved.is_relative_to(run_dir.resolve()) else None
 
     def _editable_parameters(self, config: CaseConfig) -> list[EditableParameter]:
         parameters: list[EditableParameter] = []
@@ -395,7 +426,7 @@ class WebRepository:
 
 def sanitize_run_id(run_id: str | None) -> str | None:
     if not run_id:
-        return f"web-{datetime.now().astimezone().strftime('%Y%m%d-%H%M%S')}"
+        return f"web-{default_run_id()}"
     sanitized = RUN_ID_RE.sub("-", run_id).strip(".-_")
     if not sanitized:
         raise ValueError("Run id must contain at least one letter or number.")
@@ -403,10 +434,17 @@ def sanitize_run_id(run_id: str | None) -> str | None:
 
 
 def safe_segment(value: str) -> str:
-    sanitized = sanitize_run_id(value)
-    if sanitized != value:
-        raise ValueError(f"Unsafe path segment: {value!r}")
-    return value
+    return safe_path_segment(value)
+
+
+def normalize_artifact_path(artifact_path: str) -> Path:
+    normalized = artifact_path.replace("\\", "/")
+    if not normalized or normalized.startswith("/") or re.match(r"^[A-Za-z]:", normalized):
+        raise ValueError("Artifact path must be relative to the run directory.")
+    candidate = PurePosixPath(normalized)
+    if candidate.is_absolute() or any(part in {"", ".", ".."} for part in candidate.parts):
+        raise ValueError("Artifact path must stay inside the run directory.")
+    return Path(*candidate.parts)
 
 
 def utc_now() -> str:

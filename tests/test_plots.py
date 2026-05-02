@@ -4,11 +4,8 @@ from thorium_reactor.paths import create_result_bundle
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot, load_plot_manifest
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-def test_generate_summary_plots_populates_plots_dir() -> None:
-    bundle = create_result_bundle(REPO_ROOT / ".tmp" / "plot-test", "plot_case", "run")
+def test_generate_summary_plots_populates_plots_dir(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
     summary = {
         "case": "plot_case",
         "metrics": {
@@ -32,8 +29,8 @@ def test_generate_summary_plots_populates_plots_dir() -> None:
     assert Path(assets["bop_balance"]).exists()
 
 
-def test_generate_summary_plots_emits_flow_interface_plot_when_available() -> None:
-    bundle = create_result_bundle(REPO_ROOT / ".tmp" / "plot-flow-test", "plot_case", "run")
+def test_generate_summary_plots_emits_flow_interface_plot_when_available(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
     summary = {
         "case": "plot_case",
         "metrics": {
@@ -58,8 +55,8 @@ def test_generate_summary_plots_emits_flow_interface_plot_when_available() -> No
     assert Path(assets["flow_interfaces"]).exists()
 
 
-def test_generate_summary_plots_emits_active_flow_allocation_plot() -> None:
-    bundle = create_result_bundle(REPO_ROOT / ".tmp" / "plot-active-flow-test", "plot_case", "run")
+def test_generate_summary_plots_emits_active_flow_allocation_plot(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
     summary = {
         "case": "plot_case",
         "metrics": {
@@ -84,8 +81,8 @@ def test_generate_summary_plots_emits_active_flow_allocation_plot() -> None:
     assert Path(assets["active_flow_allocation"]).exists()
 
 
-def test_generate_validation_plot_updates_manifest() -> None:
-    bundle = create_result_bundle(REPO_ROOT / ".tmp" / "plot-validation-test", "plot_case", "run")
+def test_generate_validation_plot_updates_manifest(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
     validation = {
         "case": "plot_case",
         "checks": [
@@ -103,8 +100,8 @@ def test_generate_validation_plot_updates_manifest() -> None:
     assert Path(assets["validation_summary"]).exists()
 
 
-def test_generate_summary_plots_emits_transient_plots_when_history_exists() -> None:
-    bundle = create_result_bundle(REPO_ROOT / ".tmp" / "plot-transient-test", "plot_case", "run")
+def test_generate_summary_plots_emits_transient_plots_when_history_exists(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
     transient_path = bundle.write_json(
         "transient.json",
         {
@@ -136,8 +133,8 @@ def test_generate_summary_plots_emits_transient_plots_when_history_exists() -> N
     assert Path(assets["transient_fuel_temperature"]).exists()
 
 
-def test_generate_summary_plots_emits_transient_sweep_envelopes_when_history_exists() -> None:
-    bundle = create_result_bundle(REPO_ROOT / ".tmp" / "plot-transient-sweep-test", "plot_case", "run")
+def test_generate_summary_plots_emits_transient_sweep_envelopes_when_history_exists(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
     transient_sweep_path = bundle.write_json(
         "transient_sweep.json",
         {

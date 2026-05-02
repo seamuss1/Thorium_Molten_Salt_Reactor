@@ -8,6 +8,7 @@ from thorium_reactor.config import load_case_config
 from thorium_reactor.flow.properties import average_primary_temperature_c, evaluate_fluid_properties, primary_coolant_cp_kj_kgk, property_reference_temperature_c
 from thorium_reactor.flow.primary_system import (
     _darcy_friction_factor,
+    _build_pump_demand_summary,
     _internal_nusselt_number,
     _log_mean_temperature_difference,
     build_primary_system_summary,
@@ -244,8 +245,27 @@ def test_pressure_budget_includes_buoyancy_assist() -> None:
     assert hydraulics["net_resistive_pressure_kpa"] >= hydraulics["frictional_pressure_drop_kpa"]
     assert hydraulics["buoyancy_driving_pressure_kpa"] >= 0.0
     assert hydraulics["required_pump_pressure_kpa"] <= hydraulics["net_resistive_pressure_kpa"]
+    assert hydraulics["required_pump_pressure_kpa"] >= 0.0
+    assert hydraulics["pump_hydraulic_power_kw"] >= 0.0
+    assert hydraulics["pump_shaft_power_kw"] >= 0.0
+    assert "natural_circulation_margin_kpa" in hydraulics
     assert hydraulics["hot_leg_rise_m"] >= 0.0
     assert hydraulics["cold_leg_drop_m"] >= 0.0
+
+
+def test_buoyancy_credit_reports_margin_instead_of_negative_pump_power() -> None:
+    demand = _build_pump_demand_summary(
+        -12_000.0,
+        salt_density_kg_m3=1900.0,
+        volumetric_flow_m3_s=0.25,
+        pump_efficiency=0.8,
+    )
+
+    assert demand["pump_demand_pressure_pa"] == 0.0
+    assert demand["natural_circulation_margin_pa"] == 12_000.0
+    assert demand["pump_head_m"] == 0.0
+    assert demand["hydraulic_power_kw"] == 0.0
+    assert demand["shaft_power_kw"] == 0.0
 
 
 def test_primary_thermal_profile_tracks_component_temperatures() -> None:

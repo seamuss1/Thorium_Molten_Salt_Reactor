@@ -98,9 +98,8 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
 
     @app.get("/api/runs/{case_name}/{run_id}/artifacts/{artifact_path:path}")
     def get_artifact(case_name: str, run_id: str, artifact_path: str) -> FileResponse:
-        del case_name, run_id
         try:
-            path = repository.resolve_artifact_path(artifact_path)
+            path = repository.resolve_artifact_path(case_name, run_id, artifact_path)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:

@@ -39,9 +39,9 @@ def _minimal_summary() -> dict:
     }
 
 
-def test_run_transient_sweep_case_produces_cpu_backed_bundle() -> None:
+def test_run_transient_sweep_case_produces_cpu_backed_bundle(tmp_path: Path) -> None:
     config = load_case_config(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml")
-    bundle = create_result_bundle(REPO_ROOT / ".tmp" / "transient-sweep-test", config.name, "run")
+    bundle = create_result_bundle(tmp_path, config.name, "run")
     summary = _minimal_summary()
 
     payload = run_transient_sweep_case(
@@ -69,9 +69,9 @@ def test_run_transient_sweep_case_produces_cpu_backed_bundle() -> None:
     assert (bundle.root / "transient_sweep.json").exists()
 
 
-def test_run_transient_sweep_case_enforces_minimum_sample_floor() -> None:
+def test_run_transient_sweep_case_enforces_minimum_sample_floor(tmp_path: Path) -> None:
     config = load_case_config(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml")
-    bundle = create_result_bundle(REPO_ROOT / ".tmp" / "transient-sweep-floor-test", config.name, "run")
+    bundle = create_result_bundle(tmp_path, config.name, "run")
     summary = {
         "bop": {"thermal_power_mw": 8.0},
         "flow": {"reduced_order": {"active_flow": {"representative_residence_time_s": 0.85, "total_volumetric_flow_m3_s": 0.014}}},
@@ -88,10 +88,10 @@ def test_run_transient_sweep_case_enforces_minimum_sample_floor() -> None:
     assert summary["transient_sweep"]["samples"] == 32
 
 
-def test_numpy_transient_sweep_matches_python_reference() -> None:
+def test_numpy_transient_sweep_matches_python_reference(tmp_path: Path) -> None:
     config = load_case_config(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml")
-    python_bundle = create_result_bundle(REPO_ROOT / ".tmp" / "transient-sweep-python-reference", config.name, "run")
-    numpy_bundle = create_result_bundle(REPO_ROOT / ".tmp" / "transient-sweep-numpy-reference", config.name, "run")
+    python_bundle = create_result_bundle(tmp_path / "python-reference", config.name, "run")
+    numpy_bundle = create_result_bundle(tmp_path / "numpy-reference", config.name, "run")
     python_payload = run_transient_sweep_case(
         config,
         python_bundle,

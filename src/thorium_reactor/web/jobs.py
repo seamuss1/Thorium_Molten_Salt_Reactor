@@ -14,6 +14,7 @@ from thorium_reactor.web.schemas import RunEvent, RunRecord, SimulationDraft, co
 
 
 ALLOWED_PHASES = ("build", "run", "transient", "transient-sweep", "validate", "render", "report")
+DEFAULT_PHASE_TIMEOUT_SECONDS = 900.0
 
 
 class JobManager:
@@ -82,11 +83,29 @@ class JobManager:
             bufsize=1,
         )
         assert process.stdout is not None
-        for line in process.stdout:
-            message = line.strip()
-            if message:
-                append_event(run_dir, "log", phase, message)
-        return_code = process.wait()
+        timed_out = {"value": False}
+
+        def kill_on_timeout() -> None:
+            timed_out["value"] = True
+            append_event(run_dir, "error", phase, f"Phase '{phase}' exceeded the {phase_timeout_seconds(phase):.0f} second job budget.")
+            try:
+                process.kill()
+            except OSError:
+                pass
+
+        timer = threading.Timer(phase_timeout_seconds(phase), kill_on_timeout)
+        timer.daemon = True
+        timer.start()
+        try:
+            for line in process.stdout:
+                message = line.strip()
+                if message:
+                    append_event(run_dir, "log", phase, message)
+            return_code = process.wait()
+        finally:
+            timer.cancel()
+        if timed_out["value"]:
+            raise TimeoutError(f"Phase '{phase}' exceeded the {phase_timeout_seconds(phase):.0f} second job budget.")
         if return_code != 0:
             raise RuntimeError(f"Phase '{phase}' failed with exit code {return_code}.")
 
@@ -137,7 +156,7 @@ def normalize_phases(phases: list[str]) -> list[str]:
 def build_cli_command(draft: SimulationDraft, phase: str) -> list[str]:
     command = [sys.executable, "-m", "thorium_reactor.cli", phase, draft.case_name]
     if draft.run_id:
-        command.extend(["--run-id", draft.run_id])
+        command.extend(["--run-id", draft.run_id, "--reuse-run-id"])
     if phase == "run":
         command.append("--no-solver")
     if phase == "transient" and draft.scenario:
@@ -149,6 +168,19 @@ def build_cli_command(draft: SimulationDraft, phase: str) -> list[str]:
         if draft.prefer_gpu:
             command.append("--prefer-gpu")
     return command
+
+
+def phase_timeout_seconds(phase: str) -> float:
+    configured = os.environ.get("THORIUM_REACTOR_WEB_PHASE_TIMEOUT_S")
+    if configured:
+        try:
+            value = float(configured)
+        except ValueError:
+            value = DEFAULT_PHASE_TIMEOUT_SECONDS
+        return max(value, 1.0)
+    if phase == "transient-sweep":
+        return DEFAULT_PHASE_TIMEOUT_SECONDS * 2.0
+    return DEFAULT_PHASE_TIMEOUT_SECONDS
 
 
 def write_status(run_dir: Path, payload: dict[str, Any]) -> None:

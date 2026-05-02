@@ -10,6 +10,7 @@ from thorium_reactor.capabilities import (
     BALANCE_OF_PLANT,
     MSR_PRIMARY_SYSTEM,
     THERMAL_NETWORK,
+    TRANSIENT_ANALYSIS,
     get_case_capabilities,
     validate_case_capability,
 )
@@ -43,6 +44,7 @@ from thorium_reactor.literature_models import (
     build_tritium_transport_summary,
 )
 from thorium_reactor.neutronics.openmc_compat import missing_openmc_runtime_message, openmc
+from thorium_reactor.physics_core import build_physics_core_summary
 from thorium_reactor.property_audit import build_property_audit
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot
 from thorium_reactor.runtime_context import build_runtime_context
@@ -442,6 +444,20 @@ def run_case(
                     summary["metrics"]["tritium_environmental_release_fraction"] = summary["tritium"][
                         "environmental_release_fraction"
                     ]
+    if TRANSIENT_ANALYSIS in capabilities and "bop" in summary and "flow" in summary:
+        physics_core = build_physics_core_summary(config, summary)
+        summary["physics_core"] = physics_core
+        summary["metrics"]["physics_core_k_eff"] = physics_core["neutronics"]["k_eff"]
+        summary["metrics"]["physics_core_beta_eff"] = physics_core["neutronics"]["beta_eff"]
+        summary["metrics"]["physics_core_fuel_temperature_feedback_pcm_per_c"] = physics_core["neutronics"][
+            "feedback_coefficients"
+        ]["fuel_temperature_pcm_per_c"]
+        summary["metrics"]["physics_core_precursor_transport_loss_fraction"] = physics_core["precursor_transport"][
+            "transport_loss_fraction"
+        ]
+        summary["metrics"]["physics_core_natural_circulation_fraction"] = physics_core["thermal_hydraulics"][
+            "momentum_balance"
+        ]["natural_circulation_fraction_of_nominal"]
     if built.manifest.get("benchmark_traceability"):
         summary["benchmark_traceability"] = _json_copy(built.manifest["benchmark_traceability"])
         summary["metrics"]["benchmark_traceability_score"] = built.manifest["benchmark_traceability"]["traceability_score"]
@@ -470,6 +486,8 @@ def run_case(
     bundle.write_json("runtime_context.json", runtime_context)
     bundle.write_json("property_audit.json", property_audit)
     bundle.write_json("benchmark_residuals.json", benchmark_residuals)
+    if "physics_core" in summary:
+        bundle.write_json("physics_core.json", summary["physics_core"])
     state_store = build_state_store(
         config,
         summary,

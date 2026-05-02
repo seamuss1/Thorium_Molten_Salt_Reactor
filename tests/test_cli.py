@@ -1,4 +1,9 @@
-from thorium_reactor.cli import build_parser, resolve_benchmark_runtime
+from pathlib import Path
+
+import pytest
+
+from thorium_reactor.cli import _load_or_create_bundle, build_parser, resolve_benchmark_runtime
+from thorium_reactor.paths import create_result_bundle
 
 
 def test_cli_registers_all_commands() -> None:
@@ -112,6 +117,16 @@ def test_cli_registers_runtime_benchmark_command() -> None:
     assert namespace.samples == 128
     assert namespace.backends == "python,numpy"
     assert namespace.fail_on_gpu_fallback is True
+
+
+def test_cli_explicit_run_id_creation_rejects_collision(tmp_path: Path) -> None:
+    existing = create_result_bundle(tmp_path, "example_pin", "fixed")
+
+    with pytest.raises(FileExistsError):
+        _load_or_create_bundle(tmp_path, "example_pin", "fixed")
+
+    reused = _load_or_create_bundle(tmp_path, "example_pin", "fixed", allow_existing=True)
+    assert reused.root == existing.root
 
 
 def test_cli_registers_economics_command() -> None:

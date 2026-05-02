@@ -134,10 +134,12 @@ def build_primary_system_summary(
         cleanup_turnover_days=float(fuel_cycle_summary["cleanup_turnover_days"]),
     )
 
-    required_pump_pressure_pa = pressure_budget["required_pump_pressure_pa"]
-    pump_head_m = required_pump_pressure_pa / (salt_density_kg_m3 * GRAVITY_M_S2) if salt_density_kg_m3 > 0.0 else 0.0
-    hydraulic_power_kw = required_pump_pressure_pa * volumetric_flow_m3_s / 1000.0
-    shaft_power_kw = hydraulic_power_kw / pump_efficiency if pump_efficiency > 0.0 else 0.0
+    pump_demand = _build_pump_demand_summary(
+        pressure_budget["required_pump_pressure_pa"],
+        salt_density_kg_m3=salt_density_kg_m3,
+        volumetric_flow_m3_s=volumetric_flow_m3_s,
+        pump_efficiency=pump_efficiency,
+    )
 
     summary = {
         "model": "reduced_order_primary_system",
@@ -163,11 +165,13 @@ def build_primary_system_summary(
             "hydrostatic_pressure_change_kpa": _round_float(pressure_budget["hydrostatic_pressure_change_pa"] / 1000.0),
             "buoyancy_driving_pressure_kpa": _round_float(pressure_budget["buoyancy_driving_pressure_pa"] / 1000.0),
             "net_resistive_pressure_kpa": _round_float(pressure_budget["net_resistive_pressure_pa"] / 1000.0),
-            "required_pump_pressure_kpa": _round_float(required_pump_pressure_pa / 1000.0),
-            "total_pressure_drop_kpa": _round_float(required_pump_pressure_pa / 1000.0),
-            "pump_head_m": _round_float(pump_head_m),
-            "pump_hydraulic_power_kw": _round_float(hydraulic_power_kw),
-            "pump_shaft_power_kw": _round_float(shaft_power_kw),
+            "net_required_pump_pressure_kpa": _round_float(pump_demand["net_required_pressure_pa"] / 1000.0),
+            "required_pump_pressure_kpa": _round_float(pump_demand["pump_demand_pressure_pa"] / 1000.0),
+            "total_pressure_drop_kpa": _round_float(pump_demand["pump_demand_pressure_pa"] / 1000.0),
+            "natural_circulation_margin_kpa": _round_float(pump_demand["natural_circulation_margin_pa"] / 1000.0),
+            "pump_head_m": _round_float(pump_demand["pump_head_m"]),
+            "pump_hydraulic_power_kw": _round_float(pump_demand["hydraulic_power_kw"]),
+            "pump_shaft_power_kw": _round_float(pump_demand["shaft_power_kw"]),
             "pump_efficiency": _round_float(pump_efficiency),
             "thermal_expansion_head_m": _round_float(pressure_budget["thermal_expansion_head_m"]),
             "representative_elevation_span_m": _round_float(pressure_budget["representative_elevation_span_m"]),
@@ -182,7 +186,7 @@ def build_primary_system_summary(
         "checks": _build_primary_system_checks(
             reduced_order_flow,
             segment_summary["max_reynolds_number"],
-            pump_head_m,
+            pump_demand["pump_head_m"],
             heat_exchanger_summary,
             thermal_profile,
             inventory_summary,
@@ -671,6 +675,32 @@ def _build_pressure_budget(
         "hot_leg_rise_m": hot_leg_rise_m,
         "cold_leg_drop_m": cold_leg_drop_m,
         "buoyancy_geometry_complete": buoyancy_geometry_complete,
+    }
+
+
+def _build_pump_demand_summary(
+    net_required_pressure_pa: float,
+    *,
+    salt_density_kg_m3: float,
+    volumetric_flow_m3_s: float,
+    pump_efficiency: float,
+) -> dict[str, float]:
+    pump_demand_pressure_pa = max(float(net_required_pressure_pa), 0.0)
+    natural_circulation_margin_pa = max(-float(net_required_pressure_pa), 0.0)
+    pump_head_m = (
+        pump_demand_pressure_pa / (salt_density_kg_m3 * GRAVITY_M_S2)
+        if salt_density_kg_m3 > 0.0
+        else 0.0
+    )
+    hydraulic_power_kw = pump_demand_pressure_pa * max(volumetric_flow_m3_s, 0.0) / 1000.0
+    shaft_power_kw = hydraulic_power_kw / pump_efficiency if pump_efficiency > 0.0 else 0.0
+    return {
+        "net_required_pressure_pa": float(net_required_pressure_pa),
+        "pump_demand_pressure_pa": pump_demand_pressure_pa,
+        "natural_circulation_margin_pa": natural_circulation_margin_pa,
+        "pump_head_m": pump_head_m,
+        "hydraulic_power_kw": hydraulic_power_kw,
+        "shaft_power_kw": shaft_power_kw,
     }
 
 
