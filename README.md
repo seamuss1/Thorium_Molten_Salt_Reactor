@@ -62,7 +62,9 @@ Start it on Windows with:
 .\scripts\Run-Web.cmd
 ```
 
-The main views are Dashboard, Cases, Builder, Runs, Science, and 3D. Browser-launched runs use bundle-local snapshots under `results/<case>/<run_id>/` and leave canonical case YAML files untouched. The v1 browser command allowlist is deliberately limited to safe workflow phases: `build`, `run --no-solver`, `transient`, `transient-sweep`, `validate`, `render`, and `report`.
+The main views are Dashboard, Cases, Builder, Runs, Science, 3D, and Admin for configured admins. Browser-launched runs use bundle-local snapshots under `results/<case>/<run_id>/` and leave canonical case YAML files untouched. The v1 browser command allowlist is deliberately limited to safe workflow phases: `build`, `run --no-solver`, `transient`, `transient-sweep`, `validate`, `render`, and `report`.
+
+When published through Cloudflare Access, keep `THORIUM_REACTOR_ACCESS_REQUIRED=1` so simulation starts require an authenticated Access email header. `seamusdgallagher@gmail.com` and comma-separated `THORIUM_REACTOR_ADMIN_EMAILS` entries can start without limit. Other authenticated users are limited to `THORIUM_REACTOR_RATE_LIMIT_PER_DAY`, defaulting to one start per day, and admins can reset that counter in the Admin view.
 
 The Science view automatically indexes `README.md` and `docs/*.md`. Markdown equations written with `$...$` or `$$...$$` render with KaTeX in both science documents and generated reports. See [docs/browser-front-end.md](docs/browser-front-end.md) for interface details and development notes.
 

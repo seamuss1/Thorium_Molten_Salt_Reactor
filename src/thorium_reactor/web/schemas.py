@@ -84,6 +84,30 @@ class SimulationDraft(BaseModel):
     prefer_gpu: bool = True
 
 
+class AuthSession(BaseModel):
+    email: str
+    is_admin: bool
+    admin_emails: list[str] = Field(default_factory=list)
+    daily_run_limit: int | None = None
+    runs_started_today: int
+    runs_remaining_today: int | None = None
+    rate_limit_date: str
+    resets_at: str | None = None
+    can_start_run: bool
+
+
+class RateLimitRecord(BaseModel):
+    email: str
+    date: str
+    count: int
+    limit: int
+    remaining: int
+    last_started_at: str | None = None
+    last_reset_at: str | None = None
+    reset_by: str | None = None
+    resets_at: str | None = None
+
+
 class DraftValidationRequest(BaseModel):
     draft_yaml: str | None = None
     patch: dict[str, Any] = Field(default_factory=dict)

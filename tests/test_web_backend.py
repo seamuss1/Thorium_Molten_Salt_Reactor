@@ -10,6 +10,11 @@ from thorium_reactor.web.app import create_app
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+ADMIN_HEADERS = {"cf-access-authenticated-user-email": "seamusdgallagher@gmail.com"}
+
+
+def access_headers(email: str) -> dict[str, str]:
+    return {"cf-access-authenticated-user-email": email}
 
 
 def test_web_case_discovery_and_docs() -> None:
@@ -74,6 +79,7 @@ def test_web_run_rejects_unsafe_draft_case_before_creating_results(monkeypatch) 
 
     response = client.post(
         "/api/runs",
+        headers=ADMIN_HEADERS,
         json={
             "case_name": f"../{escape_name}",
             "run_id": f"unsafe-{uuid.uuid4().hex}",
@@ -109,6 +115,7 @@ def test_web_fake_run_records_status_and_streams_events(monkeypatch) -> None:
     try:
         response = client.post(
             "/api/runs",
+            headers=ADMIN_HEADERS,
             json={
                 "case_name": "example_pin",
                 "run_id": run_id,
@@ -139,3 +146,85 @@ def test_web_fake_run_records_status_and_streams_events(monkeypatch) -> None:
         assert "Run completed" in body
     finally:
         shutil.rmtree(run_root, ignore_errors=True)
+
+
+def test_web_requires_access_identity_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("THORIUM_REACTOR_ACCESS_REQUIRED", "1")
+    monkeypatch.setenv("THORIUM_REACTOR_WEB_FAKE_JOBS", "1")
+    client = TestClient(create_app(REPO_ROOT))
+
+    response = client.post(
+        "/api/runs",
+        json={
+            "case_name": "example_pin",
+            "run_id": f"missing-identity-{uuid.uuid4().hex}",
+            "phases": ["run"],
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_web_rate_limits_non_admins_and_admin_can_reset(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("THORIUM_REACTOR_WEB_FAKE_JOBS", "1")
+    monkeypatch.setenv("THORIUM_REACTOR_RATE_LIMIT_PATH", str(tmp_path / "limits.json"))
+    client = TestClient(create_app(REPO_ROOT))
+    email = "guest@example.com"
+    run_ids = [f"limited-{uuid.uuid4().hex}" for _ in range(3)]
+    run_roots = [REPO_ROOT / "results" / "example_pin" / run_id for run_id in run_ids]
+
+    try:
+        first = client.post(
+            "/api/runs",
+            headers=access_headers(email),
+            json={"case_name": "example_pin", "run_id": run_ids[0], "phases": ["run"]},
+        )
+        assert first.status_code == 202
+
+        limited = client.post(
+            "/api/runs",
+            headers=access_headers(email),
+            json={"case_name": "example_pin", "run_id": run_ids[1], "phases": ["run"]},
+        )
+        assert limited.status_code == 429
+
+        reset = client.post(
+            f"/api/admin/rate-limits/{email}/reset",
+            headers=ADMIN_HEADERS,
+        )
+        assert reset.status_code == 200
+        assert reset.json()["remaining"] == 1
+
+        after_reset = client.post(
+            "/api/runs",
+            headers=access_headers(email),
+            json={"case_name": "example_pin", "run_id": run_ids[2], "phases": ["run"]},
+        )
+        assert after_reset.status_code == 202
+    finally:
+        for run_root in run_roots:
+            shutil.rmtree(run_root, ignore_errors=True)
+
+
+def test_web_admins_bypass_daily_run_limit(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("THORIUM_REACTOR_WEB_FAKE_JOBS", "1")
+    monkeypatch.setenv("THORIUM_REACTOR_RATE_LIMIT_PATH", str(tmp_path / "limits.json"))
+    client = TestClient(create_app(REPO_ROOT))
+    run_ids = [f"admin-unlimited-{uuid.uuid4().hex}" for _ in range(2)]
+    run_roots = [REPO_ROOT / "results" / "example_pin" / run_id for run_id in run_ids]
+
+    try:
+        for run_id in run_ids:
+            response = client.post(
+                "/api/runs",
+                headers=ADMIN_HEADERS,
+                json={"case_name": "example_pin", "run_id": run_id, "phases": ["run"]},
+            )
+            assert response.status_code == 202
+
+        session = client.get("/api/me", headers=ADMIN_HEADERS)
+        assert session.status_code == 200
+        assert session.json()["runs_remaining_today"] is None
+    finally:
+        for run_root in run_roots:
+            shutil.rmtree(run_root, ignore_errors=True)

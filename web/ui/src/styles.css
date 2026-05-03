@@ -117,6 +117,7 @@ select {
 .nav-list svg,
 .sidebar-note svg,
 .section-title svg,
+.draft-note svg,
 .primary-action svg,
 .secondary-action svg {
   width: 18px;
@@ -685,6 +686,35 @@ mark,
   color: #972514;
 }
 
+.admin-panel {
+  margin-top: 18px;
+}
+
+.admin-table {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) 110px 90px 90px minmax(150px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  overflow-wrap: anywhere;
+}
+
+.admin-row.header {
+  background: #e8f1ef;
+  color: #415058;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .timeline {
   display: flex;
   flex-wrap: wrap;
@@ -1083,7 +1113,8 @@ mark,
   .input-grid,
   .phase-grid,
   .media-strip,
-  .fact-list {
+  .fact-list,
+  .admin-row {
     grid-template-columns: 1fr;
   }
 

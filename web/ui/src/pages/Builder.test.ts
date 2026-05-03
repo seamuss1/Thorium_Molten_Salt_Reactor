@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPatch } from "./Builder";
+import { buildPatch, inputStepForParameter } from "./Builder";
 
 describe("buildPatch", () => {
   it("creates nested objects and arrays from editable parameter paths", () => {
@@ -21,5 +21,10 @@ describe("buildPatch", () => {
         hot_leg_temp_c: 705
       }
     });
+  });
+
+  it("uses browser-safe numeric steps for editable fields", () => {
+    expect(inputStepForParameter({ kind: "number", step: 1 })).toBe("any");
+    expect(inputStepForParameter({ kind: "integer", step: 1000 })).toBe(1);
   });
 });

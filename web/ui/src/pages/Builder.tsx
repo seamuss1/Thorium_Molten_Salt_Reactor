@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { CheckCircle2, PlaySquare, SlidersHorizontal } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2, PlaySquare, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { api } from "../api";
 import type { EditableParameter, SimulationDraft } from "../types";
 
@@ -17,6 +17,8 @@ const phaseOptions = [
 export function Builder() {
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
+  const session = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
   const cases = useQuery({ queryKey: ["cases"], queryFn: api.cases });
   const initialCase = new URLSearchParams(location.search).get("case");
   const [caseName, setCaseName] = useState(initialCase ?? "");
@@ -50,8 +52,18 @@ export function Builder() {
 
   const createRun = useMutation({
     mutationFn: api.createRun,
-    onSuccess: (run) => navigate(`/runs/${run.case_name}/${run.run_id}`)
+    onSuccess: (run) => {
+      queryClient.invalidateQueries({ queryKey: ["me"] });
+      queryClient.invalidateQueries({ queryKey: ["rate-limits"] });
+      navigate(`/runs/${run.case_name}/${run.run_id}`);
+    }
   });
+  const quotaLabel = !session.data
+    ? "Checking simulation access"
+    : session.data.is_admin
+      ? "Unlimited simulation starts"
+      : `${session.data.runs_remaining_today ?? 0} of ${session.data.daily_run_limit ?? 1} starts remaining today`;
+  const startDisabled = createRun.isPending || !caseName || !session.data || session.data.can_start_run === false;
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -126,10 +138,14 @@ export function Builder() {
               <span>Use GPU for sweep</span>
             </label>
           </div>
-          <button className="primary-action wide" type="submit" disabled={createRun.isPending || !caseName}>
+          <button className="primary-action wide" type="submit" disabled={startDisabled}>
             <PlaySquare aria-hidden="true" />
             <span>{createRun.isPending ? "Starting..." : "Start run"}</span>
           </button>
+          <div className={session.data?.can_start_run === false ? "error-box" : "draft-note"}>
+            <ShieldCheck aria-hidden="true" />
+            <span>{quotaLabel}</span>
+          </div>
           {createRun.error && <div className="error-box">{createRun.error.message}</div>}
         </section>
         <section className="builder-parameters">
@@ -148,7 +164,7 @@ export function Builder() {
                       type="number"
                       min={parameter.minimum ?? undefined}
                       max={parameter.maximum ?? undefined}
-                      step={parameter.step ?? "any"}
+                      step={inputStepForParameter(parameter)}
                       value={String(values[parameter.path] ?? parameter.value ?? "")}
                       onChange={(event) => setValues((current) => ({ ...current, [parameter.path]: Number(event.target.value) }))}
                     />
@@ -196,4 +212,8 @@ export function buildPatch(values: Record<string, unknown>): Record<string, unkn
     });
   });
   return root;
+}
+
+export function inputStepForParameter(parameter: Pick<EditableParameter, "kind" | "step">): number | "any" {
+  return parameter.kind === "integer" ? 1 : "any";
 }

@@ -4,13 +4,15 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from thorium_reactor.web.jobs import JobManager, is_terminal
+from thorium_reactor.web.permissions import AccessController, AccessUser
 from thorium_reactor.web.repository import WebRepository
 from thorium_reactor.web.schemas import (
+    AuthSession,
     CaseDetail,
     CaseSummary,
     DocRecord,
@@ -18,6 +20,7 @@ from thorium_reactor.web.schemas import (
     DraftValidationRequest,
     DraftValidationResponse,
     HealthResponse,
+    RateLimitRecord,
     RunRecord,
     SimulationDraft,
     model_to_dict,
@@ -36,10 +39,30 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     )
     app.state.repository = repository
     app.state.jobs = jobs
+    app.state.access = AccessController(repository.repo_root)
+
+    def access() -> AccessController:
+        return app.state.access
+
+    def current_user(request: Request, controller: AccessController = Depends(access)) -> AccessUser:
+        return controller.user_from_request(request)
+
+    def current_admin(
+        user: AccessUser = Depends(current_user),
+        controller: AccessController = Depends(access),
+    ) -> AccessUser:
+        return controller.require_admin(user)
 
     @app.get("/api/health", response_model=HealthResponse)
     def health() -> HealthResponse:
         return HealthResponse(status="ok", repo_root=str(repository.repo_root))
+
+    @app.get("/api/me", response_model=AuthSession)
+    def get_me(
+        user: AccessUser = Depends(current_user),
+        controller: AccessController = Depends(access),
+    ) -> AuthSession:
+        return controller.session_for(user)
 
     @app.get("/api/cases", response_model=list[CaseSummary])
     def list_cases() -> list[CaseSummary]:
@@ -57,10 +80,17 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         return repository.validate_draft(case_name, draft_yaml=request.draft_yaml, patch=request.patch)
 
     @app.post("/api/runs", response_model=RunRecord, status_code=202)
-    def create_run(request: SimulationDraft) -> RunRecord:
+    def create_run(
+        draft: SimulationDraft,
+        user: AccessUser = Depends(current_user),
+        controller: AccessController = Depends(access),
+    ) -> RunRecord:
+        claimed = controller.claim_run_start(user)
         try:
-            return jobs.submit(request)
+            return jobs.submit(draft)
         except Exception as exc:  # noqa: BLE001 - converted into browser-safe feedback.
+            if claimed is not None:
+                controller.release_run_start(user)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/runs", response_model=list[RunRecord])
@@ -116,6 +146,21 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
             return repository.get_doc(slug)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/admin/rate-limits", response_model=list[RateLimitRecord])
+    def list_rate_limits(
+        _admin: AccessUser = Depends(current_admin),
+        controller: AccessController = Depends(access),
+    ) -> list[RateLimitRecord]:
+        return controller.store.list_records()
+
+    @app.post("/api/admin/rate-limits/{email:path}/reset", response_model=RateLimitRecord)
+    def reset_rate_limit(
+        email: str,
+        admin: AccessUser = Depends(current_admin),
+        controller: AccessController = Depends(access),
+    ) -> RateLimitRecord:
+        return controller.store.reset(email, reset_by=admin.email)
 
     dist_dir = repository.repo_root / "web" / "ui" / "dist"
     if dist_dir.exists():

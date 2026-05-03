@@ -1,7 +1,8 @@
 param(
     [string]$HostName = "0.0.0.0",
     [int]$Port = 18488,
-    [switch]$SkipUiBuild
+    [switch]$SkipUiBuild,
+    [switch]$RequireAccessIdentity
 )
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -34,9 +35,17 @@ if ($Port -ne 18488) {
     $portArgs = @("-p", "${Port}:${Port}")
 }
 
+$accessEnvArgs = @()
+if (-not $RequireAccessIdentity) {
+    $accessEnvArgs = @(
+        "-e", "THORIUM_REACTOR_ACCESS_REQUIRED=0",
+        "-e", "THORIUM_REACTOR_LOCAL_DEV_EMAIL=seamusdgallagher@gmail.com"
+    )
+}
+
 Push-Location $repoRoot
 try {
-    & docker compose run --rm --build @portArgs web uvicorn thorium_reactor.web.app:create_app --factory --host $HostName --port $Port
+    & docker compose run --rm --build @portArgs @accessEnvArgs web uvicorn thorium_reactor.web.app:create_app --factory --host $HostName --port $Port
     exit $LASTEXITCODE
 }
 finally {

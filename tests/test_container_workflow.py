@@ -20,6 +20,15 @@ def test_canonical_docker_compose_defines_required_services() -> None:
     assert services["moltres"]["environment"]["THORIUM_REACTOR_RUNTIME_IMAGE"] == "thorium-reactor-moltres:latest"
 
 
+def test_app_runner_image_installs_xpu_backend_stack() -> None:
+    dockerfile = (REPO_ROOT / "docker" / "app-runner.Dockerfile").read_text(encoding="utf-8")
+
+    assert "https://download.pytorch.org/whl/xpu" in dockerfile
+    assert "torch==${PYTORCH_XPU_VERSION}" in dockerfile
+    assert "PYTORCH_ENABLE_XPU_FALLBACK=0" in dockerfile
+    assert "SYCL_CACHE_PERSISTENT=1" in dockerfile
+
+
 def test_windows_wrappers_delegate_to_docker_compose() -> None:
     run_reactor = (REPO_ROOT / "scripts" / "Run-Reactor.ps1").read_text(encoding="utf-8")
     run_tests = (REPO_ROOT / "scripts" / "Run-Tests.ps1").read_text(encoding="utf-8")

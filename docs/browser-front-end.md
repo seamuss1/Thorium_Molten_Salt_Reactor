@@ -26,6 +26,14 @@ The wrapper builds `web/ui/dist` when it is missing. If the UI build is already 
 
 During focused UI development, Vite can still be run from `web/ui` for hot reload and proxies `/api` to `http://localhost:18488`. That is a development convenience only; the documented app runtime is the one-port FastAPI service.
 
+## Access And Rate Limits
+
+The deployed Docker `web` service defaults `THORIUM_REACTOR_ACCESS_REQUIRED=1`, so `/api/runs` requires the Cloudflare Access authenticated email header. `seamusdgallagher@gmail.com` is always an unlimited-start admin, and additional admins are read from comma-separated `THORIUM_REACTOR_ADMIN_EMAILS`.
+
+Non-admin authenticated users are limited by `THORIUM_REACTOR_RATE_LIMIT_PER_DAY`, which defaults to one simulation start per day. The Admin view lists limited users and can reset a user's daily counter. Rate state is stored in `.tmp/web-rate-limits.json` unless `THORIUM_REACTOR_RATE_LIMIT_PATH` points elsewhere.
+
+The `Run-Web` wrapper keeps local development convenient by disabling the Access-header requirement and using `seamusdgallagher@gmail.com` as the local dev identity. Pass `-RequireAccessIdentity` when testing the deployed identity gate locally.
+
 ## Run Safety
 
 Browser-launched runs use bundle-local snapshots. The backend writes `case_snapshot.yaml`, optional `benchmark_snapshot.yaml`, `provenance.json`, `job_status.json`, and `job_events.ndjson` into `results/<case>/<run_id>/` before invoking the CLI. Canonical files under `configs/cases` are not modified.

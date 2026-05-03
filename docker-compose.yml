@@ -24,14 +24,23 @@ services:
     volumes:
       - ./:/workspace
     ports:
-      - "18488:18488"
+      - "127.0.0.1:18488:18488"
     environment:
       PYTHONPATH: /workspace/src
       THORIUM_REACTOR_RUNTIME_SERVICE: web
       THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-web:latest
       THORIUM_REACTOR_TOOL_RUNTIME: python
       THORIUM_REACTOR_TOOL_VERSION: python-container
+      THORIUM_REACTOR_ACCESS_REQUIRED: "${THORIUM_REACTOR_ACCESS_REQUIRED:-1}"
+      THORIUM_REACTOR_ADMIN_EMAILS: "${THORIUM_REACTOR_ADMIN_EMAILS:-seamusdgallagher@gmail.com}"
+      THORIUM_REACTOR_RATE_LIMIT_PER_DAY: "${THORIUM_REACTOR_RATE_LIMIT_PER_DAY:-1}"
+      THORIUM_REACTOR_RATE_LIMIT_TIMEZONE: "${THORIUM_REACTOR_RATE_LIMIT_TIMEZONE:-America/New_York}"
     command: ["uvicorn", "thorium_reactor.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "18488"]
+    networks:
+      default:
+      thorium_edge:
+        aliases:
+          - thorium-web
 
   openmc:
     build:
@@ -96,3 +105,8 @@ services:
       THORIUM_REACTOR_TOOL_RUNTIME: moltres
       THORIUM_REACTOR_TOOL_VERSION: moltres-container
     command: ["python", "-m", "thorium_reactor.cli", "--help"]
+
+networks:
+  default:
+  thorium_edge:
+    name: thorium_edge

@@ -83,3 +83,27 @@ export interface SimulationDraft {
   sweep_seed: number;
   prefer_gpu: boolean;
 }
+
+export interface AuthSession {
+  email: string;
+  is_admin: boolean;
+  admin_emails: string[];
+  daily_run_limit?: number | null;
+  runs_started_today: number;
+  runs_remaining_today?: number | null;
+  rate_limit_date: string;
+  resets_at?: string | null;
+  can_start_run: boolean;
+}
+
+export interface RateLimitRecord {
+  email: string;
+  date: string;
+  count: number;
+  limit: number;
+  remaining: number;
+  last_started_at?: string | null;
+  last_reset_at?: string | null;
+  reset_by?: string | null;
+  resets_at?: string | null;
+}
