@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, ListTree, Sigma } from "lucide-react";
 import { api } from "../api";
+import { ExpandableText } from "../components/ExpandableText";
 import { Markdown } from "../components/Markdown";
 
 const formulaCards = [
@@ -41,8 +42,8 @@ export function Docs() {
         <div className="doc-links">
           {docs.data?.map((item) => (
             <Link key={item.slug} className={item.slug === slug ? "selected" : ""} to={`/docs/${item.slug}`}>
-              <strong>{item.title}</strong>
-              <small>{item.path}</small>
+              <span className="list-title">{item.title}</span>
+              <small className="list-meta">{item.path}</small>
             </Link>
           ))}
         </div>
@@ -52,8 +53,12 @@ export function Docs() {
           <>
             <header className="page-header compact science-header">
               <div>
-                <p className="eyebrow">{doc.data.path}</p>
-                <h1>{doc.data.title}</h1>
+                <p className="eyebrow">
+                  <ExpandableText lines={1}>{doc.data.path}</ExpandableText>
+                </p>
+                <h1>
+                  <ExpandableText lines={2}>{doc.data.title}</ExpandableText>
+                </h1>
                 <div className="science-meta">
                   <span>{doc.data.headings.length} sections</span>
                   <span>Repository note</span>
@@ -70,7 +75,9 @@ export function Docs() {
                     <h2>Outline</h2>
                   </div>
                   {headings.map((heading) => (
-                    <span key={heading}>{heading}</span>
+                    <ExpandableText className="toc-item" key={heading} lines={1}>
+                      {heading}
+                    </ExpandableText>
                   ))}
                 </section>
                 <section className="formula-stack">

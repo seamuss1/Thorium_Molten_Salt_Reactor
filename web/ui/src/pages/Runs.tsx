@@ -3,8 +3,10 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, CheckCircle2, Clock, XCircle } from "lucide-react";
 import { api } from "../api";
+import { ExpandableText } from "../components/ExpandableText";
 import { MetricChart } from "../components/MetricChart";
 import { RunArtifacts } from "../components/RunArtifacts";
+import { hasViewableGeometry } from "../geometryArtifacts";
 
 export function Runs() {
   const navigate = useNavigate();
@@ -47,8 +49,12 @@ export function Runs() {
               className={run.case_name === selected?.caseName && run.run_id === selected.runId ? "selected" : ""}
               onClick={() => navigate(`/runs/${run.case_name}/${run.run_id}`)}
             >
-              <strong>{run.case_name}</strong>
-              <span>{run.run_id}</span>
+              <ExpandableText className="list-title" insideInteractive lines={1}>
+                {run.case_name}
+              </ExpandableText>
+              <ExpandableText className="list-meta" insideInteractive lines={1}>
+                {run.run_id}
+              </ExpandableText>
               <mark>{run.status}</mark>
             </button>
           ))}
@@ -60,11 +66,15 @@ export function Runs() {
             <header className="page-header compact">
               <div>
                 <p className="eyebrow">{detail.data.case_name}</p>
-                <h1>{detail.data.run_id}</h1>
+                <h1>
+                  <ExpandableText lines={2}>{detail.data.run_id}</ExpandableText>
+                </h1>
               </div>
-              <Link className="secondary-action" to={`/viewer/${detail.data.case_name}/${detail.data.run_id}`}>
-                Open 3D
-              </Link>
+              {hasViewableGeometry(detail.data) && (
+                <Link className="secondary-action" to={`/viewer/${detail.data.case_name}/${detail.data.run_id}`}>
+                  Open 3D
+                </Link>
+              )}
             </header>
             <div className="timeline">
               {(detail.data.command_plan.length ? detail.data.command_plan : ["build", "run", "validate", "report"]).map((phase) => (
@@ -77,7 +87,7 @@ export function Runs() {
             {detail.data.latest_event && (
               <div className="event-banner">
                 <Clock aria-hidden="true" />
-                <span>{detail.data.latest_event.message}</span>
+                <ExpandableText lines={2}>{detail.data.latest_event.message}</ExpandableText>
               </div>
             )}
             <section className="two-column">
@@ -89,11 +99,15 @@ export function Runs() {
                 <dl className="fact-list">
                   <div>
                     <dt>Status</dt>
-                    <dd>{detail.data.status}</dd>
+                    <dd>
+                      <ExpandableText lines={1}>{detail.data.status}</ExpandableText>
+                    </dd>
                   </div>
                   <div>
                     <dt>Phase</dt>
-                    <dd>{detail.data.phase ?? "n/a"}</dd>
+                    <dd>
+                      <ExpandableText lines={1}>{detail.data.phase ?? "n/a"}</ExpandableText>
+                    </dd>
                   </div>
                   <div>
                     <dt>Artifacts</dt>
@@ -101,7 +115,9 @@ export function Runs() {
                   </div>
                   <div>
                     <dt>Capabilities</dt>
-                    <dd>{detail.data.capabilities.join(", ") || "n/a"}</dd>
+                    <dd>
+                      <ExpandableText lines={2}>{detail.data.capabilities.join(", ") || "n/a"}</ExpandableText>
+                    </dd>
                   </div>
                 </dl>
               </div>

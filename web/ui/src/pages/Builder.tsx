@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, PlaySquare, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { api } from "../api";
+import { ExpandableText } from "../components/ExpandableText";
 import type { EditableParameter, SimulationDraft } from "../types";
 
 const phaseOptions = [
@@ -159,7 +160,9 @@ export function Builder() {
               <div className="input-grid">
                 {parameters.map((parameter) => (
                   <label key={parameter.path} className="field">
-                    <span>{parameter.label}</span>
+                    <ExpandableText className="field-title" insideInteractive lines={2}>
+                      {parameter.label}
+                    </ExpandableText>
                     <input
                       type="number"
                       min={parameter.minimum ?? undefined}
@@ -168,7 +171,9 @@ export function Builder() {
                       value={String(values[parameter.path] ?? parameter.value ?? "")}
                       onChange={(event) => setValues((current) => ({ ...current, [parameter.path]: Number(event.target.value) }))}
                     />
-                    <small>{parameter.unit ?? parameter.path}</small>
+                    <ExpandableText className="field-hint" insideInteractive lines={1}>
+                      {parameter.unit ?? parameter.path}
+                    </ExpandableText>
                   </label>
                 ))}
               </div>

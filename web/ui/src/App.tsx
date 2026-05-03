@@ -1,8 +1,9 @@
-import { Suspense, lazy } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { Suspense, lazy, useEffect, useState } from "react";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Atom, Box, BookOpen, Boxes, FlaskConical, Gauge, PlaySquare, ShieldCheck } from "lucide-react";
+import { Activity, Atom, Box, BookOpen, Boxes, FlaskConical, Gauge, Menu, PlaySquare, ShieldCheck, X } from "lucide-react";
 import { api } from "./api";
+import { ExpandableText } from "./components/ExpandableText";
 
 const Dashboard = lazy(() => import("./pages/Dashboard").then((module) => ({ default: module.Dashboard })));
 const Cases = lazy(() => import("./pages/Cases").then((module) => ({ default: module.Cases })));
@@ -24,22 +25,44 @@ const navigation = [
 export function App() {
   const session = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
   const items = session.data?.is_admin ? [...navigation, { to: "/admin", label: "Admin", icon: ShieldCheck }] : navigation;
+  const location = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [location.pathname]);
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className={`sidebar${menuOpen ? " menu-open" : ""}`}>
         <div className="brand">
           <Boxes aria-hidden="true" />
           <div>
             <strong>Thorium Lab</strong>
             <span>MSR simulation</span>
           </div>
+          <button
+            type="button"
+            className="menu-toggle"
+            aria-expanded={menuOpen}
+            aria-controls="primary-navigation"
+            aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            {menuOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
+          </button>
         </div>
-        <nav className="nav-list" aria-label="Primary navigation">
+        <nav id="primary-navigation" className="nav-list" aria-label="Primary navigation">
           {items.map((item) => {
             const Icon = item.icon;
             return (
-              <NavLink key={item.to} to={item.to} end={item.to === "/"} className={({ isActive }) => (isActive ? "active" : "")}>
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.to === "/"}
+                className={({ isActive }) => (isActive ? "active" : "")}
+                aria-label={item.label}
+              >
                 <Icon aria-hidden="true" />
                 <span>{item.label}</span>
               </NavLink>
@@ -48,7 +71,7 @@ export function App() {
         </nav>
         <div className="sidebar-note">
           <FlaskConical aria-hidden="true" />
-          <span>{session.data?.email ?? "Draft runs write isolated bundle snapshots."}</span>
+          <ExpandableText lines={2}>{session.data?.email ?? "Draft runs write isolated bundle snapshots."}</ExpandableText>
         </div>
       </aside>
       <main className="main-panel">

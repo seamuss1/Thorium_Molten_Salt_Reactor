@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, Atom, CheckCircle2, Clock, FileText, PlaySquare } from "lucide-react";
 import { api } from "../api";
+import { ExpandableText } from "../components/ExpandableText";
 import { MetricChart } from "../components/MetricChart";
 
 export function Dashboard() {
@@ -24,7 +25,9 @@ export function Dashboard() {
       <header className="page-header">
         <div>
           <p className="eyebrow">Shared lab server</p>
-          <h1>Thorium molten-salt reactor simulation</h1>
+          <h1>
+            <ExpandableText lines={2}>Thorium molten-salt reactor simulation</ExpandableText>
+          </h1>
         </div>
         <Link className="primary-action" to="/builder">
           <PlaySquare aria-hidden="true" />
@@ -34,7 +37,9 @@ export function Dashboard() {
 
       <section className="hero-band">
         <div className="hero-copy">
-          <h2>{String(latest?.reactor?.name ?? latest?.case_name ?? "Simulation workspace")}</h2>
+          <h2>
+            <ExpandableText lines={2}>{String(latest?.reactor?.name ?? latest?.case_name ?? "Simulation workspace")}</ExpandableText>
+          </h2>
           <div className="stat-row">
             <Stat icon={Atom} label="Cases" value={caseCount} />
             <Stat icon={Activity} label="Runs" value={runCount} />
@@ -60,8 +65,12 @@ export function Dashboard() {
           {latest ? (
             <>
               <div className="run-line">
-                <strong>{latest.case_name}</strong>
-                <span>{latest.run_id}</span>
+                <ExpandableText className="run-title" lines={1}>
+                  {latest.case_name}
+                </ExpandableText>
+                <ExpandableText className="run-meta" lines={1}>
+                  {latest.run_id}
+                </ExpandableText>
                 <mark>{latest.status}</mark>
               </div>
               <MetricChart metrics={latest.metrics} title="Latest run metrics" />
@@ -81,8 +90,8 @@ export function Dashboard() {
           <div className="doc-links">
             {docs.data?.slice(0, 6).map((doc) => (
               <Link key={doc.slug} to={`/docs/${doc.slug}`}>
-                <strong>{doc.title}</strong>
-                <small>{doc.path}</small>
+                <span className="list-title">{doc.title}</span>
+                <small className="list-meta">{doc.path}</small>
               </Link>
             ))}
           </div>

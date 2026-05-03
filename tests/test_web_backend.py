@@ -70,6 +70,30 @@ def test_web_artifact_serving_rejects_path_traversal() -> None:
         shutil.rmtree(bundle.root, ignore_errors=True)
 
 
+def test_web_run_summaries_only_advertise_viewable_geometry() -> None:
+    client = TestClient(create_app(REPO_ROOT))
+    run_id = f"geometry-summary-{uuid.uuid4().hex}"
+    bundle = create_result_bundle(REPO_ROOT, "example_pin", run_id)
+    try:
+        exports_dir = bundle.root / "geometry" / "exports"
+        exports_dir.mkdir(parents=True, exist_ok=True)
+        (exports_dir / "core.gltf").write_text('{"asset":{"version":"2.0"},"scenes":[]}', encoding="utf-8")
+        (exports_dir / "core.obj").write_text("o core\n", encoding="utf-8")
+        (exports_dir / "core.png").write_bytes(b"not really a png")
+        (bundle.root / "report.md").write_text("# Geometry summary test\n", encoding="utf-8")
+
+        listed = client.get("/api/runs")
+        assert listed.status_code == 200
+        listed_run = next(item for item in listed.json() if item["case_name"] == "example_pin" and item["run_id"] == run_id)
+        assert [artifact["label"] for artifact in listed_run["artifacts"]] == ["core.gltf"]
+
+        detail = client.get(f"/api/runs/example_pin/{run_id}")
+        detail_labels = {artifact["label"] for artifact in detail.json()["artifacts"]}
+        assert {"core.gltf", "core.obj", "core.png", "report.md"}.issubset(detail_labels)
+    finally:
+        shutil.rmtree(bundle.root, ignore_errors=True)
+
+
 def test_web_run_rejects_unsafe_draft_case_before_creating_results(monkeypatch) -> None:
     monkeypatch.setenv("THORIUM_REACTOR_WEB_FAKE_JOBS", "1")
     client = TestClient(create_app(REPO_ROOT))
@@ -163,6 +187,17 @@ def test_web_requires_access_identity_when_configured(monkeypatch) -> None:
     )
 
     assert response.status_code == 401
+
+
+def test_web_allows_localhost_dev_identity_when_access_is_required(monkeypatch) -> None:
+    monkeypatch.setenv("THORIUM_REACTOR_ACCESS_REQUIRED", "1")
+    client = TestClient(create_app(REPO_ROOT), base_url="http://127.0.0.1:18488")
+
+    response = client.get("/api/me")
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "seamusdgallagher@gmail.com"
+    assert response.json()["is_admin"] is True
 
 
 def test_web_rate_limits_non_admins_and_admin_can_reset(monkeypatch, tmp_path: Path) -> None:

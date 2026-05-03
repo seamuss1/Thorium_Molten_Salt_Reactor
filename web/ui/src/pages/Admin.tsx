@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RotateCcw, ShieldCheck } from "lucide-react";
 import { api } from "../api";
+import { ExpandableText } from "../components/ExpandableText";
 
 export function Admin() {
   const queryClient = useQueryClient();
@@ -49,7 +50,9 @@ export function Admin() {
           </div>
           <div className="tag-row">
             {session.data?.admin_emails.map((email) => (
-              <span key={email}>{email}</span>
+              <span key={email}>
+                <ExpandableText lines={1}>{email}</ExpandableText>
+              </span>
             ))}
           </div>
         </div>
@@ -88,22 +91,34 @@ export function Admin() {
             </div>
             {limits.data.map((record) => (
               <div className="admin-row" key={record.email}>
-                <strong>{record.email}</strong>
-                <span>{record.date}</span>
-                <span>
-                  {record.count} / {record.limit}
+                <strong data-label="User">
+                  <ExpandableText lines={1}>{record.email}</ExpandableText>
+                </strong>
+                <span data-label="Date">
+                  <ExpandableText lines={1}>{record.date}</ExpandableText>
                 </span>
-                <span>{record.remaining}</span>
-                <span>{record.last_started_at ? formatDateTime(record.last_started_at) : "None"}</span>
-                <button
-                  className="secondary-action"
-                  type="button"
-                  onClick={() => reset.mutate(record.email)}
-                  disabled={reset.isPending}
-                >
-                  <RotateCcw aria-hidden="true" />
-                  <span>Reset</span>
-                </button>
+                <span data-label="Starts">
+                  <ExpandableText lines={1}>
+                    {record.count} / {record.limit}
+                  </ExpandableText>
+                </span>
+                <span data-label="Remaining">
+                  <ExpandableText lines={1}>{record.remaining}</ExpandableText>
+                </span>
+                <span data-label="Last start">
+                  <ExpandableText lines={1}>{record.last_started_at ? formatDateTime(record.last_started_at) : "None"}</ExpandableText>
+                </span>
+                <div className="admin-action-cell" data-label="Reset">
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    onClick={() => reset.mutate(record.email)}
+                    disabled={reset.isPending}
+                  >
+                    <RotateCcw aria-hidden="true" />
+                    <span>Reset</span>
+                  </button>
+                </div>
               </div>
             ))}
           </div>

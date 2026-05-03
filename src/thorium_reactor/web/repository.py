@@ -54,6 +54,7 @@ RAW_ARTIFACTS = (
     "job_status.json",
     "job_events.ndjson",
 )
+VIEWABLE_GEOMETRY_EXTENSIONS = {".gltf", ".glb"}
 
 
 class WebRepository:
@@ -129,7 +130,7 @@ class WebRepository:
         for case_dir in sorted([path for path in results_root.iterdir() if path.is_dir()]):
             for run_dir in sorted([path for path in case_dir.iterdir() if path.is_dir()], key=lambda path: path.stat().st_mtime, reverse=True):
                 try:
-                    records.append(self._run_record(case_dir.name, run_dir.name, run_dir))
+                    records.append(self._run_summary_record(case_dir.name, run_dir.name, run_dir))
                 except ValueError:
                     continue
         return records
@@ -207,7 +208,7 @@ class WebRepository:
         if not candidates:
             return None
         latest = max(candidates, key=lambda path: path.stat().st_mtime)
-        return self._run_record(safe_case_name, latest.name, latest)
+        return self._run_summary_record(safe_case_name, latest.name, latest)
 
     def _run_record(self, case_name: str, run_id: str, run_dir: Path) -> RunRecord:
         safe_case_name = safe_segment(case_name)
@@ -240,6 +241,56 @@ class WebRepository:
             artifacts=self._artifacts_for_run(safe_case_name, safe_run_id, run_dir),
             latest_event=events[-1] if events else None,
         )
+
+    def _run_summary_record(self, case_name: str, run_id: str, run_dir: Path) -> RunRecord:
+        safe_case_name = safe_segment(case_name)
+        safe_run_id = safe_segment(run_id)
+        status_payload = read_json(run_dir / "job_status.json", {})
+        metrics = read_metrics_csv(run_dir / "metrics.csv")
+        status = status_payload.get("status") or infer_status_from_files(run_dir)
+        return RunRecord(
+            case_name=safe_case_name,
+            run_id=safe_run_id,
+            status=str(status),
+            phase=status_payload.get("phase"),
+            command_plan=[str(item) for item in status_payload.get("command_plan", [])],
+            created_at=status_payload.get("created_at") or timestamp_from_path(run_dir),
+            started_at=status_payload.get("started_at"),
+            finished_at=status_payload.get("finished_at"),
+            metrics=metrics if isinstance(metrics, dict) else {},
+            artifacts=self._summary_artifacts_for_run(safe_case_name, safe_run_id, run_dir),
+        )
+
+    def _summary_artifacts_for_run(self, case_name: str, run_id: str, run_dir: Path) -> list[ArtifactRef]:
+        refs: dict[str, ArtifactRef] = {}
+        for path in self._viewable_geometry_paths(run_dir):
+            ref = self._artifact_ref(path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=path.name, kind="geometry")
+            refs[ref.path] = ref
+        return sorted(refs.values(), key=lambda ref: ref.label)
+
+    def _viewable_geometry_paths(self, run_dir: Path) -> list[Path]:
+        paths: dict[str, Path] = {}
+
+        exports_dir = run_dir / "geometry" / "exports"
+        if exports_dir.exists():
+            for extension in VIEWABLE_GEOMETRY_EXTENSIONS:
+                for path in sorted(exports_dir.glob(f"*{extension}")):
+                    if self._is_viewable_geometry_file(path):
+                        paths[path.as_posix()] = path
+
+        manifest = read_json(run_dir / "render_assets.json", {})
+        if isinstance(manifest, dict):
+            for raw_path in manifest.values():
+                if not is_viewable_geometry_artifact_path(raw_path):
+                    continue
+                path = self._resolve_recorded_path(raw_path, run_dir=run_dir)
+                if path and self._is_viewable_geometry_file(path):
+                    paths[path.as_posix()] = path
+
+        return sorted(paths.values(), key=lambda path: path.name)
+
+    def _is_viewable_geometry_file(self, path: Path) -> bool:
+        return path.is_file() and path.suffix.lower() in VIEWABLE_GEOMETRY_EXTENSIONS and path.stat().st_size > 0
 
     def _artifacts_for_run(self, case_name: str, run_id: str, run_dir: Path) -> list[ArtifactRef]:
         refs: dict[str, ArtifactRef] = {}
@@ -496,6 +547,21 @@ def infer_status(run_dir: Path, summary: Mapping[str, Any], validation: Mapping[
     if (run_dir / "build_manifest.json").exists():
         return "built"
     return "unknown"
+
+
+def infer_status_from_files(run_dir: Path) -> str:
+    if (run_dir / "summary.json").exists() or (run_dir / "validation.json").exists() or (run_dir / "report.md").exists():
+        return "completed"
+    if (run_dir / "build_manifest.json").exists():
+        return "built"
+    return "unknown"
+
+
+def is_viewable_geometry_artifact_path(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    normalized = value.replace("\\", "/").lower()
+    return any(normalized.endswith(extension) for extension in VIEWABLE_GEOMETRY_EXTENSIONS)
 
 
 def artifact_kind(path: Path) -> str:

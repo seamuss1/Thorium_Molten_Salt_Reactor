@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { Database, FileJson, Image, ScrollText } from "lucide-react";
+import { Database, ExternalLink, FileJson, Image, ScrollText } from "lucide-react";
 import { fetchText } from "../api";
+import { ExpandableText } from "./ExpandableText";
 import { Markdown } from "./Markdown";
 import type { ArtifactRef } from "../types";
 
@@ -52,11 +53,16 @@ export function RunArtifacts({ artifacts }: RunArtifactsProps) {
         </div>
         <div className="file-list">
           {data.map((artifact) => (
-            <a key={artifact.path} href={artifact.url} target="_blank" rel="noreferrer">
+            <div className="file-item" key={artifact.path}>
               <FileJson aria-hidden="true" />
-              <span>{artifact.label}</span>
+              <ExpandableText className="file-name" lines={1}>
+                {artifact.label}
+              </ExpandableText>
               <small>{formatSize(artifact.size)}</small>
-            </a>
+              <a className="icon-action" href={artifact.url} target="_blank" rel="noreferrer" aria-label={`Open ${artifact.label}`}>
+                <ExternalLink aria-hidden="true" />
+              </a>
+            </div>
           ))}
           {!data.length && <div className="empty-panel">No structured data artifacts yet.</div>}
         </div>

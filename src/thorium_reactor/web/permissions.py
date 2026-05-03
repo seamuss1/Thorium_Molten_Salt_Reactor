@@ -15,7 +15,8 @@ from thorium_reactor.web.schemas import AuthSession, RateLimitRecord
 
 
 OWNER_EMAIL = "seamusdgallagher@gmail.com"
-LOCAL_DEV_EMAIL = "local-dev@thorium.local"
+LOCAL_DEV_EMAIL = OWNER_EMAIL
+LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
 ACCESS_EMAIL_HEADERS = (
     "cf-access-authenticated-user-email",
     "x-authenticated-user-email",
@@ -41,7 +42,7 @@ class AccessController:
     def user_from_request(self, request: Request) -> AccessUser:
         email = email_from_headers(request)
         if email is None:
-            if self.access_required:
+            if self.access_required and not is_localhost_request(request):
                 raise HTTPException(status_code=401, detail="Cloudflare Access identity is required to start simulations.")
             email = normalize_email(os.environ.get("THORIUM_REACTOR_LOCAL_DEV_EMAIL", LOCAL_DEV_EMAIL))
         return AccessUser(email=email, is_admin=email in self.admin_emails)
@@ -192,6 +193,12 @@ def email_from_headers(request: Request) -> str | None:
         if value:
             return normalize_email(value)
     return None
+
+
+def is_localhost_request(request: Request) -> bool:
+    host = request.headers.get("host", "")
+    hostname = host.rsplit(":", 1)[0].strip("[]").lower()
+    return hostname in LOCAL_HOSTNAMES
 
 
 def configured_admin_emails() -> set[str]:

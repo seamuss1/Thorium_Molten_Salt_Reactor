@@ -1,7 +1,10 @@
-import { Suspense, useMemo, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
 import { Bounds, Html, OrbitControls, useGLTF } from "@react-three/drei";
-import { Box, Layers, Maximize2 } from "lucide-react";
+import { Layers, Maximize2, ZoomIn, ZoomOut } from "lucide-react";
+import { Vector3 } from "three";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import { viewableGeometryArtifact } from "../geometryArtifacts";
 import type { ArtifactRef } from "../types";
 
 interface ModelViewerProps {
@@ -9,28 +12,23 @@ interface ModelViewerProps {
 }
 
 export function ModelViewer({ artifacts }: ModelViewerProps) {
-  const gltf = artifacts.find((artifact) => artifact.path.endsWith(".gltf"));
-  const fallbackImage =
-    artifacts.find((artifact) => artifact.label.includes("physics_overlay")) ??
-    artifacts.find((artifact) => artifact.label.includes("annotated_cutaway")) ??
-    artifacts.find((artifact) => artifact.mime_type.startsWith("image/"));
+  const gltf = viewableGeometryArtifact(artifacts);
   const [showGrid, setShowGrid] = useState(true);
-
-  if (!gltf && fallbackImage) {
-    return (
-      <div className="viewer-fallback">
-        <img src={fallbackImage.url} alt={fallbackImage.label} />
-      </div>
-    );
-  }
+  const [zoomCommand, setZoomCommand] = useState(0);
 
   if (!gltf) {
-    return <div className="empty-panel tall">No 3D geometry export is available for this run.</div>;
+    return <div className="empty-panel tall">This run has no viewable glTF geometry export.</div>;
   }
 
   return (
     <div className="viewer-shell">
       <div className="viewer-toolbar" aria-label="3D viewer controls">
+        <button type="button" onClick={() => setZoomCommand((value) => value + 1)} title="Zoom in" aria-label="Zoom in">
+          <ZoomIn aria-hidden="true" />
+        </button>
+        <button type="button" onClick={() => setZoomCommand((value) => value - 1)} title="Zoom out" aria-label="Zoom out">
+          <ZoomOut aria-hidden="true" />
+        </button>
         <button type="button" onClick={() => setShowGrid((value) => !value)} title="Toggle reference grid">
           <Layers aria-hidden="true" />
         </button>
@@ -48,10 +46,33 @@ export function ModelViewer({ artifacts }: ModelViewerProps) {
             <ReactorScene url={gltf.url} />
           </Bounds>
         </Suspense>
-        <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
+        <ViewerOrbitControls zoomCommand={zoomCommand} />
       </Canvas>
     </div>
   );
+}
+
+function ViewerOrbitControls({ zoomCommand }: { zoomCommand: number }) {
+  const controls = useRef<OrbitControlsImpl>(null);
+  const lastZoomCommand = useRef(0);
+  const { camera } = useThree();
+
+  useEffect(() => {
+    const delta = zoomCommand - lastZoomCommand.current;
+    if (delta === 0) return;
+
+    const target = controls.current?.target ?? new Vector3(0, 0, 0);
+    const offset = camera.position.clone().sub(target);
+    if (offset.lengthSq() === 0) offset.set(4, 3, 5);
+    const factor = Math.pow(delta > 0 ? 0.82 : 1.22, Math.abs(delta));
+    offset.setLength(Math.min(90, Math.max(0.7, offset.length() * factor)));
+    camera.position.copy(target.clone().add(offset));
+    camera.updateProjectionMatrix();
+    controls.current?.update();
+    lastZoomCommand.current = zoomCommand;
+  }, [camera, zoomCommand]);
+
+  return <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={0.08} />;
 }
 
 function ReactorScene({ url }: { url: string }) {
@@ -60,9 +81,6 @@ function ReactorScene({ url }: { url: string }) {
   return (
     <group rotation={[-Math.PI / 2, 0, 0]}>
       <primitive object={scene} />
-      <Html position={[0, 1.4, 0]} center className="viewer-label">
-        <Box size={14} /> geometry export
-      </Html>
     </group>
   );
 }
