@@ -94,6 +94,117 @@ def test_web_run_summaries_only_advertise_viewable_geometry() -> None:
         shutil.rmtree(bundle.root, ignore_errors=True)
 
 
+def test_web_run_detail_exposes_curated_output_sections() -> None:
+    client = TestClient(create_app(REPO_ROOT))
+    run_id = f"output-sections-{uuid.uuid4().hex}"
+    bundle = create_result_bundle(REPO_ROOT, "example_pin", run_id)
+    try:
+        bundle.write_json(
+            "summary.json",
+            {
+                "bop": {
+                    "thermal_power_mw": 100.0,
+                    "electric_power_mw": 38.0,
+                    "primary_delta_t_c": 90.0,
+                    "primary_mass_flow_kg_s": 500.0,
+                    "steam_generator_duty_mw": 100.0,
+                },
+                "physics_core": {
+                    "integrity_checks": {"status": "ok"},
+                    "neutronics": {
+                        "k_eff": 1.012,
+                        "beta_eff": 0.0061,
+                        "group_count": 6,
+                        "methods": ["diffusion", "sp3"],
+                        "feedback_coefficients": {"fuel_temperature_pcm_per_c": -12.5},
+                    },
+                },
+                "primary_system": {
+                    "primary_mass_flow_kg_s": 500.0,
+                    "primary_volumetric_flow_m3_s": 0.2,
+                    "loop_hydraulics": {"pump_shaft_power_kw": 42.0, "max_reynolds_number": 120000.0},
+                    "heat_exchanger": {"required_area_m2": 450.0, "duty_mw": 99.8},
+                },
+                "transient": {
+                    "status": "completed",
+                    "scenario_name": "load_follow",
+                    "peak_power_fraction": 1.07,
+                    "final_power_fraction": 1.0,
+                    "peak_fuel_temperature_c": 704.0,
+                },
+                "transient_sweep": {
+                    "status": "completed",
+                    "backend": "numpy",
+                    "samples": 32,
+                    "peak_power_fraction_p95": 1.08,
+                    "peak_fuel_temperature_c_p95": 712.0,
+                    "runtime_performance": {"sample_steps_per_s": 9000.0},
+                    "numerical_checks": {"status": "ok"},
+                },
+                "fuel_cycle": {"fissile_inventory_kg": 80.0, "specific_power_mw_per_t_hm": 500.0},
+                "chemistry": {"corrosion_risk": "low", "corrosion_index": 1.01, "redox_state_ev": -0.02},
+                "tritium": {"removal_fraction": 0.66, "environmental_release_fraction": 0.18},
+                "benchmark_traceability": {
+                    "traceability_score": 88.0,
+                    "confidence_summary": {"high": 2, "medium": 1},
+                    "coverage": {
+                        "targets_structured": {"linked": 5, "total": 5},
+                        "targets_with_evidence": {"linked": 4, "total": 5},
+                    },
+                    "datasets": [{"id": "sample"}],
+                    "validation_maturity": {
+                        "validation_maturity_score": 70.0,
+                        "validation_maturity_stage": "screening_backed",
+                        "gaps": ["Cross-code check pending."],
+                    },
+                },
+                "finance": {
+                    "status": "completed",
+                    "outputs": {"lcoe_usd_per_mwh": 120.0, "annual_generation_mwh": 800000.0},
+                    "inputs": {"net_capacity_mwe": 100.0, "construction_months": 48},
+                    "cost_breakdown_usd": {"total_capitalized_cost": 500000000.0},
+                },
+                "schedule": {
+                    "status": "completed",
+                    "total_years_to_commercial_operation": 8.5,
+                    "commercial_operation_date": "2035-01-01",
+                },
+                "visualization_state": {
+                    "has_geometry_description": True,
+                    "has_render_assets": True,
+                    "available_views": ["hero_cutaway"],
+                    "assets": {"gltf": "/workspace/results/example_pin/run/geometry/exports/core.gltf"},
+                },
+            },
+        )
+        bundle.write_json(
+            "validation.json",
+            {"checks": [{"status": "pass"}, {"status": "pending"}, {"status": "pass"}]},
+        )
+
+        response = client.get(f"/api/runs/example_pin/{run_id}")
+
+        assert response.status_code == 200
+        sections = {section["id"]: section for section in response.json()["output_sections"]}
+        assert {
+            "neutronics",
+            "plant_balance",
+            "primary_flow",
+            "transient_response",
+            "transient_uncertainty",
+            "fuel_chemistry",
+            "validation_maturity",
+            "commercial_planning",
+            "visualization",
+        }.issubset(sections)
+        assert sections["plant_balance"]["metrics"][0]["label"] == "Thermal power"
+        assert any(metric["label"] == "k-effective" for metric in sections["neutronics"]["metrics"])
+        assert sections["validation_maturity"]["status"] == "screening_backed"
+        assert any(metric["label"] == "LCOE" for metric in sections["commercial_planning"]["metrics"])
+    finally:
+        shutil.rmtree(bundle.root, ignore_errors=True)
+
+
 def test_web_run_rejects_unsafe_draft_case_before_creating_results(monkeypatch) -> None:
     monkeypatch.setenv("THORIUM_REACTOR_WEB_FAKE_JOBS", "1")
     client = TestClient(create_app(REPO_ROOT))

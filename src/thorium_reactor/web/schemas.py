@@ -26,6 +26,22 @@ class RunEvent(BaseModel):
     artifact: ArtifactRef | None = None
 
 
+class OutputMetric(BaseModel):
+    label: str
+    value: Any = None
+    unit: str | None = None
+    kind: str | None = None
+
+
+class OutputSection(BaseModel):
+    id: str
+    title: str
+    status: str | None = None
+    summary: str | None = None
+    metrics: list[OutputMetric] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class RunRecord(BaseModel):
     case_name: str
     run_id: str
@@ -41,6 +57,7 @@ class RunRecord(BaseModel):
     reactor: dict[str, Any] = Field(default_factory=dict)
     capabilities: list[str] = Field(default_factory=list)
     artifacts: list[ArtifactRef] = Field(default_factory=list)
+    output_sections: list[OutputSection] = Field(default_factory=list)
     latest_event: RunEvent | None = None
 
 

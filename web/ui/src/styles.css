@@ -487,6 +487,7 @@ canvas {
 
 .panel h2,
 .artifact-pane h2,
+.output-section h2,
 .parameter-band h2,
 .parameter-band h3 {
   margin: 0 0 12px;
@@ -727,6 +728,170 @@ mark,
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 16px;
+}
+
+.simulation-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 18px;
+}
+
+.simulation-overview div {
+  min-width: 0;
+  min-height: 74px;
+  padding: 12px;
+  border: 1px solid #dce5e1;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.simulation-overview dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.simulation-overview dd {
+  margin: 6px 0 0;
+  font-size: 18px;
+  font-weight: 800;
+  min-width: 0;
+}
+
+.output-focus {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.output-focus-title {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.output-focus-title > div {
+  min-width: 0;
+}
+
+.output-focus-title > div:last-child {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.output-focus-title h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.output-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.output-section {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(23, 33, 38, 0.04);
+}
+
+.output-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.output-section-header > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.output-section-header svg,
+.output-notes svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.output-section-header h2 {
+  min-width: 0;
+}
+
+.output-summary {
+  margin: 0 0 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.output-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.output-metric {
+  min-width: 0;
+  min-height: 76px;
+  padding: 10px;
+  border: 1px solid #e0e7ee;
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+
+.output-metric dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.output-metric dd {
+  margin: 6px 0 0;
+  min-width: 0;
+}
+
+.output-metric-value {
+  color: #21303a;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.output-notes {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.output-notes li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.supporting-grid {
+  margin-top: 18px;
 }
 
 .parameter-groups,
@@ -1289,9 +1454,19 @@ mark,
   .hero-band,
   .dashboard-grid,
   .two-column,
+  .output-section-grid,
   .artifact-grid,
   .docs-layout {
     grid-template-columns: 1fr;
+  }
+
+  .app-shell {
+    align-content: start;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .simulation-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .artifact-grid {
@@ -1345,8 +1520,23 @@ mark,
   .phase-grid,
   .media-strip,
   .fact-list,
+  .simulation-overview,
+  .output-metric-grid,
   .admin-row {
     grid-template-columns: 1fr;
+  }
+
+  .output-focus-title {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .output-focus-title > div:last-child {
+    justify-content: stretch;
+  }
+
+  .output-focus-title .secondary-action {
+    flex: 1 1 auto;
   }
 
   .sidebar {
@@ -1412,7 +1602,8 @@ mark,
   .parameter-band,
   .builder-controls,
   .panel,
-  .artifact-pane {
+  .artifact-pane,
+  .output-section {
     padding: 14px;
   }
 

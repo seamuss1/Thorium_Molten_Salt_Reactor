@@ -3,13 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Activity, Atom, CheckCircle2, Clock, FileText, PlaySquare } from "lucide-react";
 import { api } from "../api";
 import { ExpandableText } from "../components/ExpandableText";
-import { MetricChart } from "../components/MetricChart";
 
 export function Dashboard() {
   const cases = useQuery({ queryKey: ["cases"], queryFn: api.cases });
   const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs, refetchInterval: 5000 });
   const docs = useQuery({ queryKey: ["docs"], queryFn: api.docs });
-  const latest = runs.data?.[0];
+  const latestCase = cases.data?.find((item) => item.latest_run) ?? cases.data?.[0];
   const caseCount = cases.data?.length ?? 0;
   const runCount = runs.data?.length ?? 0;
   const completedCount = runs.data?.filter((run) => run.status === "completed").length ?? 0;
@@ -38,11 +37,11 @@ export function Dashboard() {
       <section className="hero-band">
         <div className="hero-copy">
           <h2>
-            <ExpandableText lines={2}>{String(latest?.reactor?.name ?? latest?.case_name ?? "Simulation workspace")}</ExpandableText>
+            <ExpandableText lines={2}>{String(latestCase?.reactor?.name ?? latestCase?.name ?? "Simulation workspace")}</ExpandableText>
           </h2>
           <div className="stat-row">
-            <Stat icon={Atom} label="Cases" value={caseCount} />
-            <Stat icon={Activity} label="Runs" value={runCount} />
+            <Stat icon={Atom} label="Simulation types" value={caseCount} />
+            <Stat icon={Activity} label="Result bundles" value={runCount} />
             <Stat icon={CheckCircle2} label="Completed" value={completedCount} />
             <Stat icon={FileText} label="Docs" value={docCount} />
           </div>
@@ -60,27 +59,25 @@ export function Dashboard() {
         <div className="panel">
           <div className="section-title">
             <Clock aria-hidden="true" />
-            <h2>Latest run</h2>
+            <h2>Simulation portfolio</h2>
           </div>
-          {latest ? (
-            <>
-              <div className="run-line">
-                <ExpandableText className="run-title" lines={1}>
-                  {latest.case_name}
-                </ExpandableText>
-                <ExpandableText className="run-meta" lines={1}>
-                  {latest.run_id}
-                </ExpandableText>
-                <mark>{latest.status}</mark>
-              </div>
-              <MetricChart metrics={latest.metrics} title="Latest run metrics" />
-              <Link className="text-link" to={`/runs/${latest.case_name}/${latest.run_id}`}>
-                Open run workspace
-              </Link>
-            </>
+          {cases.data?.length ? (
+            <div className="doc-links">
+              {cases.data.slice(0, 6).map((item) => (
+                <Link key={item.name} to="/cases">
+                  <span className="list-title">{String(item.reactor.name ?? item.name)}</span>
+                  <small className="list-meta">
+                    {[item.reactor.family, item.reactor.mode, item.latest_run?.status].filter(Boolean).join(" / ") || item.name}
+                  </small>
+                </Link>
+              ))}
+            </div>
           ) : (
-            <div className="empty-panel">No result bundles found.</div>
+            <div className="empty-panel">No simulation types found.</div>
           )}
+          <Link className="text-link" to="/cases">
+            Open simulation outputs
+          </Link>
         </div>
         <div className="panel">
           <div className="section-title">

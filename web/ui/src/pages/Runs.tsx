@@ -5,6 +5,7 @@ import { Activity, CheckCircle2, Clock, XCircle } from "lucide-react";
 import { api } from "../api";
 import { ExpandableText } from "../components/ExpandableText";
 import { MetricChart } from "../components/MetricChart";
+import { RunOutputSections } from "../components/RunOutputSections";
 import { RunArtifacts } from "../components/RunArtifacts";
 import { hasViewableGeometry } from "../geometryArtifacts";
 
@@ -90,9 +91,10 @@ export function Runs() {
                 <ExpandableText lines={2}>{detail.data.latest_event.message}</ExpandableText>
               </div>
             )}
+            <RunOutputSections sections={detail.data.output_sections ?? []} />
             <section className="two-column">
               <div className="panel">
-                <MetricChart metrics={detail.data.metrics} title="Run metrics" />
+                <MetricChart metrics={detail.data.metrics} title="Raw metric rollup" />
               </div>
               <div className="panel">
                 <h2>Run state</h2>

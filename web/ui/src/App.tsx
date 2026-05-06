@@ -15,9 +15,9 @@ const Admin = lazy(() => import("./pages/Admin").then((module) => ({ default: mo
 
 const navigation = [
   { to: "/", label: "Dashboard", icon: Gauge },
-  { to: "/cases", label: "Cases", icon: Atom },
+  { to: "/cases", label: "Simulations", icon: Atom },
   { to: "/builder", label: "Builder", icon: PlaySquare },
-  { to: "/runs", label: "Runs", icon: Activity },
+  { to: "/runs", label: "Run log", icon: Activity },
   { to: "/docs", label: "Science", icon: BookOpen },
   { to: "/viewer", label: "3D", icon: Box }
 ];

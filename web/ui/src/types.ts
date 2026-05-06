@@ -16,6 +16,22 @@ export interface RunEvent {
   progress?: number | null;
 }
 
+export interface OutputMetric {
+  label: string;
+  value: unknown;
+  unit?: string | null;
+  kind?: string | null;
+}
+
+export interface OutputSection {
+  id: string;
+  title: string;
+  status?: string | null;
+  summary?: string | null;
+  metrics: OutputMetric[];
+  notes: string[];
+}
+
 export interface RunRecord {
   case_name: string;
   run_id: string;
@@ -31,6 +47,7 @@ export interface RunRecord {
   reactor: Record<string, unknown>;
   capabilities: string[];
   artifacts: ArtifactRef[];
+  output_sections?: OutputSection[];
   latest_event?: RunEvent | null;
 }
 
