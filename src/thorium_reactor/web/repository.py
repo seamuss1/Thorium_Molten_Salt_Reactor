@@ -44,20 +44,32 @@ RAW_ARTIFACTS = (
     "property_audit.json",
     "benchmark_residuals.json",
     "physics_core.json",
+    "flow_summary.json",
     "build_manifest.json",
     "geometry_description.json",
     "validation.json",
     "transient.json",
     "transient_sweep.json",
+    "runtime_benchmark.json",
+    "benchmark_execution.json",
+    "finance.json",
+    "schedule.json",
+    "project_plan.json",
     "metrics.csv",
+    "cash_flow.csv",
+    "cost_breakdown.csv",
     "report.md",
     "case_snapshot.yaml",
     "benchmark_snapshot.yaml",
     "provenance.json",
     "job_status.json",
     "job_events.ndjson",
+    "plots_manifest.json",
+    "render_assets.json",
 )
 VIEWABLE_GEOMETRY_EXTENSIONS = {".gltf", ".glb"}
+TOP_LEVEL_ARTIFACT_EXTENSIONS = {".csv", ".json", ".md", ".ndjson", ".yaml", ".yml"}
+VISUAL_ARTIFACT_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".mp4", ".png", ".svg", ".webp"}
 
 
 class WebRepository:
@@ -549,6 +561,7 @@ class WebRepository:
     def _add_validation_section(self, sections: list[OutputSection], summary: Mapping[str, Any], validation: Mapping[str, Any]) -> None:
         traceability = as_mapping(summary.get("benchmark_traceability"))
         maturity = as_mapping(first_present(summary.get("validation_maturity"), traceability.get("validation_maturity")))
+        quality = as_mapping(first_present(summary.get("benchmark_quality"), traceability.get("benchmark_quality")))
         checks = validation.get("checks") if isinstance(validation.get("checks"), list) else []
         if not traceability and not maturity and not checks:
             return
@@ -566,6 +579,7 @@ class WebRepository:
         metrics = output_metrics(
             ("Traceability score", traceability.get("traceability_score"), "score", "number"),
             ("Validation maturity", maturity.get("validation_maturity_score"), "score", "number"),
+            ("Benchmark quality", quality.get("quality_score"), "score", "number"),
             ("Validation checks", len(checks) if checks else None, "count", "number"),
             ("Checks passed", status_counts.get("pass"), "count", "number"),
             ("Checks pending", status_counts.get("pending"), "count", "number"),
@@ -579,12 +593,16 @@ class WebRepository:
         notes = []
         for gap in (maturity.get("gaps") if isinstance(maturity.get("gaps"), list) else traceability.get("gaps") if isinstance(traceability.get("gaps"), list) else []):
             notes.append(str(gap))
+        quality_blockers = quality.get("promotion_blockers")
+        if isinstance(quality_blockers, list):
+            for blocker in quality_blockers:
+                notes.append(str(blocker))
         self._append_section(
             sections,
             "validation_maturity",
             "Validation and benchmark maturity",
             metrics=metrics,
-            status=first_present(maturity.get("validation_maturity_stage"), traceability.get("maturity_stage"), "validation"),
+            status=first_present(quality.get("quality_stage"), maturity.get("validation_maturity_stage"), traceability.get("maturity_stage"), "validation"),
             summary=make_sentence(
                 [
                     f"{format_value(traceability.get('traceability_score'))} traceability score"
@@ -592,6 +610,9 @@ class WebRepository:
                     else None,
                     f"{format_value(maturity.get('validation_maturity_score'))} maturity score"
                     if maturity.get("validation_maturity_score") is not None
+                    else None,
+                    f"{format_value(quality.get('quality_score'))} benchmark quality score"
+                    if quality.get("quality_score") is not None
                     else None,
                     f"{status_counts.get('pass', 0)} checks passing" if checks else None,
                 ]
@@ -738,6 +759,11 @@ class WebRepository:
                 ref = self._artifact_ref(path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=name, kind=artifact_kind(path))
                 refs[ref.path] = ref
 
+        for path in sorted(run_dir.iterdir()):
+            if path.is_file() and path.suffix.lower() in TOP_LEVEL_ARTIFACT_EXTENSIONS:
+                ref = self._artifact_ref(path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=path.name, kind=artifact_kind(path))
+                refs[ref.path] = ref
+
         for manifest_name, kind in (("plots_manifest.json", "plot"), ("render_assets.json", "geometry")):
             manifest = read_json(run_dir / manifest_name, {})
             if isinstance(manifest, dict):
@@ -751,6 +777,15 @@ class WebRepository:
         if exports_dir.exists():
             for path in sorted(exports_dir.glob("*")):
                 if path.is_file() and path.suffix.lower() in {".gltf", ".bin", ".obj", ".stl", ".png", ".svg", ".json", ".mp4", ".gif"}:
+                    ref = self._artifact_ref(path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=path.name, kind=artifact_kind(path))
+                    refs[ref.path] = ref
+
+        for asset_dir_name in ("plots", "images"):
+            asset_dir = run_dir / asset_dir_name
+            if not asset_dir.exists():
+                continue
+            for path in sorted(asset_dir.glob("*")):
+                if path.is_file() and path.suffix.lower() in VISUAL_ARTIFACT_EXTENSIONS:
                     ref = self._artifact_ref(path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=path.name, kind=artifact_kind(path))
                     refs[ref.path] = ref
         return sorted(refs.values(), key=lambda ref: (ref.kind, ref.label))
@@ -1073,9 +1108,9 @@ def artifact_kind(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix in {".gltf", ".glb", ".obj", ".stl", ".bin"}:
         return "geometry"
-    if suffix in {".png", ".svg", ".gif", ".mp4"}:
+    if suffix in {".gif", ".jpeg", ".jpg", ".mp4", ".png", ".svg", ".webp"}:
         return "media"
-    if suffix in {".json", ".csv", ".yaml", ".yml"}:
+    if suffix in {".json", ".csv", ".yaml", ".yml", ".ndjson"}:
         return "data"
     if suffix == ".md":
         return "report" if path.name == "report.md" else "document"

@@ -1,12 +1,25 @@
 title: MSRE first criticality reference benchmark
 references:
   - Historical MSRE first criticality measurements remain the primary open benchmark anchor for molten-salt reactor neutronics.
+  - Public MSRE benchmark sources are now separated into a source index, parameter table, and assumption log before any benchmark-ready claim is made.
+source_dossier:
+  status: public_source_dossier_started
+  source_index: benchmarks/msre_first_criticality/source_index.yaml
+  parameter_table: benchmarks/msre_first_criticality/parameters.yaml
+  assumption_log: benchmarks/msre_first_criticality/assumptions.md
+  unresolved_required_parameter_count: 8
+  promotion_rule: All benchmark quality gates must pass before this case is called benchmark-ready.
 assumptions:
   - id: msre_open_model_scope
     text: This case is an openly reproducible MSRE-inspired benchmark harness rather than a full-fidelity proprietary reconstruction.
     basis: project_scope
-    confidence: medium
-    evidence_refs: [ornl-measurements]
+    confidence: low
+    evidence_refs: [ornl-measurements, shen-2021-nse]
+  - id: current_geometry_not_benchmark_grade
+    text: The current case geometry is a simplified channel harness and must not be treated as the evaluated MSRE geometry.
+    basis: implementation_status
+    confidence: high
+    evidence_refs: [source-dossier]
 evidence:
   - id: ornl-measurements
     topic: MSRE benchmark basis
@@ -14,20 +27,55 @@ evidence:
     claim: ORNL identifies the MSRE as the foundation of the evaluated molten-salt benchmark record.
     relevance: The repo uses MSRE as the quantitative validation anchor for historical liquid-fuel behavior.
     confidence: high
+  - id: shen-2021-nse
+    topic: Peer-reviewed MSRE first criticality benchmark
+    source: https://doi.org/10.1080/00295639.2021.1880850
+    claim: The MSRE first criticality benchmark describes a U-235 zero-power, stationary-salt, uniform-temperature critical experiment and reports a Serpent keff reference.
+    relevance: Supplies the citable first-criticality experiment state and cross-code reference for future OpenMC comparison.
+    confidence: high
+  - id: osti-2020-report
+    topic: MSRE benchmark uncertainty and bias notes
+    source: https://www.osti.gov/biblio/1617123
+    claim: The benchmark evaluation reports total experimental keff uncertainty and identifies graphite and nuclear-data effects as likely bias contributors.
+    relevance: Supplies uncertainty fields for uncertainty-aware residuals instead of broad placeholder bands.
+    confidence: high
+  - id: source-dossier
+    topic: Repository source dossier
+    source: benchmarks/msre_first_criticality/source_index.yaml
+    claim: The repository now records source-backed facts separately from unresolved benchmark-grade geometry and material inputs.
+    relevance: Prevents the illustrative harness from being mistaken for a completed evaluated benchmark model.
+    confidence: high
 datasets:
   - id: msre_first_criticality
     phenomenon: criticality
     status: numerical_validation
     confidence: high
-    source: https://www.ornl.gov/molten-salt-reactor/measurements
+    source: https://doi.org/10.1080/00295639.2021.1880850
     observables:
-      - id: expected_keff_band
-        min: 0.99
-        max: 1.01
-        units: delta-k/k
+      - id: experimental_critical_keff
+        value: 0.99978
+        units: k-effective
+        uncertainty_pcm: 420
         status: literature-backed
-        confidence: medium
-        note: Placeholder benchmark band for the open harness until the reconstructed geometry is tightened further.
+        confidence: high
+        evidence_refs: [shen-2021-nse, osti-2020-report]
+        note: Expected benchmark-model keff after the assessed -22 pcm simplification bias, with total experimental benchmark uncertainty.
+      - id: serpent_reference_keff
+        value: 1.02132
+        units: k-effective
+        uncertainty_pcm: 3
+        status: literature-backed
+        confidence: high
+        evidence_refs: [shen-2021-nse, osti-2020-report]
+        note: Published Serpent/ENDF-B-VII.1 calculation for the evaluated benchmark model; used as a future cross-code comparison target.
+      - id: u235_concentration_reactivity_coefficient
+        value: 0.223
+        units: relative-reactivity-per-relative-u235-mass
+        uncertainty: 0.006
+        status: literature-backed
+        confidence: high
+        evidence_refs: [osti-2020-report]
+        note: Differential physics target to add once the workflow supports composition perturbation sweeps.
 targets:
   nominal_thermal_power_mwth:
     value: 8.0
@@ -40,9 +88,25 @@ validation:
     status: literature-backed
     note: Historical operating-point values are benchmark-facing for this reference harness.
   cross_code_checks:
-    - name: openmc_reference_model
+    - name: openmc_vs_serpent_reference_model
       status: planned
-      note: Compare the open harness against a second independently prepared reference model.
+      note: Compare a benchmark-grade OpenMC reconstruction against the published Serpent reference model.
   uncertainty_coverage:
-    status: qualitative
-    note: Initial benchmark uncertainty is carried qualitatively until the reconstructed model is tightened.
+    status: partial
+    note: Experimental keff uncertainty is quantified, but geometry/material perturbation propagation is not yet complete.
+quality_gates:
+  - id: source_dossier_declared
+    status: completed
+    note: Source index, parameter table, and assumption log are present in the repository.
+  - id: benchmark_geometry_reconstructed
+    status: blocked
+    note: The active case still uses an illustrative layered-channel geometry.
+  - id: source_indexed_materials
+    status: blocked
+    note: Fuel salt, graphite, and structure materials are not yet fully reconstructed from the evaluated benchmark.
+  - id: solver_bundle_published
+    status: blocked
+    note: A solver-backed OpenMC benchmark bundle with statepoint statistics is still required.
+  - id: cross_code_completed
+    status: blocked
+    note: OpenMC-vs-Serpent comparison is declared but not complete.

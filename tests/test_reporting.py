@@ -642,6 +642,19 @@ def test_report_surfaces_model_validity_and_validation_maturity() -> None:
                         "confidence_summary": {"high": 0, "medium": 1, "low": 0, "unspecified": 0},
                         "status_summary": {"surrogate_targets": 1, "literature_backed_targets": 0},
                         "gaps": ["1 benchmark target(s) are still marked surrogate."],
+                        "benchmark_quality": {
+                            "quality_score": 50.0,
+                            "quality_stage": "benchmark_blocked",
+                            "benchmark_ready": False,
+                            "failed_gate_count": 1,
+                            "gates": [
+                                {
+                                    "id": "benchmark_geometry_reconstructed",
+                                    "status": "fail",
+                                    "message": "Case geometry is not marked as a benchmark reconstruction.",
+                                }
+                            ],
+                        },
                     },
                 }
             ),
@@ -673,6 +686,8 @@ def test_report_surfaces_model_validity_and_validation_maturity() -> None:
         assert "## Model Representation" in report
         assert "Validation maturity score" in report
         assert "Validation gap" in report
+        assert "## Benchmark Quality Gates" in report
+        assert "benchmark_geometry_reconstructed" in report
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 

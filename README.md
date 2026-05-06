@@ -146,6 +146,8 @@ Each active run is written to `results/<case>/<run_id>/` and is expected to cont
 
 The benchmark layer now supports dataset-centric evidence, assumptions, target confidence, and traceability scoring. MSRE cases are the quantitative historic-benchmark path; TMSR-LF1 remains a modern test-reactor extension with contextual and lower-confidence public targets until richer numerical datasets are added.
 
+`msre_first_criticality` now has a source dossier, parameter table, assumption log, benchmark quality gates, and uncertainty-aware keff residuals. It remains deliberately blocked from `benchmark_ready` status until the simplified channel harness is replaced with a source-indexed MSRE geometry/material reconstruction and a solver-backed result bundle is published. See [docs/msre-first-criticality-validation-plan.md](docs/msre-first-criticality-validation-plan.md).
+
 ## Modeling Strategy Notes
 
 - [docs/thermal-hydraulics-modeling-strategy.md](docs/thermal-hydraulics-modeling-strategy.md) describes the recommended analysis ladder for this repo: whole-loop reduced-order thermal-hydraulics first, porous or homogenized core models second, and local 3D CFD only where geometry controls the answer. It also lays out the additional precursor-transport and neutronics coupling needed for liquid-fueled MSR studies.

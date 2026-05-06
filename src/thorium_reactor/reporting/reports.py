@@ -30,6 +30,7 @@ def generate_report(
     model_representation = summary.get("model_representation", config.get("model_representation", {}))
     model_validity = summary.get("model_validity", {})
     validation_maturity = summary.get("validation_maturity") or benchmark_traceability.get("validation_maturity", {})
+    benchmark_quality = summary.get("benchmark_quality") or benchmark_traceability.get("benchmark_quality", {})
 
     lines = [
         f"# {config['reactor']['name']}",
@@ -196,6 +197,18 @@ def generate_report(
             lines.append(f"- Cross-code checks declared: `{len(cross_code_checks)}`")
             for gap in validation_maturity.get("gaps", []):
                 lines.append(f"- Validation gap: {gap}")
+        if benchmark_quality:
+            lines.extend(["", "## Benchmark Quality Gates", ""])
+            lines.append(f"- Quality score: `{benchmark_quality.get('quality_score', 'n/a')}`")
+            lines.append(f"- Quality stage: `{benchmark_quality.get('quality_stage', 'n/a')}`")
+            lines.append(f"- Benchmark ready: `{benchmark_quality.get('benchmark_ready', 'n/a')}`")
+            lines.append(f"- Failed gates: `{benchmark_quality.get('failed_gate_count', 'n/a')}`")
+            for gate in benchmark_quality.get("gates", []):
+                lines.append(
+                    f"- Gate `{gate.get('id', 'gate')}`: "
+                    f"`{gate.get('status', 'pending')}`"
+                    + (f" ({gate.get('message')})" if gate.get("message") else "")
+                )
 
     lines.extend(
         [
@@ -491,12 +504,20 @@ def generate_report(
         lines.append(f"- Residual item count: `{benchmark_residuals.get('item_count', 0)}`")
         lines.append(f"- Dataset count: `{benchmark_residuals.get('dataset_count', 0)}`")
         for item in benchmark_residuals.get("items", []):
-            lines.append(
-                f"- `{item.get('name', 'target')}`: "
-                f"metric=`{item.get('metric', 'n/a')}`, "
-                f"status=`{item.get('status', 'pending')}`, "
-                f"residual=`{item.get('residual', 'n/a')}`"
-            )
+            parts = [
+                f"metric=`{item.get('metric', 'n/a')}`",
+                f"status=`{item.get('status', 'pending')}`",
+                f"residual=`{item.get('residual', 'n/a')}`",
+            ]
+            if item.get("target_value") is not None:
+                parts.append(f"target=`{item.get('target_value')}`")
+            if item.get("residual_pcm") is not None:
+                parts.append(f"residual_pcm=`{item.get('residual_pcm')}`")
+            if item.get("combined_uncertainty_pcm") is not None:
+                parts.append(f"combined_uncertainty_pcm=`{item.get('combined_uncertainty_pcm')}`")
+            if item.get("normalized_residual") is not None:
+                parts.append(f"normalized_residual=`{item.get('normalized_residual')}`")
+            lines.append(f"- `{item.get('name', 'target')}`: " + ", ".join(parts))
 
     if validation:
         lines.extend(["", "## Validation", ""])

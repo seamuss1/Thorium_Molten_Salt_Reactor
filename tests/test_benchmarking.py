@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from thorium_reactor.benchmarking import assess_benchmark_traceability, build_docker_openmc_command
+from thorium_reactor.benchmarking import (
+    assess_benchmark_traceability,
+    build_benchmark_residuals,
+    build_docker_openmc_command,
+)
 from thorium_reactor.config import load_case_config, load_yaml
 
 
@@ -43,3 +47,48 @@ def test_build_docker_openmc_command_targets_repo_compose_runtime() -> None:
         "--run-id",
         "benchmark-run",
     ]
+
+
+def test_msre_first_criticality_quality_gates_block_illustrative_harness() -> None:
+    config = load_case_config(REPO_ROOT / "configs" / "cases" / "msre_first_criticality" / "case.yaml")
+    benchmark = load_yaml(REPO_ROOT / "benchmarks" / "msre_first_criticality" / "benchmark.yaml")
+
+    traceability = assess_benchmark_traceability(config, benchmark)
+    quality = traceability["benchmark_quality"]
+
+    assert traceability["maturity_stage"] == "literature_tracked"
+    assert traceability["status_summary"]["surrogate_targets"] == 0
+    assert quality["benchmark_ready"] is False
+    assert quality["quality_stage"] == "benchmark_blocked"
+    assert quality["failed_gate_count"] > 0
+    assert any(gate["id"] == "benchmark_geometry_reconstructed" for gate in quality["gates"])
+    assert any("geometry" in blocker.lower() for blocker in quality["promotion_blockers"])
+
+
+def test_msre_keff_residuals_are_uncertainty_aware() -> None:
+    config = load_case_config(REPO_ROOT / "configs" / "cases" / "msre_first_criticality" / "case.yaml")
+    benchmark = load_yaml(REPO_ROOT / "benchmarks" / "msre_first_criticality" / "benchmark.yaml")
+
+    passing = build_benchmark_residuals(
+        config,
+        {"metrics": {"keff": 1.001, "keff_std_dev": 0.00005}},
+        benchmark,
+    )
+    passing_item = next(item for item in passing["items"] if item["name"] == "keff_experimental_criticality")
+
+    assert passing_item["status"] == "pass"
+    assert passing_item["target_value"] == 0.99978
+    assert passing_item["benchmark_uncertainty_pcm"] == 420.0
+    assert passing_item["calculated_uncertainty_pcm"] == 5.0
+    assert passing_item["normalized_residual"] < 1.0
+
+    failing = build_benchmark_residuals(
+        config,
+        {"metrics": {"keff": 1.02, "keff_std_dev": 0.00005}},
+        benchmark,
+    )
+    failing_item = next(item for item in failing["items"] if item["name"] == "keff_experimental_criticality")
+
+    assert failing_item["status"] == "fail"
+    assert failing_item["residual_pcm"] == 2022.0
+    assert failing_item["normalized_residual"] > 2.0

@@ -16,6 +16,7 @@ from thorium_reactor.capabilities import (
 )
 from thorium_reactor.benchmarking import assess_benchmark_traceability
 from thorium_reactor.benchmarking import build_benchmark_residuals
+from thorium_reactor.benchmarking import evaluate_validation_target
 from thorium_reactor.bop.steady_state import BOPInputs, run_steady_state_bop
 from thorium_reactor.config import CaseConfig, load_yaml
 from thorium_reactor.flow.properties import (
@@ -110,6 +111,22 @@ def _summarize_model_validity(checks: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _benchmark_quality_checks_to_status_checks(benchmark_traceability: dict[str, Any]) -> list[dict[str, Any]]:
+    quality = benchmark_traceability.get("benchmark_quality", {})
+    if not quality:
+        return []
+    checks: list[dict[str, Any]] = []
+    for gate in quality.get("gates", []):
+        checks.append(
+            {
+                "name": f"benchmark_quality::{gate.get('id', 'gate')}",
+                "status": str(gate.get("status", "pending")),
+                "message": str(gate.get("message", "")),
+            }
+        )
+    return checks
+
+
 def _build_core_screening_checks(config: CaseConfig, reduced_order_flow: dict[str, Any]) -> list[dict[str, Any]]:
     active_flow = reduced_order_flow.get("active_flow", {})
     active_area_cm2 = float(active_flow.get("total_flow_area_cm2", 0.0))
@@ -156,7 +173,7 @@ def _build_validation_result(
     checks: list[dict[str, Any]] = []
     metrics = summary.get("metrics", {})
     for name, target in config.validation_targets.items():
-        checks.append(_evaluate_target(name, target, metrics, manifest))
+        checks.append(evaluate_validation_target(name, target, metrics, manifest, benchmark=benchmark))
     checks = _merge_checks(
         checks,
         manifest.get("model_validity", {}).get("checks", []),
@@ -329,6 +346,7 @@ def run_case(
                 statepoint_path = statepoints[-1]
                 with openmc.StatePoint(str(statepoint_path)) as statepoint:
                     keff = float(statepoint.keff.nominal_value)
+                    keff_std_dev = float(getattr(statepoint.keff, "std_dev", 0.0))
                 summary["neutronics"] = {
                     "status": "completed",
                     "statepoint": str(statepoint_path),
@@ -336,6 +354,7 @@ def run_case(
                     "simulation": describe_simulation_settings(config),
                 }
                 summary["metrics"]["keff"] = round(keff, 6)
+                summary["metrics"]["keff_std_dev"] = round(keff_std_dev, 8)
             else:
                 summary["neutronics"] = {
                     "status": "completed_without_statepoint",
@@ -460,8 +479,13 @@ def run_case(
         ]["natural_circulation_fraction_of_nominal"]
     if built.manifest.get("benchmark_traceability"):
         summary["benchmark_traceability"] = _json_copy(built.manifest["benchmark_traceability"])
+        summary["benchmark_quality"] = _json_copy(
+            built.manifest["benchmark_traceability"].get("benchmark_quality", {})
+        )
         summary["metrics"]["benchmark_traceability_score"] = built.manifest["benchmark_traceability"]["traceability_score"]
         summary["metrics"]["validation_maturity_score"] = built.manifest.get("validation_maturity", {}).get("validation_maturity_score", 0.0)
+        if summary["benchmark_quality"]:
+            summary["metrics"]["benchmark_quality_score"] = summary["benchmark_quality"].get("quality_score", 0.0)
     benchmark_residuals = build_benchmark_residuals(config, summary, built.benchmark)
     summary["benchmark_residuals"] = _json_copy(benchmark_residuals)
     summary["model_validity"] = _summarize_model_validity(
@@ -534,43 +558,6 @@ def validate_case(
     return result
 
 
-def _evaluate_target(
-    name: str,
-    target: dict[str, Any],
-    metrics: dict[str, Any],
-    manifest: dict[str, Any],
-) -> dict[str, Any]:
-    source_name = target.get("source", "metrics")
-    source = metrics if source_name == "metrics" else manifest
-    value = source.get(target["metric"])
-    if value is None:
-        return {
-            "name": name,
-            "status": "pending",
-            "message": f"Metric '{target['metric']}' is not available yet.",
-        }
-
-    minimum = target.get("min")
-    maximum = target.get("max")
-    if minimum is not None and value < minimum:
-        return {
-            "name": name,
-            "status": "fail",
-            "message": f"{value} is below the minimum bound {minimum}.",
-        }
-    if maximum is not None and value > maximum:
-        return {
-            "name": name,
-            "status": "fail",
-            "message": f"{value} is above the maximum bound {maximum}.",
-        }
-    return {
-        "name": name,
-        "status": "pass",
-        "message": f"{value} is within the expected range.",
-    }
-
-
 def _build_pin_case(config: CaseConfig, benchmark: dict[str, Any]) -> BuiltCase:
     geometry = config.geometry
     layers = list(geometry["layers"])
@@ -580,7 +567,12 @@ def _build_pin_case(config: CaseConfig, benchmark: dict[str, Any]) -> BuiltCase:
     invariants.extend(material_sanity_checks(config))
     benchmark_traceability = assess_benchmark_traceability(config, benchmark) if benchmark else {}
     model_representation = get_model_representation(config)
-    model_validity = _summarize_model_validity(_invariant_checks_to_status_checks(invariants))
+    model_validity = _summarize_model_validity(
+        _merge_checks(
+            _invariant_checks_to_status_checks(invariants),
+            _benchmark_quality_checks_to_status_checks(benchmark_traceability),
+        )
+    )
 
     model = _create_openmc_pin_model(config) if openmc is not None else None
 
@@ -633,7 +625,12 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
             if solid.get("material"):
                 material_inventory.add(str(solid["material"]))
         invariants.extend(material_sanity_checks(config))
-        model_validity = _summarize_model_validity(_invariant_checks_to_status_checks(invariants))
+        model_validity = _summarize_model_validity(
+            _merge_checks(
+                _invariant_checks_to_status_checks(invariants),
+                _benchmark_quality_checks_to_status_checks(benchmark_traceability),
+            )
+        )
         channel_cell_count = sum(len(channel["layers"]) for channel in resolved.channels)
         static_cell_count = 13
         return BuiltCase(
@@ -704,7 +701,12 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
     invariants.extend(material_sanity_checks(config))
     benchmark_traceability = assess_benchmark_traceability(config, benchmark) if benchmark else {}
     model_representation = get_model_representation(config)
-    model_validity = _summarize_model_validity(_invariant_checks_to_status_checks(invariants))
+    model_validity = _summarize_model_validity(
+        _merge_checks(
+            _invariant_checks_to_status_checks(invariants),
+            _benchmark_quality_checks_to_status_checks(benchmark_traceability),
+        )
+    )
     return BuiltCase(
         manifest={
             "case": config.name,

@@ -1,0 +1,82 @@
+schema_version: 1
+title: MSRE first criticality public source index
+scope: >
+  Public-source traceability backbone for turning the repository's
+  msre_first_criticality case from an illustrative harness into a
+  benchmark-grade OpenMC reconstruction.
+sources:
+  - id: ornl_measurements
+    type: project_page
+    title: Measurements | Molten Salt Reactor
+    organization: Oak Ridge National Laboratory
+    url: https://www.ornl.gov/molten-salt-reactor/measurements
+    confidence: high
+    claims:
+      - id: irphep_gap_filled
+        text: ORNL identifies the MSRE first criticality work as the first MSR benchmark published in the IRPhEP handbook.
+      - id: benchmark_scope
+        text: The benchmark is based on the MSRE U-235 zero-power critical experiment.
+    repo_use:
+      - Establishes MSRE first criticality as the repository's highest-priority historic validation anchor.
+  - id: shen_2021_nse
+    type: peer_reviewed_article
+    title: Reactor Physics Benchmark of the First Criticality in the Molten Salt Reactor Experiment
+    authors:
+      - Dan Shen
+      - Germina Ilas
+      - Jeffrey J. Powers
+      - Massimiliano Fratoni
+    journal: Nuclear Science and Engineering
+    year: 2021
+    doi: https://doi.org/10.1080/00295639.2021.1880850
+    url: https://www.tandfonline.com/doi/full/10.1080/00295639.2021.1880850
+    confidence: high
+    claims:
+      - id: experiment_conditions
+        text: The benchmark describes the MSRE first criticality experiment at zero power, stationary salt, and uniform temperature with U-235 fuel.
+      - id: serpent_reference_keff
+        text: The published Serpent/ENDF/B-VII.1 benchmark calculation reported keff of 1.02132 with 3 pcm one-sigma uncertainty.
+      - id: model_discrepancy_context
+        text: The reported discrepancy is noted as consistent with known challenges in graphite-moderated benchmark systems.
+    repo_use:
+      - Supplies the citable physics target and experiment state for uncertainty-aware keff residuals.
+  - id: osti_2020_msre_benchmark
+    type: technical_report
+    title: Molten Salt Reactor Experiment Benchmark Evaluation
+    authors:
+      - Massimiliano Fratoni
+      - Dan Shen
+      - Germina Ilas
+      - Jeffrey J. Powers
+    organization: U.S. DOE Office of Scientific and Technical Information
+    year: 2020
+    doi: https://doi.org/10.2172/1617123
+    url: https://www.osti.gov/biblio/1617123
+    confidence: high
+    claims:
+      - id: experimental_keff_uncertainty
+        text: The total uncertainty for experimental keff was estimated at 420 pcm.
+      - id: expected_benchmark_keff
+        text: The evaluated benchmark-model keff target is 0.99978 after applying the assessed simplification bias.
+      - id: serpent_reference_keff
+        text: The first-criticality Serpent 2 calculation reported keff of 1.02132 with 3 pcm uncertainty.
+      - id: u235_coefficient
+        text: The calculated U-235 concentration reactivity coefficient matched the experimental value within reported uncertainty.
+      - id: likely_bias_sources
+        text: Possible bias sources include graphite impurity content, carbon capture data, and nuclear-grade graphite properties.
+    repo_use:
+      - Provides numerical uncertainty fields and bias notes for benchmark residual reporting.
+  - id: irphep_2019_msre
+    type: evaluated_benchmark_handbook
+    title: 2019 IRPhEP Handbook MSRE first criticality benchmark
+    organization: OECD Nuclear Energy Agency International Reactor Physics Experiment Evaluation Project
+    url: https://www.oecd-nea.org/jcms/pl_20279/international-handbook-of-evaluated-reactor-physics-benchmark-experiments
+    confidence: high
+    claims:
+      - id: evaluated_benchmark_record
+        text: The MSRE first criticality benchmark entered the evaluated reactor physics benchmark record in the 2019 handbook.
+    repo_use:
+      - Defines the eventual authoritative source for full geometry, material, and benchmark-evaluation tables.
+access_notes:
+  - The current repository only encodes facts available from public article/report landing pages and open text.
+  - Full benchmark-grade geometry and material reconstruction should be checked against the IRPhEP evaluation before any benchmark-ready claim is made.

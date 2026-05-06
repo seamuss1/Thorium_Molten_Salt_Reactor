@@ -25,10 +25,15 @@ def test_benchmark_paths_resolve_from_case_configs() -> None:
 
 def test_msre_benchmark_case_uses_historic_mode_and_resolves_benchmark() -> None:
     config = _load_case("msre_first_criticality")
+    built = build_case(config)
 
     assert config.reactor["mode"] == "historic_benchmark"
     assert config.benchmark_file is not None
     assert config.benchmark_file.exists()
+    assert config.data["benchmark_model"]["readiness"] == "illustrative_harness"
+    assert built.manifest["simulation"]["particles"] == 100000
+    assert built.manifest["benchmark_traceability"]["benchmark_quality"]["benchmark_ready"] is False
+    assert "benchmark_quality::benchmark_geometry_reconstructed" in built.manifest["model_validity"]["failed_check_names"]
 
 
 def test_flagship_case_declares_commercial_grid_characteristics() -> None:

@@ -1,0 +1,118 @@
+schema_version: 1
+benchmark_case: msre_first_criticality
+title: MSRE first criticality parameter traceability table
+status: public_source_dossier_started
+source_index: benchmarks/msre_first_criticality/source_index.yaml
+resolved_parameter_count: 7
+unresolved_required_parameter_count: 8
+parameter_groups:
+  - id: experiment_conditions
+    title: Experiment Conditions
+    parameters:
+      - id: experiment_type
+        value: first criticality
+        units: categorical
+        status: source_backed
+        confidence: high
+        source_refs: [ornl_measurements, shen_2021_nse]
+        model_mapping: reactor.mode historic_benchmark; validation target keff_experimental_criticality
+      - id: power_state
+        value: zero power
+        units: categorical
+        status: source_backed
+        confidence: high
+        source_refs: [ornl_measurements, shen_2021_nse]
+        model_mapping: simulation.mode eigenvalue with no transient power feedback claim
+      - id: salt_motion_state
+        value: stationary salt
+        units: categorical
+        status: source_backed
+        confidence: high
+        source_refs: [shen_2021_nse, osti_2020_msre_benchmark]
+        model_mapping: OpenMC static material distribution
+      - id: thermal_state
+        value: uniform temperature
+        units: categorical
+        status: source_backed
+        confidence: high
+        source_refs: [shen_2021_nse]
+        model_mapping: property_reference_temperature_c pending IRPhEP-confirmed value
+      - id: fissile_driver
+        value: U-235 fuel
+        units: categorical
+        status: source_backed
+        confidence: high
+        source_refs: [ornl_measurements, shen_2021_nse]
+        model_mapping: materials.fuel_salt.nuclides U235
+  - id: neutronics_targets
+    title: Neutronics Targets
+    parameters:
+      - id: experimental_critical_keff
+        value: 0.99978
+        units: k-effective
+        uncertainty_pcm: 420
+        uncertainty_type: total experimental benchmark uncertainty
+        status: source_backed
+        confidence: high
+        source_refs: [shen_2021_nse, osti_2020_msre_benchmark]
+        model_mapping: validation_targets.keff_experimental_criticality
+      - id: serpent_reference_keff
+        value: 1.02132
+        units: k-effective
+        uncertainty_pcm: 3
+        uncertainty_type: one_sigma Monte Carlo uncertainty
+        status: source_backed
+        confidence: high
+        source_refs: [shen_2021_nse, osti_2020_msre_benchmark]
+        model_mapping: future cross_code_checks.openmc_vs_serpent_reference
+      - id: u235_concentration_reactivity_coefficient_experiment
+        value: 0.223
+        units: relative reactivity per relative U-235 mass in loop
+        uncertainty: 0.006
+        status: source_backed
+        confidence: high
+        source_refs: [osti_2020_msre_benchmark]
+        model_mapping: future differential worth validation target
+      - id: u235_concentration_reactivity_coefficient_serpent
+        value: 0.2228
+        units: relative reactivity per relative U-235 mass in loop
+        uncertainty: 0.0014
+        status: source_backed
+        confidence: high
+        source_refs: [osti_2020_msre_benchmark]
+        model_mapping: future cross-code reference residual
+  - id: unresolved_required_inputs
+    title: Required Inputs Still Blocking Benchmark-Ready Status
+    parameters:
+      - id: full_core_graphite_lattice
+        status: unresolved
+        needed_for: benchmark-grade OpenMC geometry
+        source_refs: [irphep_2019_msre]
+      - id: axial_region_stack
+        status: unresolved
+        needed_for: benchmark-grade OpenMC geometry
+        source_refs: [irphep_2019_msre]
+      - id: vessel_reflector_and_control_regions
+        status: unresolved
+        needed_for: benchmark-grade OpenMC geometry
+        source_refs: [irphep_2019_msre]
+      - id: fuel_salt_mole_and_isotopic_inventory
+        status: unresolved
+        needed_for: benchmark-grade material model
+        source_refs: [irphep_2019_msre]
+      - id: graphite_grade_density_impurity_and_sab
+        status: unresolved
+        needed_for: graphite moderation and absorption uncertainty
+        source_refs: [irphep_2019_msre, osti_2020_msre_benchmark]
+      - id: inor8_or_hastelloy_n_structure_composition
+        status: unresolved
+        needed_for: vessel and structural absorption
+        source_refs: [irphep_2019_msre]
+      - id: benchmark_temperature_value
+        status: unresolved
+        needed_for: temperature-dependent materials and cross sections
+        source_refs: [irphep_2019_msre, shen_2021_nse]
+      - id: source_convergence_and_statepoint_statistics
+        status: unresolved
+        needed_for: OpenMC result publication
+        source_refs: [shen_2021_nse]
