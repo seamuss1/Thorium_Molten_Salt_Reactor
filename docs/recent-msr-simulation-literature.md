@@ -4,7 +4,15 @@ This note records the 2024-2026 literature review used to guide the next realism
 upgrades in this repository. The implemented changes from this review are the
 segmented delayed-neutron precursor transport model, molten-salt property
 uncertainty screen, tritium distribution screen, and graphite irradiation
-lifetime screen now documented in `docs/current-model-equations.md`.
+lifetime screen, plus the summary-derived deterministic physics-core loop
+residence handoff now documented in `docs/current-model-equations.md`.
+
+The May 2026 refresh prioritized primary or official-lab sources published since
+2024-05-06. It did not identify a reason to replace the repository's
+reduced-order architecture, but it did support one focused implementation
+upgrade: the deterministic finite-volume physics-core precursor handoff now uses
+summary-derived external-loop residence time instead of a fixed nominal loop
+time.
 
 ## Main Findings
 
@@ -29,8 +37,21 @@ lifetime screen now documented in `docs/current-model-equations.md`.
 - Pecora et al. derived one-dimensional delayed-neutron and decay-heat precursor
   transport equations in the SyTH system thermal-hydraulics model. The paper is
   a useful next step for extending this repository from a two-region model to
-  finite-volume loop segments.
+  finite-volume loop segments with physically meaningful residence times.
   Source: https://doi.org/10.13182/MC25-47271
+
+- Elhareef and Wu benchmarked a consistent point-reactor kinetics method against
+  MSRE reactivity insertion and natural-circulation tests while solving delayed
+  precursor concentration as part of the thermal-hydraulics/species-transport
+  model. This reinforces treating loop residence and flow as first-class inputs
+  to the precursor handoff, not as a hard-coded constant.
+  Source: https://doi.org/10.1016/j.anucene.2025.111366
+
+- Yilmaz et al. compared CAD and CSG OpenMC models for the MSRE and reiterated
+  that MSRE remains one of the few high-value validation anchors for liquid-fuel
+  MSRs. This supports the repository's MSRE benchmark-harness direction but did
+  not justify a reduced-order model change by itself.
+  Source: https://doi.org/10.3389/fnuen.2024.1385478
 
 - Chen et al. developed and verified ThorFPMC for coupled fission-product
   transport, highlighting that source term, decay heat, shielding, xenon poison,
@@ -100,6 +121,8 @@ The implemented models are intentionally reduced-order bridges:
 
 - six configurable DNP groups,
 - core plus configurable external-loop segment inventories,
+- summary-derived external-loop residence time for deterministic
+  finite-volume precursor handoffs,
 - implicit advection-decay stepping for numerical stability,
 - residence-time scaling with transient flow fraction,
 - cleanup removal weighted by loop segment,

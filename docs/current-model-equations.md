@@ -379,6 +379,22 @@ Segment residence fractions are normalized from the case `loop_segments` block,
 or inferred from primary-loop pipe geometry when available. The update is solved
 implicitly so severe flow-reduction scenarios remain numerically stable.
 
+The deterministic `physics_core` finite-volume precursor handoff uses the same
+idea, but now assigns its external-loop cells an absolute residence time from
+the run summary instead of a fixed nominal loop time. When primary-system
+inventory and flow are available, the loop residence estimate is:
+
+$$
+\tau_{\mathrm{loop,FV}}
+=
+\frac{V_{\mathrm{fuel,total}}-V_{\mathrm{active\ core}}}
+{\dot V_{\mathrm{primary}}}
+$$
+
+If that inventory balance is unavailable, the handoff falls back to pipe segment
+volume divided by local segment flow, then to a core-residence scaled fallback.
+The reported `loop_residence_basis` records which path was used.
+
 The xenon piece remains an explicit proxy:
 
 - xenon follows power with a configurable lag and cleanup removal term.

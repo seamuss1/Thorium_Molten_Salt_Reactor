@@ -307,7 +307,13 @@ def build_finite_volume_precursor_transport(
     loop_segments = normalize_loop_segments(config.data.get("loop_segments"))
     core_nodes = thermal_hydraulics["axial_nodes"]
     loop_cell_count = max(int(precursor_settings.get("loop_cells", len(loop_segments))), 1)
-    cells = _precursor_cells(core_nodes, loop_segments, loop_cell_count)
+    loop_residence = _estimate_external_loop_residence_time(summary, thermal_hydraulics)
+    cells = _precursor_cells(
+        core_nodes,
+        loop_segments,
+        loop_cell_count,
+        loop_residence_time_s=float(loop_residence["residence_time_s"]),
+    )
     diffusion_m2_s = max(float(precursor_settings.get("diffusion_coefficient_m2_s", 2.5e-5)), 0.0)
     cleanup_rate_s = _cleanup_rate_s(config, summary)
     delayed_group_results = []
@@ -351,6 +357,8 @@ def build_finite_volume_precursor_transport(
         "cell_count": len(cells),
         "core_cell_count": sum(1 for cell in cells if cell["region"] == "core"),
         "loop_cell_count": sum(1 for cell in cells if cell["region"] != "core"),
+        "loop_residence_time_s": _round_float(float(loop_residence["residence_time_s"])),
+        "loop_residence_basis": str(loop_residence["basis"]),
         "diffusion_coefficient_m2_s": _round_float(diffusion_m2_s),
         "cleanup_rate_s": _round_float(cleanup_rate_s),
         "core_delayed_neutron_source_absolute_fraction": _round_float(
@@ -532,6 +540,8 @@ def _precursor_cells(
     core_nodes: list[dict[str, Any]],
     loop_segments: list[dict[str, Any]],
     loop_cell_count: int,
+    *,
+    loop_residence_time_s: float,
 ) -> list[dict[str, Any]]:
     cells: list[dict[str, Any]] = []
     core_total_residence_s = sum(float(node.get("cell_length_m", 0.1)) / max(float(node.get("velocity_m_s", 0.0)), 1.0e-6) for node in core_nodes)
@@ -547,18 +557,52 @@ def _precursor_cells(
             }
         )
     normalized_segments = normalize_loop_segments(loop_segments)
+    assignments = _loop_cell_segment_assignments(normalized_segments, loop_cell_count)
+    assignment_counts: dict[int, int] = {}
+    for segment_index in assignments:
+        assignment_counts[segment_index] = assignment_counts.get(segment_index, 0) + 1
+    preserve_segment_residence = loop_cell_count >= len(normalized_segments)
     for index in range(loop_cell_count):
-        segment = normalized_segments[index % len(normalized_segments)]
+        segment_index = assignments[index]
+        segment = normalized_segments[segment_index]
+        if preserve_segment_residence:
+            residence_time_s = (
+                max(float(loop_residence_time_s), 1.0e-6)
+                * float(segment["residence_fraction"])
+                / max(assignment_counts[segment_index], 1)
+            )
+        else:
+            residence_time_s = max(float(loop_residence_time_s), 1.0e-6) / loop_cell_count
         cells.append(
             {
                 "id": f"loop_{index}_{segment['id']}",
                 "region": "loop",
-                "residence_time_s": max(4.0 * float(segment["residence_fraction"]), 0.05),
+                "segment_id": str(segment["id"]),
+                "residence_time_s": max(residence_time_s, 0.05),
                 "source_fraction": 0.0,
                 "cleanup_weight": float(segment["cleanup_weight"]),
             }
         )
     return cells
+
+
+def _loop_cell_segment_assignments(
+    segments: list[dict[str, float | str]],
+    loop_cell_count: int,
+) -> list[int]:
+    cumulative: list[float] = []
+    total = 0.0
+    for segment in normalize_loop_segments(segments):
+        total += float(segment["residence_fraction"])
+        cumulative.append(total)
+    assignments: list[int] = []
+    for index in range(loop_cell_count):
+        midpoint = (index + 0.5) / max(loop_cell_count, 1)
+        segment_index = 0
+        while segment_index < len(cumulative) - 1 and midpoint > cumulative[segment_index]:
+            segment_index += 1
+        assignments.append(segment_index)
+    return assignments
 
 
 def _solve_ring_advection_diffusion_decay(
@@ -665,6 +709,7 @@ def _cell_inventory_report(
         {
             "id": str(cell["id"]),
             "region": str(cell["region"]),
+            "segment_id": str(cell.get("segment_id", cell["region"])),
             "residence_time_s": _round_float(float(cell["residence_time_s"])),
             "source_fraction": _round_float(float(cell["source_fraction"])),
             "inventory_fraction": _round_float(totals[index] / max(total_inventory, 1.0e-12)),
@@ -922,6 +967,72 @@ def _flow_reversal_screen(
             }
         )
     return screen
+
+
+def _estimate_external_loop_residence_time(
+    summary: dict[str, Any],
+    thermal_hydraulics: dict[str, Any],
+) -> dict[str, Any]:
+    primary_system = summary.get("primary_system", {})
+    primary_system = primary_system if isinstance(primary_system, dict) else {}
+    reduced_order = summary.get("flow", {}).get("reduced_order", {})
+    active_flow = reduced_order.get("active_flow", {}) if isinstance(reduced_order, dict) else {}
+    primary_flow_m3_s = _finite_float_or_default(primary_system.get("primary_volumetric_flow_m3_s"), 0.0)
+    active_flow_m3_s = _finite_float_or_default(active_flow.get("total_volumetric_flow_m3_s"), 0.0)
+    flow_m3_s = primary_flow_m3_s if primary_flow_m3_s > 0.0 else active_flow_m3_s
+
+    inventory = primary_system.get("inventory", {})
+    fuel_salt = inventory.get("fuel_salt", {}) if isinstance(inventory, dict) else {}
+    total_fuel_salt_m3 = _finite_float_or_default(fuel_salt.get("total_m3"), 0.0)
+    active_salt_m3 = _finite_float_or_default(active_flow.get("total_salt_volume_cm3"), 0.0) * 1.0e-6
+    external_loop_m3 = max(total_fuel_salt_m3 - active_salt_m3, 0.0)
+    if external_loop_m3 > 0.0 and flow_m3_s > 0.0:
+        return {
+            "residence_time_s": external_loop_m3 / flow_m3_s,
+            "basis": "fuel_salt_inventory_minus_active_core_volume_over_primary_flow",
+        }
+
+    pipe_residence_s = _pipe_loop_residence_time_s(primary_system.get("loop_segments"))
+    if pipe_residence_s > 0.0:
+        return {
+            "residence_time_s": pipe_residence_s,
+            "basis": "primary_system_pipe_segment_volume_over_local_flow",
+        }
+
+    core_nodes = thermal_hydraulics.get("axial_nodes", [])
+    if isinstance(core_nodes, list):
+        core_residence_s = sum(
+            float(node.get("cell_length_m", 0.1)) / max(float(node.get("velocity_m_s", 0.0)), 1.0e-6)
+            for node in core_nodes
+            if isinstance(node, dict)
+        )
+        if core_residence_s > 0.0:
+            return {
+                "residence_time_s": max(core_residence_s * 4.0, 0.2),
+                "basis": "core_residence_time_scaled_fallback",
+            }
+
+    return {
+        "residence_time_s": 4.0,
+        "basis": "legacy_default_fallback",
+    }
+
+
+def _pipe_loop_residence_time_s(raw_segments: Any) -> float:
+    if not isinstance(raw_segments, list):
+        return 0.0
+    residence_s = 0.0
+    for segment in raw_segments:
+        if not isinstance(segment, dict):
+            continue
+        flow_m3_s = _finite_float_or_default(segment.get("volumetric_flow_m3_s"), 0.0)
+        length_m = _finite_float_or_default(segment.get("length_m"), 0.0)
+        diameter_m = _finite_float_or_default(segment.get("inner_diameter_m"), 0.0)
+        if flow_m3_s <= 0.0 or length_m <= 0.0 or diameter_m <= 0.0:
+            continue
+        volume_m3 = math.pi * (0.5 * diameter_m) ** 2 * length_m
+        residence_s += volume_m3 / flow_m3_s
+    return residence_s
 
 
 def _cleanup_rate_s(config: Any, summary: dict[str, Any]) -> float:

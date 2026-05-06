@@ -76,8 +76,10 @@ def test_physics_core_honors_configured_method_and_mesh_counts() -> None:
             }
         },
         "primary_system": {
+            "primary_volumetric_flow_m3_s": 0.025,
             "thermal_profile": {"estimated_hot_leg_temp_c": 690.0, "estimated_cold_leg_temp_c": 555.0},
             "loop_hydraulics": {"pump_head_m": 6.0, "buoyancy_driving_pressure_kpa": 1.2},
+            "inventory": {"fuel_salt": {"total_m3": 0.215}},
         },
         "metrics": {},
         "neutronics": {"status": "dry-run"},
@@ -89,6 +91,16 @@ def test_physics_core_honors_configured_method_and_mesh_counts() -> None:
     assert physics_core["neutronics"]["group_count"] == 7
     assert physics_core["thermal_hydraulics"]["axial_node_count"] == 8
     assert physics_core["precursor_transport"]["loop_cell_count"] == 3
+    assert physics_core["precursor_transport"]["loop_residence_time_s"] == pytest.approx(5.0)
+    assert physics_core["precursor_transport"]["loop_residence_basis"] == (
+        "fuel_salt_inventory_minus_active_core_volume_over_primary_flow"
+    )
+    loop_cells = [
+        cell for cell in physics_core["precursor_transport"]["cells"]
+        if cell["region"] == "loop"
+    ]
+    assert sum(float(cell["residence_time_s"]) for cell in loop_cells) == pytest.approx(5.0)
+    assert all(cell["segment_id"] != "loop" for cell in loop_cells)
 
 
 def test_physics_core_uses_defaults_for_null_optional_salt_properties() -> None:
