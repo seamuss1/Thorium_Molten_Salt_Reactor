@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, CheckCircle2, Clock, XCircle } from "lucide-react";
 import { api } from "../api";
 import { ExpandableText } from "../components/ExpandableText";
-import { MetricChart } from "../components/MetricChart";
+import { RunDataExplorer } from "../components/RunDataExplorer";
 import { RunOutputSections } from "../components/RunOutputSections";
 import { RunArtifacts } from "../components/RunArtifacts";
 import { hasViewableGeometry } from "../geometryArtifacts";
@@ -91,39 +91,8 @@ export function Runs() {
                 <ExpandableText lines={2}>{detail.data.latest_event.message}</ExpandableText>
               </div>
             )}
+            <RunDataExplorer run={detail.data} />
             <RunOutputSections sections={detail.data.output_sections ?? []} />
-            <section className="two-column">
-              <div className="panel">
-                <MetricChart metrics={detail.data.metrics} title="Raw metric rollup" />
-              </div>
-              <div className="panel">
-                <h2>Run state</h2>
-                <dl className="fact-list">
-                  <div>
-                    <dt>Status</dt>
-                    <dd>
-                      <ExpandableText lines={1}>{detail.data.status}</ExpandableText>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Phase</dt>
-                    <dd>
-                      <ExpandableText lines={1}>{detail.data.phase ?? "n/a"}</ExpandableText>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Artifacts</dt>
-                    <dd>{detail.data.artifacts.length}</dd>
-                  </div>
-                  <div>
-                    <dt>Capabilities</dt>
-                    <dd>
-                      <ExpandableText lines={2}>{detail.data.capabilities.join(", ") || "n/a"}</ExpandableText>
-                    </dd>
-                  </div>
-                </dl>
-              </div>
-            </section>
             <RunArtifacts artifacts={detail.data.artifacts} />
           </>
         ) : (

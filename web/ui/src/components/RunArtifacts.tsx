@@ -4,6 +4,7 @@ import { fetchText } from "../api";
 import { ExpandableText } from "./ExpandableText";
 import { Markdown } from "./Markdown";
 import type { ArtifactRef } from "../types";
+import { formatSize, visualArtifacts } from "../runData";
 
 interface RunArtifactsProps {
   artifacts: ArtifactRef[];
@@ -11,8 +12,9 @@ interface RunArtifactsProps {
 
 export function RunArtifacts({ artifacts }: RunArtifactsProps) {
   const report = artifacts.find((artifact) => artifact.label === "report.md");
-  const media = artifacts.filter((artifact) => artifact.kind === "media").slice(0, 6);
-  const data = artifacts.filter((artifact) => artifact.kind === "data").slice(0, 10);
+  const visuals = visualArtifacts(artifacts);
+  const visualPaths = new Set(visuals.map((artifact) => artifact.path));
+  const files = artifacts.filter((artifact) => artifact.label !== "report.md" && !visualPaths.has(artifact.path));
   const reportQuery = useQuery({
     queryKey: ["artifact-text", report?.url],
     queryFn: () => fetchText(report!.url),
@@ -38,41 +40,38 @@ export function RunArtifacts({ artifacts }: RunArtifactsProps) {
           <span>Visual outputs</span>
         </div>
         <div className="media-strip">
-          {media.map((artifact) => (
+          {visuals.map((artifact) => (
             <a key={artifact.path} href={artifact.url} target="_blank" rel="noreferrer" className="media-tile">
               {artifact.mime_type.startsWith("image/") ? <img src={artifact.url} alt={artifact.label} /> : <span>{artifact.label}</span>}
+              <small>{artifact.label}</small>
             </a>
           ))}
-          {!media.length && <div className="empty-panel">No plot or render media yet.</div>}
+          {!visuals.length && <div className="empty-panel">No plot or render media yet.</div>}
         </div>
       </section>
       <section className="artifact-pane">
         <div className="pane-title">
           <Database aria-hidden="true" />
-          <span>Data files</span>
+          <span>Files and datasets</span>
         </div>
         <div className="file-list">
-          {data.map((artifact) => (
+          {files.map((artifact) => (
             <div className="file-item" key={artifact.path}>
               <FileJson aria-hidden="true" />
               <ExpandableText className="file-name" lines={1}>
                 {artifact.label}
               </ExpandableText>
-              <small>{formatSize(artifact.size)}</small>
+              <small>
+                {artifact.kind} / {formatSize(artifact.size)}
+              </small>
               <a className="icon-action" href={artifact.url} target="_blank" rel="noreferrer" aria-label={`Open ${artifact.label}`}>
                 <ExternalLink aria-hidden="true" />
               </a>
             </div>
           ))}
-          {!data.length && <div className="empty-panel">No structured data artifacts yet.</div>}
+          {!files.length && <div className="empty-panel">No additional artifacts yet.</div>}
         </div>
       </section>
     </div>
   );
-}
-
-function formatSize(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
