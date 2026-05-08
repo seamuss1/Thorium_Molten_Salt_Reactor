@@ -16,6 +16,23 @@ summary-derived external-loop residence time instead of a fixed nominal loop
 time, and its reported delayed-neutron worth now weights the flowing precursor
 source by the deterministic adjoint/shape importance profile.
 
+## May 2026 Model Impact Assessment
+
+The review screened each model area named in the May 2026 task and separated
+science that changed the repository from science that should remain roadmap
+context until higher-fidelity data or architecture exists.
+
+| Area | Usefulness assessment | Repository action |
+| --- | --- | --- |
+| Reduced-order thermal hydraulics | Recent RELAP5-TMSR, SyTH, and RESTA3D work reinforces explicit loop residence, flow-fraction scaling, and finite-volume handoff patterns. The repo already had the core reduced-order closures, so the material gap was not a new TH correlation but better residence propagation into coupled precursor outputs. | Kept the reduced-order TH architecture. Used summary-derived loop residence in the deterministic precursor handoff. |
+| Neutronics handoffs | Squirrel and Griffin/Pronghorn/Squirrel MSRE validation work shows that point-kinetics reductions for liquid fuel should account for spatial source importance when precursor material moves out of high-worth regions. | Changed deterministic `physics_core.beta_eff` to use static adjoint-shape-weighted flowing precursor source, while preserving `unweighted_beta_eff` for comparison. |
+| Delayed-neutron precursor transport | New and recent DNP studies consistently support multi-group moving precursor treatment with core/external-loop residence effects. The existing segmented six-group model is directionally appropriate, but its deterministic handoff needed a worth-weighted metric. | Added cell-level delayed-neutron source fractions and the adjoint-weighted flowing-fuel worth report. |
+| Species transport | Mole/Griffin and ThorFPMC results show that fission-product migration, decay heat, xenon poison, source term, and online removal are coupled. That is scientifically relevant, but a real implementation would require a finite-volume species inventory model rather than a narrow patch. | No code change in this pass. Kept as roadmap context; current xenon, cleanup, and tritium pieces remain screening proxies. |
+| Chemistry | Recent multiphysics and fission-product transport work supports coupling chemistry, cleanup, and species state. The available public findings did not provide a small defensible replacement for the current redox/impurity/corrosion proxy. | No chemistry model change. Existing chemistry outputs remain explicitly labeled as proxy/screening values. |
+| Depletion | Current literature points toward online processing and inventory-control coupling, but implementing that well would require depletion-chain transport or SaltProc-style integration beyond this reduced-order patch. | No depletion code change. Existing depletion fields remain assumption metadata and reduced-order transient terms. |
+| Validation | MSRE remains the strongest public validation anchor, and recent CAD/CSG OpenMC plus Squirrel/Griffin/Pronghorn work increases confidence that MSRE pump and natural-circulation cases are the right next validation targets. | No new benchmark dataset was added in this pass. The literature note now records the validation relevance and the implemented metric can be compared against MSRE flowing-fuel delayed-neutron worth studies. |
+| Reporting | The original repository outputs reported precursor loss but not an importance-weighted delayed-neutron worth. That made the deterministic output less decision-useful for liquid-fuel kinetics comparisons. | Reports now expose weighted `beta_eff`, `beta_eff_basis`, `unweighted_beta_eff`, `delayed_neutron_flow_loss_pcm`, and precursor-coupling fractions through the physics-core JSON. |
+
 ## Main Findings
 
 - Lee et al. coupled Mole species transport with Griffin neutronics for the MSRE
