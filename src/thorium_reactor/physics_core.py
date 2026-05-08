@@ -108,6 +108,11 @@ def build_deterministic_neutronics_summary(
         "statepoint": summary.get("neutronics", {}).get("statepoint"),
     }
     selected = method_results[methods[0]]
+    adjoint_weighted_precursor = _adjoint_weighted_core_delayed_source_fraction(
+        precursor_transport=precursor_transport,
+        core_importance=selected["adjoint_weighted_importance"],
+    )
+    beta_eff = total_beta * adjoint_weighted_precursor["fraction"]
     return {
         "status": "completed",
         "model": "temperature_dependent_multigroup_deterministic",
@@ -123,7 +128,12 @@ def build_deterministic_neutronics_summary(
         },
         "cross_sections": _xs_report(base_xs),
         "k_eff": selected["k_eff"],
-        "beta_eff": _round_float(total_beta * precursor_transport["core_delayed_neutron_source_absolute_fraction"]),
+        "beta_eff": _round_float(beta_eff),
+        "beta_eff_basis": "static_adjoint_shape_weighted_flowing_precursor_source",
+        "unweighted_beta_eff": _round_float(
+            total_beta * precursor_transport["core_delayed_neutron_source_absolute_fraction"]
+        ),
+        "delayed_neutron_flow_loss_pcm": _round_float((total_beta - beta_eff) * 1.0e5),
         "delayed_neutron_total_yield_fraction": _round_float(total_beta),
         "adjoint_weighted_importance": selected["adjoint_weighted_importance"],
         "power_shape": selected["power_shape"],
@@ -133,6 +143,12 @@ def build_deterministic_neutronics_summary(
         "precursor_coupling": {
             "core_delayed_neutron_source_absolute_fraction": precursor_transport[
                 "core_delayed_neutron_source_absolute_fraction"
+            ],
+            "adjoint_weighted_core_delayed_neutron_source_fraction": adjoint_weighted_precursor[
+                "fraction"
+            ],
+            "adjoint_static_source_normalization": adjoint_weighted_precursor[
+                "static_source_normalization"
             ],
             "transport_loss_fraction": precursor_transport["transport_loss_fraction"],
         },
@@ -320,6 +336,8 @@ def build_finite_volume_precursor_transport(
     delayed_core_source = 0.0
     delayed_total_source = 0.0
     delayed_loop_source = 0.0
+    cell_inventories = [0.0 for _ in cells]
+    cell_delayed_sources = [0.0 for _ in cells]
     for group in groups:
         inventory = _solve_ring_advection_diffusion_decay(
             cells,
@@ -328,6 +346,9 @@ def build_finite_volume_precursor_transport(
             diffusion_m2_s=diffusion_m2_s,
             cleanup_rate_s=cleanup_rate_s,
         )
+        for index, value in enumerate(inventory):
+            cell_inventories[index] += value
+            cell_delayed_sources[index] += float(group["decay_constant_s"]) * value
         core_inventory = sum(value for value, cell in zip(inventory, cells) if cell["region"] == "core")
         loop_inventory = sum(value for value, cell in zip(inventory, cells) if cell["region"] != "core")
         core_source = float(group["decay_constant_s"]) * core_inventory
@@ -347,7 +368,7 @@ def build_finite_volume_precursor_transport(
             }
         )
     decay_heat = _decay_heat_precursor_summary(cells, diffusion_m2_s, cleanup_rate_s, precursor_settings)
-    cell_report = _cell_inventory_report(cells, groups, diffusion_m2_s, cleanup_rate_s)
+    cell_report = _cell_inventory_report(cells, cell_inventories, cell_delayed_sources)
     return {
         "status": "completed",
         "model": FINITE_VOLUME_PRECURSOR_MODEL,
@@ -371,6 +392,42 @@ def build_finite_volume_precursor_transport(
         "delayed_neutron_groups": delayed_group_results,
         "decay_heat_precursors": decay_heat,
         "cells": cell_report,
+    }
+
+
+def _adjoint_weighted_core_delayed_source_fraction(
+    *,
+    precursor_transport: dict[str, Any],
+    core_importance: list[float],
+) -> dict[str, float]:
+    cells = precursor_transport.get("cells", [])
+    if not isinstance(cells, list):
+        cells = []
+    core_cells = [cell for cell in cells if isinstance(cell, dict) and cell.get("region") == "core"]
+    if not core_cells:
+        fallback = float(precursor_transport["core_delayed_neutron_source_absolute_fraction"])
+        return {
+            "fraction": _round_float(fallback),
+            "static_source_normalization": 1.0,
+        }
+
+    importance = _resample_profile(core_importance, len(core_cells))
+    static_source = sum(
+        max(float(cell.get("source_fraction", 0.0)), 0.0) * importance[index]
+        for index, cell in enumerate(core_cells)
+    )
+    weighted_source = sum(
+        max(float(cell.get("delayed_neutron_source_fraction", 0.0)), 0.0) * importance[index]
+        for index, cell in enumerate(core_cells)
+    )
+    if static_source <= 0.0:
+        weighted_fraction = float(precursor_transport["core_delayed_neutron_source_absolute_fraction"])
+        static_source = 1.0
+    else:
+        weighted_fraction = max(weighted_source / static_source, 0.0)
+    return {
+        "fraction": _round_float(weighted_fraction),
+        "static_source_normalization": _round_float(static_source),
     }
 
 
@@ -689,22 +746,11 @@ def _decay_heat_precursor_summary(
 
 def _cell_inventory_report(
     cells: list[dict[str, Any]],
-    groups: list[dict[str, float | str]],
-    diffusion_m2_s: float,
-    cleanup_rate_s: float,
+    cell_inventories: list[float],
+    cell_delayed_sources: list[float],
 ) -> list[dict[str, Any]]:
-    totals = [0.0 for _ in cells]
-    for group in groups:
-        inventory = _solve_ring_advection_diffusion_decay(
-            cells,
-            decay_constant_s=float(group["decay_constant_s"]),
-            source_strength=float(group["relative_yield_fraction"]),
-            diffusion_m2_s=diffusion_m2_s,
-            cleanup_rate_s=cleanup_rate_s,
-        )
-        for index, value in enumerate(inventory):
-            totals[index] += value
-    total_inventory = sum(totals)
+    total_inventory = sum(cell_inventories)
+    total_delayed_source = sum(cell_delayed_sources)
     return [
         {
             "id": str(cell["id"]),
@@ -712,7 +758,10 @@ def _cell_inventory_report(
             "segment_id": str(cell.get("segment_id", cell["region"])),
             "residence_time_s": _round_float(float(cell["residence_time_s"])),
             "source_fraction": _round_float(float(cell["source_fraction"])),
-            "inventory_fraction": _round_float(totals[index] / max(total_inventory, 1.0e-12)),
+            "inventory_fraction": _round_float(cell_inventories[index] / max(total_inventory, 1.0e-12)),
+            "delayed_neutron_source_fraction": _round_float(
+                cell_delayed_sources[index] / max(total_delayed_source, 1.0e-12)
+            ),
         }
         for index, cell in enumerate(cells)
     ]
@@ -783,6 +832,31 @@ def _xs_report(xs: dict[str, Any]) -> dict[str, Any]:
         "nu_fission_cm_inv": [_round_float(value) for value in xs["nu_fission_cm_inv"]],
         "chi": [_round_float(value) for value in xs["chi"]],
     }
+
+
+def _resample_profile(values: list[float], count: int) -> list[float]:
+    if count <= 0:
+        return []
+    parsed = [max(_finite_float_or_default(value, 1.0), 0.0) for value in values]
+    if not parsed:
+        return [1.0 for _ in range(count)]
+    if len(parsed) == count:
+        return parsed
+    if count == 1:
+        return [sum(parsed) / max(len(parsed), 1)]
+    if len(parsed) == 1:
+        return [parsed[0] for _ in range(count)]
+
+    resampled = []
+    old_max = len(parsed) - 1
+    new_max = count - 1
+    for index in range(count):
+        position = index * old_max / new_max
+        lower = int(math.floor(position))
+        upper = min(lower + 1, old_max)
+        fraction = position - lower
+        resampled.append(parsed[lower] * (1.0 - fraction) + parsed[upper] * fraction)
+    return resampled
 
 
 def _reference_keff(config: Any, summary: dict[str, Any]) -> float:

@@ -3,16 +3,18 @@
 This note records the 2024-2026 literature review used to guide the next realism
 upgrades in this repository. The implemented changes from this review are the
 segmented delayed-neutron precursor transport model, molten-salt property
-uncertainty screen, tritium distribution screen, and graphite irradiation
-lifetime screen, plus the summary-derived deterministic physics-core loop
-residence handoff now documented in `docs/current-model-equations.md`.
+uncertainty screen, tritium distribution screen, graphite irradiation lifetime
+screen, summary-derived deterministic physics-core loop residence handoff, and
+static adjoint-shape weighting for flowing-fuel precursor worth now documented
+in `docs/current-model-equations.md`.
 
 The May 2026 refresh prioritized primary or official-lab sources published since
-2024-05-06. It did not identify a reason to replace the repository's
-reduced-order architecture, but it did support one focused implementation
-upgrade: the deterministic finite-volume physics-core precursor handoff now uses
+2024-05-08. It did not identify a reason to replace the repository's
+reduced-order architecture, but it did support focused implementation upgrades:
+the deterministic finite-volume physics-core precursor handoff now uses
 summary-derived external-loop residence time instead of a fixed nominal loop
-time.
+time, and its reported delayed-neutron worth now weights the flowing precursor
+source by the deterministic adjoint/shape importance profile.
 
 ## Main Findings
 
@@ -46,6 +48,19 @@ time.
   model. This reinforces treating loop residence and flow as first-class inputs
   to the precursor handoff, not as a hard-coded constant.
   Source: https://doi.org/10.1016/j.anucene.2025.111366
+
+- Pfahl et al. developed the MOOSE-based Squirrel point-kinetics solver and
+  emphasized that liquid-fuel transient reactivity should weight moving delayed
+  neutron precursors by a static adjoint or neutron-shape importance function
+  when reducing spatial dynamics to a point-kinetics handoff. A related
+  DTU/INL/Idaho National Laboratory validation study compared Squirrel, Griffin,
+  and Pronghorn against MSRE zero-power pump transients and natural-circulation
+  tests; it reported good agreement for point and spatial dynamics models and
+  quantified roughly 35% flowing-fuel delayed-neutron worth loss in MSRE cases.
+  This directly motivated the new deterministic `physics_core` adjoint-weighted
+  delayed-neutron worth report.
+  Sources: https://doi.org/10.1080/00295639.2025.2494182 and
+  https://doi.org/10.3389/fnuen.2025.1617048
 
 - Yilmaz et al. compared CAD and CSG OpenMC models for the MSRE and reiterated
   that MSRE remains one of the few high-value validation anchors for liquid-fuel
@@ -123,6 +138,8 @@ The implemented models are intentionally reduced-order bridges:
 - core plus configurable external-loop segment inventories,
 - summary-derived external-loop residence time for deterministic
   finite-volume precursor handoffs,
+- adjoint-shape-weighted deterministic beta-effective and flowing-fuel delayed
+  neutron loss metrics,
 - implicit advection-decay stepping for numerical stability,
 - residence-time scaling with transient flow fraction,
 - cleanup removal weighted by loop segment,

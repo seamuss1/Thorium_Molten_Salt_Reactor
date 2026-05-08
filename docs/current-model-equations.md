@@ -395,6 +395,33 @@ If that inventory balance is unavailable, the handoff falls back to pipe segment
 volume divided by local segment flow, then to a core-residence scaled fallback.
 The reported `loop_residence_basis` records which path was used.
 
+The deterministic neutronics handoff now reports `beta_eff` with a static
+adjoint-shape precursor worth correction, following recent Squirrel and
+Griffin/Pronghorn/Squirrel MSRE validation work. For core finite-volume cell
+`j`, the precursor solve reports the delayed-neutron source fraction
+`s_{d,j}`. The deterministic neutron solve reports a normalized axial importance
+profile `w_j`, and the thermal-hydraulic source profile gives the stationary
+source fraction `s_{0,j}`. The flowing-fuel worth fraction is:
+
+$$
+F_{\beta,\mathrm{flow}}
+=
+\frac{\sum_{j \in \mathrm{core}} s_{d,j}w_j}
+{\sum_{j \in \mathrm{core}} s_{0,j}w_j}
+$$
+
+The deterministic effective delayed-neutron fraction is then:
+
+$$
+\beta_{\mathrm{eff,flow}}
+=
+\beta_{\mathrm{total}}F_{\beta,\mathrm{flow}}
+$$
+
+The older unweighted core delayed-neutron source fraction remains in the JSON as
+`unweighted_beta_eff` and `core_delayed_neutron_source_absolute_fraction` for
+comparison.
+
 The xenon piece remains an explicit proxy:
 
 - xenon follows power with a configurable lag and cleanup removal term.

@@ -33,9 +33,19 @@ def test_run_case_writes_coupled_physics_core_artifact() -> None:
         assert physics_core["neutronics"]["cross_sections"]["interpolation"] == "linear_temperature_dependence_between_declared_grid_points"
         assert physics_core["neutronics"]["k_eff"] > 0.0
         assert physics_core["neutronics"]["beta_eff"] > 0.0
+        assert physics_core["neutronics"]["beta_eff_basis"] == "static_adjoint_shape_weighted_flowing_precursor_source"
+        assert physics_core["neutronics"]["unweighted_beta_eff"] > 0.0
         assert physics_core["neutronics"]["feedback_coefficients"]["fuel_temperature_pcm_per_c"] < 0.0
         assert len(physics_core["neutronics"]["power_shape"]) == physics_core["thermal_hydraulics"]["axial_node_count"]
         assert len(physics_core["neutronics"]["adjoint_weighted_importance"]) == physics_core["thermal_hydraulics"]["axial_node_count"]
+        weighted_fraction = physics_core["neutronics"]["precursor_coupling"][
+            "adjoint_weighted_core_delayed_neutron_source_fraction"
+        ]
+        assert 0.0 < weighted_fraction < 1.0
+        assert physics_core["neutronics"]["beta_eff"] == pytest.approx(
+            physics_core["neutronics"]["delayed_neutron_total_yield_fraction"] * weighted_fraction,
+            abs=1.0e-6,
+        )
         assert physics_core["thermal_hydraulics"]["model"] == FINITE_VOLUME_TH_MODEL
         assert physics_core["thermal_hydraulics"]["porous_core_model"]["bulk_porosity"] > 0.0
         assert "pump_curve" in physics_core["thermal_hydraulics"]
@@ -45,6 +55,10 @@ def test_run_case_writes_coupled_physics_core_artifact() -> None:
         assert physics_core["precursor_transport"]["cell_count"] > physics_core["thermal_hydraulics"]["axial_node_count"]
         assert 0.0 < physics_core["precursor_transport"]["transport_loss_fraction"] < 1.0
         assert 0.0 < physics_core["precursor_transport"]["decay_heat_precursors"]["core_decay_heat_source_fraction"] < 1.0
+        assert sum(
+            float(cell["delayed_neutron_source_fraction"])
+            for cell in physics_core["precursor_transport"]["cells"]
+        ) == pytest.approx(1.0, abs=1.0e-5)
         assert (bundle.root / "physics_core.json").exists()
         assert summary["metrics"]["physics_core_k_eff"] == physics_core["neutronics"]["k_eff"]
     finally:
@@ -95,6 +109,9 @@ def test_physics_core_honors_configured_method_and_mesh_counts() -> None:
     assert physics_core["precursor_transport"]["loop_residence_basis"] == (
         "fuel_salt_inventory_minus_active_core_volume_over_primary_flow"
     )
+    assert 0.0 < physics_core["neutronics"]["precursor_coupling"][
+        "adjoint_weighted_core_delayed_neutron_source_fraction"
+    ] < 1.0
     loop_cells = [
         cell for cell in physics_core["precursor_transport"]["cells"]
         if cell["region"] == "loop"
