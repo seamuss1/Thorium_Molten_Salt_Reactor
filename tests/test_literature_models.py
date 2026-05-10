@@ -3,6 +3,7 @@ from pathlib import Path
 from thorium_reactor.config import load_case_config
 from thorium_reactor.literature_models import (
     build_graphite_lifetime_summary,
+    build_msre_pump_transient_benchmark_screen,
     build_property_uncertainty_summary,
     build_tritium_transport_summary,
 )
@@ -62,3 +63,33 @@ def test_graphite_lifetime_screen_reports_fast_flux_margin() -> None:
     assert summary["fast_flux_peaking_factor"] > 0.0
     assert summary["estimated_lifespan_years"] > 0.0
     assert summary["screening_status"] in {"pass", "watch"}
+
+
+def test_msre_pump_transient_screen_reports_1d_validation_bounds() -> None:
+    config = load_case_config(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml")
+    reduced_order_flow = {
+        "active_flow": {
+            "channel_count": 49,
+            "total_salt_volume_cm3": 9000.0,
+        },
+        "disconnected_inventory": {
+            "channel_count": 6,
+            "salt_volume_cm3": 1200.0,
+        },
+        "stagnant_inventory": {
+            "channel_count": 2,
+            "salt_volume_cm3": 300.0,
+        },
+    }
+
+    summary = build_msre_pump_transient_benchmark_screen(
+        config,
+        reduced_order_flow=reduced_order_flow,
+    )
+
+    assert summary["benchmark_mean_error_startup_pcm"]["max"] == 21.0
+    assert summary["benchmark_mean_error_coastdown_pcm"]["min"] == 5.0
+    assert summary["non_active_salt_inventory_fraction"] == 0.117647
+    assert summary["stagnant_salt_inventory_fraction"] == 0.029412
+    assert summary["screening_status"] == "watch"
+    assert "bypass_flow" in summary["sensitivity_drivers"]

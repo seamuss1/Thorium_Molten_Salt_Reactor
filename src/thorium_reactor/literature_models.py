@@ -12,6 +12,7 @@ DEFAULT_PROPERTY_UNCERTAINTIES_95: dict[str, float] = {
 }
 DEFAULT_GRAPHITE_FAST_FLUENCE_LIMIT_N_CM2 = 3.0e22
 SECONDS_PER_YEAR = 365.25 * 24.0 * 3600.0
+MSRE_PUMP_TRANSIENT_BENCHMARK_SOURCE = "https://doi.org/10.1080/00295639.2025.2475650"
 
 
 def build_property_uncertainty_summary(
@@ -178,10 +179,69 @@ def build_graphite_lifetime_summary(
     }
 
 
+def build_msre_pump_transient_benchmark_screen(
+    config: Any,
+    *,
+    reduced_order_flow: Mapping[str, Any],
+) -> dict[str, Any]:
+    active_flow = _mapping_value(reduced_order_flow, "active_flow")
+    disconnected_inventory = _mapping_value(reduced_order_flow, "disconnected_inventory")
+    stagnant_inventory = _mapping_value(reduced_order_flow, "stagnant_inventory")
+
+    active_volume_cm3 = _setting_float(active_flow, "total_salt_volume_cm3", 0.0)
+    non_active_volume_cm3 = _setting_float(disconnected_inventory, "salt_volume_cm3", 0.0)
+    stagnant_volume_cm3 = _setting_float(stagnant_inventory, "salt_volume_cm3", 0.0)
+    total_tracked_volume_cm3 = max(active_volume_cm3 + non_active_volume_cm3, 0.0)
+    non_active_fraction = (
+        non_active_volume_cm3 / total_tracked_volume_cm3
+        if total_tracked_volume_cm3 > 0.0
+        else 0.0
+    )
+    stagnant_fraction = (
+        stagnant_volume_cm3 / total_tracked_volume_cm3
+        if total_tracked_volume_cm3 > 0.0
+        else 0.0
+    )
+    channel_count = int(active_flow.get("channel_count", 0)) if active_flow else 0
+    status = "watch" if non_active_fraction > 0.0 or stagnant_fraction > 0.0 else "nominal"
+    return {
+        "model": "msre_pump_transient_benchmark_screen",
+        "screening_status": status,
+        "reference_reactor": "MSRE pump startup and coastdown tests",
+        "source": MSRE_PUMP_TRANSIENT_BENCHMARK_SOURCE,
+        "applicability": "one_dimensional_reduced_order_transient_and_precursor_models",
+        "benchmark_mean_error_startup_pcm": {"min": 11.0, "max": 21.0},
+        "benchmark_mean_error_coastdown_pcm": {"min": 5.0, "max": 13.0},
+        "sensitivity_drivers": [
+            "multigroup_energy_structure",
+            "delayed_neutron_precursor_diffusion",
+            "delayed_neutron_precursor_group_structure",
+            "bypass_flow",
+            "transient_flow_rates",
+        ],
+        "active_flow_channel_count": channel_count,
+        "active_salt_volume_cm3": _round_float(active_volume_cm3),
+        "non_active_salt_volume_cm3": _round_float(non_active_volume_cm3),
+        "stagnant_salt_volume_cm3": _round_float(stagnant_volume_cm3),
+        "non_active_salt_inventory_fraction": _round_float(non_active_fraction),
+        "stagnant_salt_inventory_fraction": _round_float(stagnant_fraction),
+        "interpretation": (
+            "The 2025 MSRE pump-transient benchmark supports one-dimensional models "
+            "as screening tools, but radial distribution and bypass-like inventory "
+            "can affect early transient reactivity rates."
+        ),
+    }
+
+
 def _mapping_section(config: Any, key: str) -> Mapping[str, Any]:
     data = getattr(config, "data", config if isinstance(config, Mapping) else {})
     section = data.get(key, {}) if isinstance(data, Mapping) else {}
     return section if isinstance(section, Mapping) else {}
+
+
+def _mapping_value(payload: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    value = payload.get(key, {})
+    return value if isinstance(value, Mapping) else {}
 
 
 def _setting_float(settings: Mapping[str, Any], key: str, default: float) -> float:

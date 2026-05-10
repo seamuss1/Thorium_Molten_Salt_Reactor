@@ -26,6 +26,11 @@ def test_run_case_writes_coupled_physics_core_artifact() -> None:
         summary = run_case(config, bundle, solver_enabled=False)
 
         physics_core = summary["physics_core"]
+        pump_benchmark = summary["msre_pump_transient_benchmark"]
+        assert pump_benchmark["model"] == "msre_pump_transient_benchmark_screen"
+        assert pump_benchmark["benchmark_mean_error_startup_pcm"]["max"] == 21.0
+        assert summary["metrics"]["msre_pump_transient_startup_error_max_pcm"] == 21.0
+        assert "bypass_flow" in pump_benchmark["sensitivity_drivers"]
         assert physics_core["status"] == "completed"
         assert physics_core["integrity_checks"]["status"] == "ok"
         assert physics_core["neutronics"]["group_count"] == 11

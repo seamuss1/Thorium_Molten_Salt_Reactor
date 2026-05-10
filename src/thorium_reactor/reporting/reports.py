@@ -342,6 +342,32 @@ def generate_report(
         lines.append(f"- Representative residence time (s): `{active_flow.get('representative_residence_time_s', 'n/a')}`")
         lines.append(f"- Disconnected salt inventory channels: `{disconnected_inventory.get('channel_count', 'n/a')}`")
 
+    msre_pump_transient = summary.get("msre_pump_transient_benchmark", {})
+    if msre_pump_transient:
+        startup_error = msre_pump_transient.get("benchmark_mean_error_startup_pcm", {})
+        coastdown_error = msre_pump_transient.get("benchmark_mean_error_coastdown_pcm", {})
+        lines.extend(["", "## MSRE Pump Transient Validation", ""])
+        lines.append(f"- Model: `{msre_pump_transient.get('model', 'n/a')}`")
+        lines.append(f"- Screening status: `{msre_pump_transient.get('screening_status', 'n/a')}`")
+        lines.append(f"- Source: `{msre_pump_transient.get('source', 'n/a')}`")
+        lines.append(
+            "- Benchmark startup mean error range (pcm): "
+            f"`{startup_error.get('min', 'n/a')} to {startup_error.get('max', 'n/a')}`"
+        )
+        lines.append(
+            "- Benchmark coastdown mean error range (pcm): "
+            f"`{coastdown_error.get('min', 'n/a')} to {coastdown_error.get('max', 'n/a')}`"
+        )
+        lines.append(
+            "- Non-active salt inventory fraction: "
+            f"`{msre_pump_transient.get('non_active_salt_inventory_fraction', 'n/a')}`"
+        )
+        lines.append(
+            "- Stagnant salt inventory fraction: "
+            f"`{msre_pump_transient.get('stagnant_salt_inventory_fraction', 'n/a')}`"
+        )
+        lines.append(f"- Interpretation: {msre_pump_transient.get('interpretation', 'n/a')}")
+
     primary_system = summary.get("primary_system", {})
     if primary_system:
         loop_hydraulics = primary_system.get("loop_hydraulics", {})

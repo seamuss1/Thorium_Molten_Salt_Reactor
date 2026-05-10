@@ -41,6 +41,7 @@ from thorium_reactor.modeling import (
 )
 from thorium_reactor.literature_models import (
     build_graphite_lifetime_summary,
+    build_msre_pump_transient_benchmark_screen,
     build_property_uncertainty_summary,
     build_tritium_transport_summary,
 )
@@ -420,6 +421,16 @@ def run_case(
             summary["metrics"]["active_flow_residence_time_s"] = reduced_order_flow["active_flow"]["representative_residence_time_s"]
             summary["metrics"]["disconnected_flow_inventory_channels"] = reduced_order_flow["disconnected_inventory"]["channel_count"]
             summary["metrics"]["stagnant_flow_inventory_channels"] = reduced_order_flow["stagnant_inventory"]["channel_count"]
+            summary["msre_pump_transient_benchmark"] = build_msre_pump_transient_benchmark_screen(
+                config,
+                reduced_order_flow=reduced_order_flow,
+            )
+            summary["metrics"]["msre_pump_transient_startup_error_max_pcm"] = summary[
+                "msre_pump_transient_benchmark"
+            ]["benchmark_mean_error_startup_pcm"]["max"]
+            summary["metrics"]["non_active_salt_inventory_fraction"] = summary[
+                "msre_pump_transient_benchmark"
+            ]["non_active_salt_inventory_fraction"]
             summary["graphite_lifetime"] = build_graphite_lifetime_summary(
                 config,
                 reduced_order_flow=reduced_order_flow,

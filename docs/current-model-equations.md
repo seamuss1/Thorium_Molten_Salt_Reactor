@@ -499,6 +499,48 @@ The screen is intentionally conservative: it highlights when a case should be
 sent to a neutronics/thermal-mechanics workflow, rather than replacing that
 workflow.
 
+## MSRE Pump-Transient Benchmark Screen
+
+Recent MSRE pump-transient benchmark work compared a simplified
+one-dimensional system model with an R-Z porous-medium model and experimental
+MSRE pump startup/coastdown data. The repository now reports this as a
+validation screen rather than changing the reduced-order solver closure.
+
+The report carries the literature mean-error envelopes:
+
+$$
+\epsilon_{\mathrm{startup}} = 11\text{ to }21\ \mathrm{pcm}
+$$
+
+$$
+\epsilon_{\mathrm{coastdown}} = 5\text{ to }13\ \mathrm{pcm}
+$$
+
+It also reports the fraction of tracked salt inventory outside the configured
+active-flow channels:
+
+$$
+f_{\mathrm{nonactive}}
+=
+\frac{V_{\mathrm{nonactive}}}
+{V_{\mathrm{active}} + V_{\mathrm{nonactive}}}
+$$
+
+and the stagnant subset:
+
+$$
+f_{\mathrm{stagnant}}
+=
+\frac{V_{\mathrm{stagnant}}}
+{V_{\mathrm{active}} + V_{\mathrm{nonactive}}}
+$$
+
+The screen is marked `watch` when non-active or stagnant salt inventory is
+present, because one-dimensional early transient reactivity rates may then be
+limited by radial distribution or bypass-like flow effects. It is a reporting
+and validation-context metric, not a replacement for a spatial
+thermal-hydraulic solve.
+
 ## Coupled Depletion And Chemistry Terms In The Transient Proxy
 
 The transient model now also tracks:

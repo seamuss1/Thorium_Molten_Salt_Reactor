@@ -14,7 +14,10 @@ reduced-order architecture, but it did support focused implementation upgrades:
 the deterministic finite-volume physics-core precursor handoff now uses
 summary-derived external-loop residence time instead of a fixed nominal loop
 time, and its reported delayed-neutron worth now weights the flowing precursor
-source by the deterministic adjoint/shape importance profile.
+source by the deterministic adjoint/shape importance profile. A May 2026
+follow-up added an MSRE pump-transient benchmark screen so reports carry the
+published one-dimensional model error envelope and flag bypass-like salt
+inventory that can limit early transient reactivity predictions.
 
 ## May 2026 Model Impact Assessment
 
@@ -31,7 +34,7 @@ context until higher-fidelity data or architecture exists.
 | Chemistry | Recent multiphysics and fission-product transport work supports coupling chemistry, cleanup, and species state. The available public findings did not provide a small defensible replacement for the current redox/impurity/corrosion proxy. | No chemistry model change. Existing chemistry outputs remain explicitly labeled as proxy/screening values. |
 | Depletion | Current literature points toward online processing and inventory-control coupling, but implementing that well would require depletion-chain transport or SaltProc-style integration beyond this reduced-order patch. | No depletion code change. Existing depletion fields remain assumption metadata and reduced-order transient terms. |
 | Validation | MSRE remains the strongest public validation anchor, and recent CAD/CSG OpenMC plus Squirrel/Griffin/Pronghorn work increases confidence that MSRE pump and natural-circulation cases are the right next validation targets. | No new benchmark dataset was added in this pass. The literature note now records the validation relevance and the implemented metric can be compared against MSRE flowing-fuel delayed-neutron worth studies. |
-| Reporting | The original repository outputs reported precursor loss but not an importance-weighted delayed-neutron worth. That made the deterministic output less decision-useful for liquid-fuel kinetics comparisons. | Reports now expose weighted `beta_eff`, `beta_eff_basis`, `unweighted_beta_eff`, `delayed_neutron_flow_loss_pcm`, and precursor-coupling fractions through the physics-core JSON. |
+| Reporting | The original repository outputs reported precursor loss but not an importance-weighted delayed-neutron worth. It also lacked a concise validation note for the expected error of one-dimensional MSRE pump-transient reductions. | Reports now expose weighted `beta_eff`, `beta_eff_basis`, `unweighted_beta_eff`, `delayed_neutron_flow_loss_pcm`, precursor-coupling fractions, and an MSRE pump-transient benchmark screen with startup/coastdown error bands and non-active salt inventory fractions. |
 
 ## Main Findings
 
@@ -65,6 +68,15 @@ context until higher-fidelity data or architecture exists.
   model. This reinforces treating loop residence and flow as first-class inputs
   to the precursor handoff, not as a hard-coded constant.
   Source: https://doi.org/10.1016/j.anucene.2025.111366
+
+- Elhareef et al. developed a peer-reviewed MSRE pump-transient benchmark using
+  simplified one-dimensional and R-Z porous-medium models. The reported mean
+  reactivity-response errors for the one-dimensional model were 11-21 pcm for
+  pump startup and 5-13 pcm for coastdown, while the higher-order model improved
+  the early transient rate by resolving radial salt distribution and bypass
+  flow. This directly motivated the new `msre_pump_transient_benchmark` report
+  section and the non-active salt inventory metrics.
+  Source: https://doi.org/10.1080/00295639.2025.2475650
 
 - Pfahl et al. developed the MOOSE-based Squirrel point-kinetics solver and
   emphasized that liquid-fuel transient reactivity should weight moving delayed
@@ -165,6 +177,8 @@ The implemented models are intentionally reduced-order bridges:
 - property uncertainty bands in run summaries and transient sweeps,
 - normalized tritium production/distribution accounting,
 - and graphite fast-flux/lifetime screening metrics.
+- and the MSRE pump-transient validation screen for one-dimensional reactivity
+  response limits and bypass-like inventory awareness.
 
 It is still not a spatial neutron kinetics solve, a Mole/Griffin coupling, a
 RELAP5-class system model, or a finite-volume species-transport solver. The next

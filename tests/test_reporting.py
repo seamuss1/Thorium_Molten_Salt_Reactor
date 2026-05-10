@@ -199,6 +199,16 @@ def test_report_includes_reduced_order_flow_section() -> None:
                             },
                         }
                     },
+                    "msre_pump_transient_benchmark": {
+                        "model": "msre_pump_transient_benchmark_screen",
+                        "screening_status": "watch",
+                        "source": "https://doi.org/10.1080/00295639.2025.2475650",
+                        "benchmark_mean_error_startup_pcm": {"min": 11.0, "max": 21.0},
+                        "benchmark_mean_error_coastdown_pcm": {"min": 5.0, "max": 13.0},
+                        "non_active_salt_inventory_fraction": 0.12,
+                        "stagnant_salt_inventory_fraction": 0.03,
+                        "interpretation": "Bypass-like inventory can affect early transient reactivity rates.",
+                    },
                     "primary_system": {
                         "loop_hydraulics": {
                             "total_pressure_drop_kpa": 31.5,
@@ -254,6 +264,9 @@ def test_report_includes_reduced_order_flow_section() -> None:
         assert "37" in report
         assert "355.397391" in report
         assert "0.005402" in report
+        assert "## MSRE Pump Transient Validation" in report
+        assert "11.0 to 21.0" in report
+        assert "0.12" in report
         assert "31.5" in report
         assert "63.4" in report
     finally:
