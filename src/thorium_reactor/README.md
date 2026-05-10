@@ -34,6 +34,7 @@ The command entrypoint is [`cli.py`](cli.py). It keeps command dispatch thin and
 | [`runtime_benchmark.py`](runtime_benchmark.py) | Backend timing and GPU/XPU viability checks |
 | [`economics/`](economics) | Finance, schedule, cash-flow, and cost-breakdown outputs |
 | [`benchmarking.py`](benchmarking.py) | Benchmark residuals, traceability, and Docker/OpenMC benchmark helpers |
+| [`qa.py`](qa.py) | Load and validate QA requirement records and the requirements traceability matrix |
 | [`reporting/`](reporting) | Markdown report generation and SVG plot generation |
 | [`integrations.py`](integrations.py) | External-code export and optional execution adapters |
 | [`web/`](web) | FastAPI app, filesystem repository adapter, job runner, permissions, schemas |

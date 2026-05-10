@@ -1,0 +1,232 @@
+schema_version: 1
+title: Thorium reactor QA requirement records
+description: >
+  Controlled requirements for benchmark, workflow, QA, reporting, and
+  solver-handoff evidence in the open MSR modeling platform.
+status_definitions:
+  implemented: Requirement is implemented and has automated verification.
+  active: Requirement has implementation coverage but still has known evidence gaps.
+  blocked: Requirement is intentionally blocked by missing source data or solver evidence.
+  planned: Requirement is defined for a future workflow.
+requirements:
+  - id: REQ-QA-RTM
+    title: Requirements traceability matrix
+    category: qa
+    statement: The repository shall maintain controlled QA requirement records and a flat traceability matrix.
+    implementation_area:
+      - qa/requirements.yaml
+      - qa/requirements_traceability_matrix.csv
+      - src/thorium_reactor/qa.py
+    verification_tests:
+      - tests/test_qa.py::test_requirements_traceability_artifacts_validate
+      - tests/test_qa.py::test_traceability_matrix_links_known_requirement_ids_and_columns
+    validation_evidence:
+      - qa/requirements_traceability_matrix.csv
+    acceptance_criteria:
+      - Every requirement has implementation area, verification test, validation evidence, acceptance criterion, and status.
+      - Every matrix row links to a known requirement ID.
+    status: implemented
+    related_issues:
+      - "#10"
+
+  - id: REQ-BENCH-SOURCE-TRACEABILITY
+    title: Benchmark source traceability
+    category: benchmark
+    statement: Benchmark claims shall be linked to source dossiers, assumptions, targets, and confidence records.
+    implementation_area:
+      - src/thorium_reactor/benchmarking.py
+      - benchmarks/msre_first_criticality/benchmark.yaml
+      - benchmarks/tmsr_lf1/benchmark.yaml
+      - src/thorium_reactor/reporting/reports.py
+    verification_tests:
+      - tests/test_benchmarking.py::test_structured_benchmark_metadata_has_traceability_summary
+      - tests/test_reporting.py::test_generate_report_includes_benchmark_evidence_and_novelty_tracks
+    validation_evidence:
+      - benchmarks/README.md
+      - docs/msre-first-criticality-validation-plan.md
+    acceptance_criteria:
+      - Reports surface traceability score, evidence records, assumption links, and validation gaps.
+    status: implemented
+
+  - id: REQ-MSRE-GEOMETRY
+    title: MSRE benchmark geometry reconstruction
+    category: msre_benchmark
+    statement: The MSRE first-criticality benchmark case shall not be promoted until geometry is source-indexed and benchmark-grade.
+    implementation_area:
+      - configs/cases/msre_first_criticality/case.yaml
+      - benchmarks/msre_first_criticality/parameters.yaml
+      - src/thorium_reactor/benchmarking.py
+    verification_tests:
+      - tests/test_benchmarking.py::test_msre_first_criticality_quality_gates_block_illustrative_harness
+      - tests/test_config_and_build.py::test_msre_benchmark_case_uses_historic_mode_and_resolves_benchmark
+    validation_evidence:
+      - benchmarks/msre_first_criticality/source_index.yaml
+      - benchmarks/msre_first_criticality/parameters.yaml
+    acceptance_criteria:
+      - Benchmark-ready status remains blocked while geometry_fidelity is not benchmark_reconstruction.
+    status: blocked
+    related_issues:
+      - "#2"
+
+  - id: REQ-MSRE-MATERIALS
+    title: MSRE source-indexed materials
+    category: msre_benchmark
+    statement: The MSRE first-criticality benchmark shall use source-indexed isotopic fuel salt, graphite, and structural material records before promotion.
+    implementation_area:
+      - configs/cases/msre_first_criticality/case.yaml
+      - benchmarks/msre_first_criticality/parameters.yaml
+      - src/thorium_reactor/benchmarking.py
+    verification_tests:
+      - tests/test_benchmarking.py::test_msre_first_criticality_quality_gates_block_illustrative_harness
+      - tests/test_config_and_build.py::test_msre_benchmark_case_uses_historic_mode_and_resolves_benchmark
+    validation_evidence:
+      - benchmarks/msre_first_criticality/parameters.yaml
+      - benchmarks/msre_first_criticality/assumptions.md
+    acceptance_criteria:
+      - Benchmark-ready status remains blocked while material_fidelity is not source_indexed_isotopic.
+    status: blocked
+    related_issues:
+      - "#3"
+
+  - id: REQ-MSRE-SOLVER-BUNDLE
+    title: MSRE solver-backed evidence bundle
+    category: msre_benchmark
+    statement: Solver-backed benchmark claims shall include OpenMC output, runtime context, and reproducible bundle metadata.
+    implementation_area:
+      - src/thorium_reactor/neutronics/workflows.py
+      - src/thorium_reactor/benchmarking.py
+      - src/thorium_reactor/runtime_context.py
+    verification_tests:
+      - tests/test_benchmarking.py::test_build_docker_openmc_command_targets_repo_compose_runtime
+      - tests/test_bundle_snapshots.py::test_report_and_validation_surface_input_provenance
+    validation_evidence:
+      - benchmarks/msre_first_criticality/benchmark.yaml
+      - results/README.md
+    acceptance_criteria:
+      - Benchmark-ready status remains blocked until solver_statistics is published_solver_bundle.
+      - Runtime provenance is carried into validation and report artifacts.
+    status: blocked
+    related_issues:
+      - "#4"
+
+  - id: REQ-BENCH-QUALITY-GATES
+    title: Benchmark quality gates
+    category: benchmark
+    statement: Benchmark claims shall fail closed when required evidence gates are incomplete.
+    implementation_area:
+      - src/thorium_reactor/benchmarking.py
+      - src/thorium_reactor/neutronics/workflows.py
+      - src/thorium_reactor/reporting/reports.py
+    verification_tests:
+      - tests/test_benchmarking.py::test_msre_first_criticality_quality_gates_block_illustrative_harness
+      - tests/test_config_and_build.py::test_msre_benchmark_case_uses_historic_mode_and_resolves_benchmark
+      - tests/test_reporting.py::test_report_surfaces_model_validity_and_validation_maturity
+    validation_evidence:
+      - benchmarks/msre_first_criticality/benchmark.yaml
+      - docs/msre-first-criticality-validation-plan.md
+    acceptance_criteria:
+      - Generated manifests and reports list failed benchmark quality gates.
+      - Validation checks expose benchmark_quality failures.
+    status: active
+    related_issues:
+      - "#8"
+
+  - id: REQ-VALIDATION-RESIDUALS
+    title: Validation residual evaluation
+    category: validation
+    statement: Validation targets shall evaluate outputs against case-specific criteria and benchmark uncertainty where available.
+    implementation_area:
+      - src/thorium_reactor/benchmarking.py
+      - src/thorium_reactor/neutronics/workflows.py
+      - src/thorium_reactor/reporting/plots.py
+    verification_tests:
+      - tests/test_benchmarking.py::test_msre_keff_residuals_are_uncertainty_aware
+      - tests/test_plots.py::test_generate_validation_plot_updates_manifest
+    validation_evidence:
+      - configs/cases/msre_first_criticality/case.yaml
+      - benchmarks/msre_first_criticality/benchmark.yaml
+    acceptance_criteria:
+      - Validation residuals include pass, fail, or pending status with reviewer-readable messages.
+      - K-effective residuals combine benchmark and calculated uncertainty when present.
+    status: implemented
+
+  - id: REQ-REPORTING-EVIDENCE
+    title: Evidence-rich generated reports
+    category: reporting
+    statement: Generated reports shall surface benchmark context, evidence trails, validation maturity, runtime context, and model limitations.
+    implementation_area:
+      - src/thorium_reactor/reporting/reports.py
+      - src/thorium_reactor/reporting/plots.py
+    verification_tests:
+      - tests/test_reporting.py::test_generate_report_includes_benchmark_evidence_and_novelty_tracks
+      - tests/test_reporting.py::test_report_includes_runtime_context_and_benchmark_residuals
+      - tests/test_reporting.py::test_report_surfaces_model_validity_and_validation_maturity
+    validation_evidence:
+      - docs/current-model-equations.md
+      - docs/msre-first-criticality-validation-plan.md
+    acceptance_criteria:
+      - Reports expose source evidence and validation gaps without promoting surrogate results.
+    status: implemented
+
+  - id: REQ-RESULT-BUNDLE-PROVENANCE
+    title: Reproducible result bundle provenance
+    category: workflow
+    statement: Workflow outputs shall be written into run-scoped bundles with input snapshots and provenance metadata.
+    implementation_area:
+      - src/thorium_reactor/paths.py
+      - src/thorium_reactor/bundle_inputs.py
+      - src/thorium_reactor/runtime_context.py
+    verification_tests:
+      - tests/test_bundle_snapshots.py::test_validation_prefers_bundled_benchmark_snapshot_after_repo_benchmark_changes
+      - tests/test_paths.py::test_result_bundle_creates_dedicated_geometry_exports_dir
+    validation_evidence:
+      - results/README.md
+      - README.md
+    acceptance_criteria:
+      - Workflow commands write isolated results under results/<case>/<run_id>.
+      - Validation and report workflows prefer bundled input snapshots.
+    status: implemented
+
+  - id: REQ-WEB-JOB-ALLOWLIST
+    title: Browser job safety allowlist
+    category: web
+    statement: Browser-launched workflows shall be restricted to safe commands and isolated run bundles.
+    implementation_area:
+      - src/thorium_reactor/web/jobs.py
+      - src/thorium_reactor/web/permissions.py
+      - web/README.md
+    verification_tests:
+      - tests/test_web_backend.py::test_web_draft_validation_does_not_modify_source_case
+      - tests/test_web_backend.py::test_web_requires_access_identity_when_configured
+      - tests/test_web_backend.py::test_web_rate_limits_non_admins_and_admin_can_reset
+    validation_evidence:
+      - docs/browser-front-end.md
+      - web/README.md
+    acceptance_criteria:
+      - Browser-launched simulations do not mutate canonical case YAML.
+      - Web permissions expose local access and rate-limit assumptions.
+    status: active
+    related_issues:
+      - "#32"
+
+  - id: REQ-EXTERNAL-HANDOFF-EXPORTS
+    title: External-code handoff exports
+    category: integrations
+    statement: External solver adapters shall export structured handoff metadata and distinguish export-only status from executed evidence.
+    implementation_area:
+      - src/thorium_reactor/integrations.py
+      - configs/cases/README.md
+    verification_tests:
+      - tests/test_cli.py::test_cli_registers_external_integration_commands
+      - tests/test_container_workflow.py::test_canonical_docker_compose_defines_required_services
+      - tests/test_web_backend.py::test_web_run_detail_exposes_generated_data_and_plot_artifacts
+    validation_evidence:
+      - configs/cases/README.md
+      - docs/current-model-equations.md
+    acceptance_criteria:
+      - Handoff artifacts identify tool, input kind, runtime context, and export-only or executed status.
+      - Reports surface external integration outputs without calling proxy decks validated solver translations.
+    status: active
+    related_issues:
+      - "#20"
+      - "#21"

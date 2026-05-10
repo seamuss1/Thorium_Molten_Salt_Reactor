@@ -26,6 +26,7 @@ The Windows `.cmd` wrappers are the normal entrypoints on this host because Powe
 | Case definitions | YAML reactor inputs, material inventories, geometry parameters, transient scenarios, economics assumptions, and validation targets | [configs/cases](configs/cases) |
 | Core package | CLI orchestration, config loading, neutronics build plumbing, reduced-order physics, plotting, reporting, web API, and external-code handoffs | [src/thorium_reactor](src/thorium_reactor) |
 | Benchmarks | MSRE historical benchmark scaffolds plus TMSR-LF1 literature-backed surrogate targets and traceability scoring | [benchmarks](benchmarks) |
+| QA artifacts | Requirements traceability matrix and controlled QA requirement records | [qa](qa) |
 | Results | Immutable run bundles under `results/<case>/<run_id>/` with snapshots, metrics, plots, reports, provenance, and geometry exports | [results/README.md](results/README.md) |
 | Browser lab | FastAPI serves both `/api` and the production React UI on one port | [web](web) and [docs/browser-front-end.md](docs/browser-front-end.md) |
 | Science notes | Modeling equations, literature review, MSRE validation plan, taxonomy, and front-end notes indexed by the Science view | [docs](docs) |
@@ -164,6 +165,7 @@ These are pragmatic export adapters. They do not claim validated one-to-one tran
 - [AGENTS.md](AGENTS.md): local runtime and workflow rules
 - [configs/cases/README.md](configs/cases/README.md): case schema and portfolio details
 - [src/thorium_reactor/README.md](src/thorium_reactor/README.md): package map and command flow
+- [qa/README.md](qa/README.md): requirements traceability and QA record artifacts
 - [web/README.md](web/README.md): browser app architecture and operational notes
 - [benchmarks/README.md](benchmarks/README.md): benchmark evidence structure
 - [results/README.md](results/README.md): bundle anatomy

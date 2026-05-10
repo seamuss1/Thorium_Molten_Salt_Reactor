@@ -23,6 +23,7 @@ from thorium_reactor.integrations import (
 from thorium_reactor.neutronics.openmc_compat import missing_openmc_runtime_message, openmc
 from thorium_reactor.neutronics.workflows import _build_visualization_state, build_case, run_case, validate_case
 from thorium_reactor.paths import ResultBundle, case_config_path, create_result_bundle, discover_repo_root, existing_result_bundle, latest_result_bundle
+from thorium_reactor.qa import build_requirements_summary
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot, load_plot_manifest
 from thorium_reactor.reporting.reports import generate_report
 from thorium_reactor.transient_sweep import DEFAULT_TRANSIENT_SWEEP_SAMPLES
@@ -36,6 +37,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="reactor", description="Thorium reactor platform CLI")
     parser.add_argument("--repo-root", type=Path, default=None, help="Override the repository root.")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    qa_command = subparsers.add_parser("qa", help="Validate QA requirements traceability artifacts")
+    qa_command.add_argument("--format", choices=["text", "json"], default="text", help="Output format.")
 
     for command_name in (
         "build",
@@ -123,6 +127,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     repo_root = args.repo_root.resolve() if args.repo_root else discover_repo_root()
+    if args.command == "qa":
+        summary = build_requirements_summary(repo_root)
+        if args.format == "json":
+            print(json.dumps(summary, indent=2, sort_keys=True))
+        else:
+            status = "PASS" if summary["passed"] else "FAIL"
+            print(f"QA requirements traceability: {status}")
+            print(f"Requirements: {summary['requirements']['total']}")
+            print(f"Matrix rows: {summary['matrix']['rows']}")
+            for check in summary["checks"]:
+                print(f"- {check['name']}: {check['status']}")
+            for error in summary["errors"]:
+                print(f"ERROR: {error}")
+        return 0 if summary["passed"] else 1
+
     config = load_case_config(case_config_path(repo_root, args.case))
 
     if args.command in {"build", "run", "benchmark", "transient", "transient-sweep", "runtime-benchmark", "economics", *INTEGRATION_COMMANDS}:
