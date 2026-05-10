@@ -138,6 +138,7 @@ dmypy.json
 # Reactor platform runtime outputs
 results/*
 !results/.gitkeep
+!results/README.md
 *.h5
 *.out
 *.ppm
@@ -145,4 +146,10 @@ results/*
 *.svg
 *.obj
 *.xml
+!resources/**/*.png
+!resources/**/*.svg
+!resources/**/*.jpg
+!resources/**/*.jpeg
+!resources/**/*.gif
+!resources/**/*.webp
 !archive/legacy_openmc_2022/**

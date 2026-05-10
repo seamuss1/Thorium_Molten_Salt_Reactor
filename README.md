@@ -1,176 +1,176 @@
-# Thorium Molten Salt Reactor Platform
+# Thorium Molten Salt Reactor Lab
 
-Container-first molten-salt reactor design monorepo for benchmarked MSR workflows. The repository now centers on an MSRE-backed validation spine, a modern TMSR-LF1 extension path, Docker Compose-based execution, standardized result bundles, steady-state and reduced-order system models, and reproducible report and visualization artifacts while preserving the original 2022 thesis outputs in an in-repo archive.
+Config-driven molten-salt reactor simulation workbench with a Python CLI, reproducible result bundles, benchmark traceability, reduced-order thermal/flow models, geometry exports, and a single-port FastAPI + React browser lab.
 
-## Featured Geometry
+This is a research and engineering scaffold, not a licensed design tool. The project is deliberately honest about maturity: dry-run neutronics are separated from solver-backed OpenMC work, modern TMSR-style cases are marked as traceable surrogates until deeper source data lands, and generated reports carry validation gaps instead of burying them.
 
-![Detailed TMSR-LF1-inspired molten salt reactor cutaway](resources/tmsr_lf1_core_csg.png)
+![Thorium Lab dashboard](resources/readme/web-dashboard.png)
 
-The `tmsr_lf1_core` case now resolves to a detailed CSG reactor stack with active fuel channels, control-guide channels, instrumentation wells, stacked plena, graphite reflector zones, a downcomer annulus, and dual vessel shells. The same Python geometry definition drives both the OpenMC model build and the repository render artifact.
+## Start Here
 
-## What This Repo Now Contains
+| Goal | Command | Output |
+| --- | --- | --- |
+| Open a configured shell | `.\scripts\Enter-PytbknShell.cmd` | Repo-aware shell with `PYTHONPATH=src` |
+| Build a smoke case | `.\scripts\Run-Reactor.cmd build example_pin` | `results/example_pin/<run_id>/build_manifest.json` |
+| Run without OpenMC | `.\scripts\Run-Reactor.cmd run example_pin --no-solver` | Summary, metrics, provenance, report inputs |
+| Render the TMSR core | `.\scripts\Run-Reactor.cmd render tmsr_lf1_core` | PNG/SVG/OBJ/STL/glTF geometry exports |
+| Start the browser lab | `.\scripts\Run-Web.cmd` | `http://localhost:18488` |
+| Run tests | `.\scripts\Run-Tests.cmd` | Full pytest suite |
 
-- `src/thorium_reactor`: installable platform package and `reactor` CLI
-- `configs/cases`: canonical reactor cases
-- `benchmarks/msre_*`: historic benchmark metadata and dataset-centric acceptance targets
-- `benchmarks/tmsr_lf1`: modern test-reactor metadata with source-linked Chinese 2 MWth TMSR operating-point, property-uncertainty, and validation-maturity records
-- `results`: generated result bundles at `results/<case>/<run_id>/`
-- `resources`: rendered reference images used in project documentation
-- `archive/legacy_openmc_2022`: preserved historical scripts and outputs from the thesis prototype
-- `tests`: unit tests for config loading, geometry manifests, BOP closure, transient physics screens, and CLI wiring
+The Windows `.cmd` wrappers are the normal entrypoints on this host because PowerShell script execution is restricted. See [AGENTS.md](AGENTS.md) for the repo-local runtime rules and [web/README.md](web/README.md) for the browser stack.
 
-## Canonical Cases
+## What This Repo Does
 
-- `example_pin`: fast smoke/regression case
-- `fuel_channel`: layered fuel-channel submodel
-- `msre_first_criticality`: historic-benchmark harness for an MSRE first-criticality style acceptance band
-- `msre_zero_power_physics`: historic-benchmark harness for zero-power regression and report plumbing
-- `msre_u233_zero_power`: historic-benchmark harness for U-233-focused zero-power studies
-- `tmsr_lf1_core`: detailed OpenMC CSG core with vessel stack and specialized channel families inspired by the TMSR-LF1 concept
-- `immersed_pool_reference`: reference-inspired immersed-pool concept with offset core enclosure, primary-loop hardware, and animated flow render output
-- `flagship_grid_msr`: 300 MWe net U.S. NRC grid-connected thorium MSR planning target with finance and build-schedule outputs
+| Layer | What is implemented | Where to look |
+| --- | --- | --- |
+| Case definitions | YAML reactor inputs, material inventories, geometry parameters, transient scenarios, economics assumptions, and validation targets | [configs/cases](configs/cases) |
+| Core package | CLI orchestration, config loading, neutronics build plumbing, reduced-order physics, plotting, reporting, web API, and external-code handoffs | [src/thorium_reactor](src/thorium_reactor) |
+| Benchmarks | MSRE historical benchmark scaffolds plus TMSR-LF1 literature-backed surrogate targets and traceability scoring | [benchmarks](benchmarks) |
+| Results | Immutable run bundles under `results/<case>/<run_id>/` with snapshots, metrics, plots, reports, provenance, and geometry exports | [results/README.md](results/README.md) |
+| Browser lab | FastAPI serves both `/api` and the production React UI on one port | [web](web) and [docs/browser-front-end.md](docs/browser-front-end.md) |
+| Science notes | Modeling equations, literature review, MSRE validation plan, taxonomy, and front-end notes indexed by the Science view | [docs](docs) |
+| Legacy work | Preserved 2022 OpenMC thesis prototype and original output files | [archive/legacy_openmc_2022](archive/legacy_openmc_2022) |
 
-## Supported Runtime
+## Simulation Figures
 
-Docker Compose is the supported workflow for development, testing, benchmarking, reporting, and solver-backed runs. The Windows wrapper scripts in [`scripts`](scripts) are thin Compose launchers and should be treated as the normal entrypoints.
+The README figures below are copied from real result bundles into [resources/readme](resources/readme) so the front page stays stable even though `results/` is ignored by Git.
 
-```bash
-docker compose build app
-docker compose run --rm app python -m pytest
-docker compose run --rm app python -m thorium_reactor.cli run example_pin --no-solver
-docker compose run --rm openmc python -m thorium_reactor.cli benchmark msre_first_criticality
-```
+| TMSR-LF1 cutaway | Physics state overlay |
+| --- | --- |
+| ![TMSR-LF1 annotated cutaway](resources/readme/tmsr-lf1-annotated-cutaway.png) | ![TMSR-LF1 physics overlay](resources/readme/tmsr-lf1-physics-overlay.png) |
 
-Windows-friendly wrappers target the same runtime:
+| Transient uncertainty envelope | Flagship finance waterfall |
+| --- | --- |
+| ![TMSR-LF1 fuel temperature uncertainty envelope](resources/readme/tmsr-lf1-temperature-envelope.svg) | ![Flagship cost waterfall](resources/readme/flagship-finance-cost-waterfall.svg) |
 
-```powershell
-.\scripts\Run-Tests.cmd
-.\scripts\Run-Reactor.cmd run example_pin --no-solver
-.\scripts\Run-Reactor.cmd benchmark msre_first_criticality
-.\scripts\Enter-PytbknShell.cmd
-```
+The latest TMSR-LF1 gallery source bundle used here is `results/tmsr_lf1_core/full-suite-20260502-1916-r2/`. Its summary reports a 250 MWth surrogate core, 456 generated cells, 91 channels, 85 active-flow salt-bearing channels, `beta_eff = 0.000495`, a traceability score of 88.3, and a validation maturity score of 68.9. Its transient ensemble used the NumPy backend with 512 samples; the p95 fuel-temperature peak is 718.7 C for the configured mild reactivity insertion scenario.
 
-Host Python environments remain best-effort for local development, but they are no longer the documented default. `environment.yml` and `environment-openmc-linux.yml` remain in the repo as fallback/reference environments.
+## Browser Lab
 
-## Browser Lab Interface
+The app is a practical lab console, not a landing page. It discovers case YAML, reads result bundles, shows generated plots and reports, launches safe workflow phases, and renders Markdown science notes with KaTeX.
 
-The repository includes a browser front end for exploring cases, result bundles, reports, science notes, plots, and 3D geometry exports. The app uses one browser-facing port: FastAPI serves both `/api` and the production React build at `http://localhost:18488`.
+![Simulation builder](resources/readme/web-builder.png)
 
-Start it on Windows with:
+Main screens:
 
-```powershell
-.\scripts\Run-Web.cmd
-```
+| Screen | Purpose |
+| --- | --- |
+| Dashboard | Portfolio snapshot, latest outputs, documentation index, quick launch |
+| Simulations | Case cards, capabilities, parameters, and latest run context |
+| Builder | Draft-per-run YAML parameter edits and safe command selection |
+| Run log | Job status, event stream, reports, plots, raw JSON, and artifacts |
+| Science | `README.md` plus `docs/*.md` rendered inside the app |
+| 3D | glTF geometry viewer with generated image fallback |
+| Admin | Local/deployed run limit reset tools for configured admins |
 
-The main views are Dashboard, Cases, Builder, Runs, Science, 3D, and Admin for configured admins. Browser-launched runs use bundle-local snapshots under `results/<case>/<run_id>/` and leave canonical case YAML files untouched. The v1 browser command allowlist is deliberately limited to safe workflow phases: `build`, `run --no-solver`, `transient`, `transient-sweep`, `validate`, `render`, and `report`.
+Browser-launched runs write isolated snapshots under `results/<case>/<run_id>/` and do not mutate `configs/cases/*/case.yaml`. The web command allowlist is intentionally narrow: `build`, `run --no-solver`, `transient`, `transient-sweep`, `validate`, `render`, and `report`.
 
-When published through Cloudflare Access, keep `THORIUM_REACTOR_ACCESS_REQUIRED=1` so simulation starts require an authenticated Access email header. `seamusdgallagher@gmail.com` and comma-separated `THORIUM_REACTOR_ADMIN_EMAILS` entries can start without limit. Other authenticated users are limited to `THORIUM_REACTOR_RATE_LIMIT_PER_DAY`, defaulting to one start per day, and admins can reset that counter in the Admin view.
+## Case Portfolio
 
-The Science view automatically indexes `README.md` and `docs/*.md`. Markdown equations written with `$...$` or `$$...$$` render with KaTeX in both science documents and generated reports. See [docs/browser-front-end.md](docs/browser-front-end.md) for interface details and development notes.
+| Case | Role | Best first command | Notes |
+| --- | --- | --- | --- |
+| [`example_pin`](configs/cases/example_pin/case.yaml) | Smoke/regression pin | `.\scripts\Run-Reactor.cmd run example_pin --no-solver` | Fastest way to check runtime, reporting, and web bundle display |
+| [`fuel_channel`](configs/cases/fuel_channel/case.yaml) | Layered channel submodel | `.\scripts\Run-Reactor.cmd build fuel_channel` | Useful for material and CSG channel checks |
+| [`msre_first_criticality`](configs/cases/msre_first_criticality/case.yaml) | Historical benchmark harness | `.\scripts\Run-Reactor.cmd validate msre_first_criticality` | See [MSRE validation plan](docs/msre-first-criticality-validation-plan.md) |
+| [`msre_zero_power_physics`](configs/cases/msre_zero_power_physics/case.yaml) | MSRE zero-power regression | `.\scripts\Run-Reactor.cmd report msre_zero_power_physics` | Report and residual plumbing |
+| [`msre_u233_zero_power`](configs/cases/msre_u233_zero_power/case.yaml) | U-233 MSRE zero-power harness | `.\scripts\Run-Reactor.cmd validate msre_u233_zero_power` | Historical benchmark path |
+| [`tmsr_lf1_core`](configs/cases/tmsr_lf1_core/case.yaml) | Modern TMSR-LF1-inspired core | `.\scripts\Run-Reactor.cmd render tmsr_lf1_core` | Detailed ring-lattice CSG, transient proxy, uncertainty sweep |
+| [`immersed_pool_reference`](configs/cases/immersed_pool_reference/case.yaml) | Immersed-pool demonstrator | `.\scripts\Run-Reactor.cmd transient immersed_pool_reference --scenario partial_heat_sink_loss` | Pool layout, loop segments, flow animation assets |
+| [`flagship_grid_msr`](configs/cases/flagship_grid_msr/case.yaml) | Commercial planning target | `.\scripts\Run-Reactor.cmd economics flagship_grid_msr --scenario conservative_foak` | 300 MWe planning case with cost and schedule outputs |
 
-## Docker Compose Layout
-
-The canonical runtime interface is [`docker-compose.yml`](docker-compose.yml). It defines:
-
-- `app`: default service for `build`, `run --no-solver`, `validate`, `report`, `render`, `transient`, `transient-sweep`, and `pytest`
-- `web`: single-port FastAPI + React browser lab interface on `18488`
-- `openmc`: solver-backed `run` and `benchmark`
-- `thermochimica`: chemistry/speciation integration service
-- `saltproc`: online-processing and inventory-accounting integration service
-- `moltres`: multigroup and moving-precursor integration service
-
-Examples:
-
-```bash
-docker compose build app openmc
-docker compose run --rm app python -m thorium_reactor.cli run example_pin --run-id docker-example --no-solver
-docker compose run --rm openmc python -m thorium_reactor.cli benchmark msre_first_criticality --run-id docker-benchmark
-docker compose run --rm thermochimica python -m thorium_reactor.cli thermochimica tmsr_lf1_core --run-id docker-chem
-```
-
-[`docker-compose.openmc.yml`](docker-compose.openmc.yml) remains as a compatibility shim for one migration cycle.
-
-## CLI Workflow
-
-```bash
-reactor build example_pin
-reactor run example_pin --no-solver
-reactor benchmark msre_first_criticality --docker-openmc
-reactor validate example_pin
-reactor report example_pin
-reactor render tmsr_lf1_core
-reactor transient immersed_pool_reference --scenario partial_heat_sink_loss
-reactor transient-sweep immersed_pool_reference --scenario partial_heat_sink_loss --samples 2048 --prefer-gpu
-reactor economics flagship_grid_msr --scenario conservative_foak --project-start 2026-05-02
-reactor moose immersed_pool_reference
-reactor scale tmsr_lf1_core
-reactor thermochimica tmsr_lf1_core
-reactor saltproc tmsr_lf1_core
-reactor moltres immersed_pool_reference
-```
-
-Command behavior:
-
-- `reactor build <case>` creates a new result bundle, emits a build manifest plus geometry description JSON, and exports OpenMC XML when OpenMC is installed.
-- `reactor run <case>` performs the build, computes steady-state BOP outputs, and writes `summary.json`, `state_store.json`, `runtime_context.json`, `property_audit.json`, and `benchmark_residuals.json`. With `--no-solver`, the run is an explicit `dry-run`. Without `--no-solver`, the run uses OpenMC when available and otherwise completes as `skipped_missing_solver`.
-- `reactor benchmark <case>` requires a solver-backed runtime and is intended to run through the Docker Compose `openmc` service.
-- `reactor validate <case>` checks geometry/material invariants and compares available metrics to configured acceptance bands.
-- `reactor report <case>` generates `report.md` from the latest or specified run bundle, including benchmark traceability scorecards, runtime context, and benchmark residual summaries when metadata is present.
-- `reactor render <case>` writes procedural geometry exports for visualization workflows, including OBJ, STL, watertight mesh validation JSON, a rendered PNG, animated GIF flow output, and MP4 video output when a case defines flow-animation paths and `ffmpeg` is available.
-- `reactor transient <case>` runs a reduced-order nodal transient proxy from the steady-state summary, writes `transient.json`, updates `summary.json`, and emits transient plots when the case defines transient scenarios.
-- `reactor transient-sweep <case>` runs an uncertainty ensemble around the reduced-order transient model, writes `transient_sweep.json`, updates `summary.json` with p50/p95 envelope metrics, and carries molten-salt property uncertainty bands into the ensemble defaults. It prefers CuPy when `--prefer-gpu` is supplied and a CUDA device is available; otherwise it uses the built-in CPU backend.
-- `reactor economics <case>` runs the commercial finance and build-schedule workflow, writes `finance.json`, `schedule.json`, `cash_flow.csv`, `cost_breakdown.csv`, and `project_plan.json`, and marks non-commercial cases as `not_applicable` unless `--force` is supplied.
-- `reactor moose <case>`, `reactor scale <case>`, `reactor thermochimica <case>`, `reactor saltproc <case>`, and `reactor moltres <case>` export integration inputs plus handoff metadata into the current bundle, and can optionally attempt external execution with `--run-external`.
+More detail lives in [configs/cases/README.md](configs/cases/README.md).
 
 ## Result Bundle Contract
 
-Each active run is written to `results/<case>/<run_id>/` and is expected to contain:
+Every workflow writes into a run bundle:
 
-- `build_manifest.json`
-- `summary.json`
-- `state_store.json`
-- `runtime_context.json`
-- `property_audit.json`
-- `benchmark_residuals.json`
-- `metrics.csv`
-- `validation.json` after validation
-- `report.md` after report generation
-- `transient.json` and/or `transient_sweep.json` when transient studies are run
-- `finance.json`, `schedule.json`, `cash_flow.csv`, `cost_breakdown.csv`, and `project_plan.json` when commercial economics are run
-- benchmark traceability in `build_manifest.json` and `summary.json` when a case is linked to benchmark metadata
-- `*_integration.json` and `*_handoff.json` for external tool exports
-- `openmc/` for solver XML and statepoints
-- `geometry/exports/` for SVG, OBJ, STL, watertight mesh validation, GPU-friendly glTF + binary buffers, a Blender Cycles GPU script, rendered PNG, and optional animated GIF or MP4 geometry exports
+```text
+results/<case>/<run_id>/
+  case_snapshot.yaml
+  benchmark_snapshot.yaml
+  provenance.json
+  build_manifest.json
+  geometry_description.json
+  summary.json
+  metrics.csv
+  validation.json
+  report.md
+  plots/
+  geometry/exports/
+```
 
-## Validation Status
+Most commands are additive. `run` creates the core summary; `validate` adds acceptance checks; `report` generates Markdown and plots; `render` adds geometry exports; `transient`, `transient-sweep`, `economics`, and external integration commands append their own domain artifacts. The bundle is meant to be inspectable by Git-unaware tools, the CLI, and the browser app.
 
-The benchmark layer now supports dataset-centric evidence, assumptions, target confidence, and traceability scoring. MSRE cases are the quantitative historic-benchmark path; TMSR-LF1 remains a modern test-reactor extension with contextual and lower-confidence public targets until richer numerical datasets are added.
+See [results/README.md](results/README.md) for the full file-by-file contract.
 
-`msre_first_criticality` now has a source dossier, parameter table, assumption log, benchmark quality gates, and uncertainty-aware keff residuals. It remains deliberately blocked from `benchmark_ready` status until the simplified channel harness is replaced with a source-indexed MSRE geometry/material reconstruction and a solver-backed result bundle is published. See [docs/msre-first-criticality-validation-plan.md](docs/msre-first-criticality-validation-plan.md).
+## Runtime Notes
 
-## Modeling Strategy Notes
+For routine Windows development, use the checked-in wrappers:
 
-- [docs/thermal-hydraulics-modeling-strategy.md](docs/thermal-hydraulics-modeling-strategy.md) describes the recommended analysis ladder for this repo: whole-loop reduced-order thermal-hydraulics first, porous or homogenized core models second, and local 3D CFD only where geometry controls the answer. It also lays out the additional precursor-transport and neutronics coupling needed for liquid-fueled MSR studies.
-- [docs/current-model-equations.md](docs/current-model-equations.md) documents the equations, correlations, supported property units, and OpenMC input assumptions used by the current reduced-order implementation.
-- [docs/recent-msr-simulation-literature.md](docs/recent-msr-simulation-literature.md) summarizes recent literature used to choose the current delayed-neutron precursor transport upgrade and the next realism steps.
-- [docs/reactor-taxonomy-and-flagship.md](docs/reactor-taxonomy-and-flagship.md) defines the difference between benchmark, research, submodel, and commercial-planning cases, and documents the `flagship_grid_msr` end goal.
+```powershell
+.\scripts\Run-Reactor.cmd run example_pin --no-solver
+.\scripts\Run-Reactor.cmd report example_pin
+.\scripts\Run-Tests.cmd
+```
 
-## External Solver Hooks
+Interactive work after entering the configured shell:
 
-The repository now includes pragmatic integration hooks for MOOSE/Cardinal, SCALE, Thermochimica, SaltProc, and Moltres:
+```powershell
+python -m thorium_reactor.cli build example_pin
+python -m thorium_reactor.cli run example_pin --no-solver
+reactor render tmsr_lf1_core
+reactor report example_pin
+```
 
-- case configs may define `integrations.moose`, `integrations.scale`, `integrations.thermochimica`, `integrations.saltproc`, and `integrations.moltres`,
-- result bundles capture exported input decks, structured handoff JSON, runtime provenance, and execution metadata,
-- generated reports surface those integration artifacts under an external integrations section.
+OpenMC-backed runs remain a separate solver path. Dry-run workflows are the default Windows path for geometry, reporting, reduced-order flow, and browser-launched runs. Solver-backed OpenMC benchmarks should be run only through the documented OpenMC-capable runtime path.
 
-These hooks are export/runtime adapters, not full validated model translations. They are meant to give this repo a clean handoff path into external toolchains.
+## Validation Posture
 
-## GPU Workflow
+This repository is useful because it exposes uncertainty instead of pretending it is done.
 
-The repository can now hand off both numerics and visualization to GPU-capable local tools without changing the core case format.
+| Area | Current status |
+| --- | --- |
+| MSRE historical validation | Source dossiers, acceptance bands, assumption logs, and quality gates exist, but the first-criticality case is intentionally not marked benchmark-ready until a source-indexed geometry/material reconstruction and solver-backed bundle are published |
+| TMSR-LF1-inspired core | Literature-backed operating point and property-uncertainty context, but still a traceable surrogate rather than a proprietary plant replica |
+| Reduced-order transients | Point-kinetics-like proxy with flowing-fuel precursor transport screens, cleanup/depletion placeholders, and uncertainty ensembles |
+| Geometry exports | Procedural CSG-derived render assets, mesh checks, OBJ/STL/glTF exports, and image overlays |
+| Commercial planning | Finance and schedule model for `flagship_grid_msr`, separated from benchmark and research cases |
 
-- `reactor transient-sweep immersed_pool_reference --scenario partial_heat_sink_loss --samples 2048 --prefer-gpu` runs an uncertainty ensemble of reduced-order transients. It falls back to the built-in CPU backend when CuPy or a CUDA device is not available.
-- `reactor render immersed_pool_reference` now writes `*.gltf`, `*.bin`, and a `*_blender_gpu.py` helper script under `results/<case>/<run_id>/geometry/exports/`.
-- Run the generated Blender helper with `blender --background --python results/<case>/<run_id>/geometry/exports/<case>_blender_gpu.py` to get a Cycles render that prefers GPU backends such as OptiX, CUDA, HIP, Metal, or oneAPI when Blender exposes them.
+Key science references and design reasoning are in:
 
-This GPU path accelerates the reduced-order transient ensemble and the final photorealistic render. The OpenMC solver path remains a separate runtime concern and can still be handed off through the existing Docker or external-code integrations.
+- [docs/current-model-equations.md](docs/current-model-equations.md)
+- [docs/thermal-hydraulics-modeling-strategy.md](docs/thermal-hydraulics-modeling-strategy.md)
+- [docs/recent-msr-simulation-literature.md](docs/recent-msr-simulation-literature.md)
+- [docs/msre-first-criticality-validation-plan.md](docs/msre-first-criticality-validation-plan.md)
+- [docs/reactor-taxonomy-and-flagship.md](docs/reactor-taxonomy-and-flagship.md)
+- [docs/openmsr-review.md](docs/openmsr-review.md)
+
+## External Tool Hooks
+
+The CLI can export integration inputs and handoff metadata for MOOSE/Cardinal-style workflows, SCALE, Thermochimica, SaltProc, and Moltres:
+
+```powershell
+.\scripts\Run-Reactor.cmd moose immersed_pool_reference
+.\scripts\Run-Reactor.cmd scale tmsr_lf1_core
+.\scripts\Run-Reactor.cmd thermochimica tmsr_lf1_core
+.\scripts\Run-Reactor.cmd saltproc tmsr_lf1_core
+.\scripts\Run-Reactor.cmd moltres immersed_pool_reference
+```
+
+These are pragmatic export adapters. They do not claim validated one-to-one translations into those external codes.
+
+## Development Links
+
+- [AGENTS.md](AGENTS.md): local runtime and workflow rules
+- [configs/cases/README.md](configs/cases/README.md): case schema and portfolio details
+- [src/thorium_reactor/README.md](src/thorium_reactor/README.md): package map and command flow
+- [web/README.md](web/README.md): browser app architecture and operational notes
+- [benchmarks/README.md](benchmarks/README.md): benchmark evidence structure
+- [results/README.md](results/README.md): bundle anatomy
+- [resources/README.md](resources/README.md): README figure refresh notes
+- [experiments/gpu_viability/README.md](experiments/gpu_viability/README.md): GPU viability experiments
+- [archive/legacy_openmc_2022/README.md](archive/legacy_openmc_2022/README.md): preserved legacy prototype
+
+## License
+
+MIT. See [LICENSE](LICENSE).
