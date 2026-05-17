@@ -401,6 +401,49 @@ def generate_report(
                 if decay_heat.get("source"):
                     lines.append(f"- Decay-heat transport source: `{decay_heat.get('source')}`")
 
+    transport_solver = summary.get("transport_solver", {})
+    if transport_solver:
+        mesh = transport_solver.get("mesh", {})
+        source_fractions = transport_solver.get("source_fractions", {})
+        lines.extend(["", "## Native RKDG Transport", ""])
+        lines.append(f"- Model: `{transport_solver.get('model', 'n/a')}`")
+        lines.append(
+            "- Mesh/order: "
+            f"`{mesh.get('type', 'n/a')}` "
+            f"({mesh.get('radial_cells', 'n/a')} x {mesh.get('axial_cells', 'n/a')}), "
+            f"p=`{transport_solver.get('polynomial_order', 'n/a')}`"
+        )
+        lines.append(f"- Time integration: `{transport_solver.get('time_integration', 'n/a')}`")
+        lines.append(f"- Time step/CFL: `{transport_solver.get('time_step_s', 'n/a')}` s / `{transport_solver.get('cfl', 'n/a')}`")
+        lines.append(f"- Conservation residual: `{transport_solver.get('conservation_residual', 'n/a')}`")
+        lines.append(f"- Minimum field value: `{transport_solver.get('minimum_field_value', 'n/a')}`")
+        fraction_items = source_fractions.items() if isinstance(source_fractions, dict) else []
+        for group_name, fractions in fraction_items:
+            if isinstance(fractions, dict):
+                lines.append(
+                    f"- {group_name} outlet source fraction: "
+                    f"`{fractions.get('outlet_source_fraction', 'n/a')}`"
+                )
+        artifacts = transport_solver.get("artifacts", {})
+        if artifacts:
+            lines.append(f"- Solution artifact: `{artifacts.get('solution_path', 'n/a')}`")
+
+    depletion_matrix = summary.get("depletion_matrix", {})
+    if depletion_matrix:
+        lines.extend(["", "## Native Sparse Depletion", ""])
+        lines.append(f"- Model: `{depletion_matrix.get('model', 'n/a')}`")
+        lines.append(f"- Backend: `{depletion_matrix.get('backend', 'n/a')}`")
+        lines.append(f"- Chain: `{depletion_matrix.get('chain_name', 'n/a')}` from `{depletion_matrix.get('chain_format', 'n/a')}`")
+        lines.append(f"- Isotopes/zones: `{depletion_matrix.get('isotope_count', 'n/a')}` / `{depletion_matrix.get('zone_count', 'n/a')}`")
+        lines.append(f"- Matrix shape/nonzeros: `{depletion_matrix.get('matrix_shape', 'n/a')}` / `{depletion_matrix.get('matrix_nonzero_entries', 'n/a')}`")
+        lines.append(f"- Step count/time step days: `{depletion_matrix.get('steps', 'n/a')}` / `{depletion_matrix.get('time_step_days', 'n/a')}`")
+        lines.append(f"- Inventory delta fraction: `{depletion_matrix.get('inventory_delta_fraction', 'n/a')}`")
+        lines.append(f"- Feed total atoms: `{depletion_matrix.get('feed_total_atoms', 'n/a')}`")
+        lines.append(f"- Atom-balance residual: `{depletion_matrix.get('atom_balance_residual', 'n/a')}`")
+        artifacts = depletion_matrix.get("artifacts", {})
+        if artifacts:
+            lines.append(f"- Matrix/history artifacts: `{artifacts.get('matrix_path', 'n/a')}`, `{artifacts.get('history_path', 'n/a')}`")
+
     primary_system = summary.get("primary_system", {})
     if primary_system:
         loop_hydraulics = primary_system.get("loop_hydraulics", {})

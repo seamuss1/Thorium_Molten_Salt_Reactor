@@ -44,6 +44,13 @@ RAW_ARTIFACTS = (
     "property_audit.json",
     "benchmark_residuals.json",
     "physics_core.json",
+    "transport_mesh.json",
+    "transport_summary.json",
+    "transport_solution.npz",
+    "depletion_chain.json",
+    "depletion_summary.json",
+    "depletion_history.json",
+    "depletion_matrix.npz",
     "flow_summary.json",
     "build_manifest.json",
     "geometry_description.json",
@@ -285,6 +292,7 @@ class WebRepository:
         self._add_neutronics_section(sections, summary)
         self._add_heat_balance_section(sections, summary)
         self._add_flow_section(sections, summary)
+        self._add_advanced_physics_section(sections, summary)
         self._add_transient_section(sections, summary)
         self._add_transient_sweep_section(sections, summary)
         self._add_fuel_chemistry_section(sections, summary)
@@ -428,6 +436,52 @@ class WebRepository:
                     f"{format_value(first_present(primary.get('primary_mass_flow_kg_s'), reduced.get('primary_mass_flow_kg_s'), get_path(thermal, 'boundary_conditions.mass_flow_kg_s')))} kg/s primary flow",
                     f"{format_value(first_present(heat_exchanger.get('required_area_m2'), thermal_hx.get('area_m2')))} m2 exchanger area",
                     f"{format_value(first_present(loop.get('max_reynolds_number'), thermal_momentum.get('reynolds_number')))} peak Reynolds",
+                ]
+            ),
+            notes=dedupe(notes),
+        )
+
+    def _add_advanced_physics_section(self, sections: list[OutputSection], summary: Mapping[str, Any]) -> None:
+        transport = as_mapping(summary.get("transport_solver"))
+        depletion = as_mapping(summary.get("depletion_matrix"))
+        if not transport and not depletion:
+            return
+
+        mesh = as_mapping(transport.get("mesh"))
+        metrics = output_metrics(
+            ("RKDG radial cells", mesh.get("radial_cells"), "cells", "number"),
+            ("RKDG axial cells", mesh.get("axial_cells"), "cells", "number"),
+            ("Polynomial order", transport.get("polynomial_order"), "p", "number"),
+            ("CFL", transport.get("cfl"), None, "number"),
+            ("Transport residual", transport.get("conservation_residual"), "fraction", "number"),
+            ("Minimum field", transport.get("minimum_field_value"), None, "number"),
+            ("Depletion isotopes", depletion.get("isotope_count"), "count", "number"),
+            ("Depletion zones", depletion.get("zone_count"), "count", "number"),
+            ("Depletion nonzeros", depletion.get("matrix_nonzero_entries"), "entries", "number"),
+            ("Atom-balance residual", depletion.get("atom_balance_residual"), "fraction", "number"),
+            ("Inventory delta", depletion.get("inventory_delta_fraction"), "fraction", "number"),
+        )
+        notes = []
+        for model in (transport.get("model"), depletion.get("model"), depletion.get("backend")):
+            if model:
+                notes.append(str(model))
+        self._append_section(
+            sections,
+            "advanced_physics",
+            "Native transport and depletion",
+            metrics=metrics,
+            status=first_present(transport.get("status"), depletion.get("status")),
+            summary=make_sentence(
+                [
+                    f"R-Z RKDG {mesh.get('radial_cells')} x {mesh.get('axial_cells')}"
+                    if mesh.get("radial_cells") and mesh.get("axial_cells")
+                    else None,
+                    f"{depletion.get('isotope_count')} isotope depletion matrix"
+                    if depletion.get("isotope_count") is not None
+                    else None,
+                    f"atom residual {format_value(depletion.get('atom_balance_residual'))}"
+                    if depletion.get("atom_balance_residual") is not None
+                    else None,
                 ]
             ),
             notes=dedupe(notes),

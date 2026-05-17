@@ -100,7 +100,7 @@ results/<case>/<run_id>/
   geometry/exports/
 ```
 
-Most commands are additive. `run` creates the core summary; `validate` adds acceptance checks; `report` generates Markdown and plots; `render` adds geometry exports; `transient`, `transient-sweep`, `economics`, and external integration commands append their own domain artifacts. The bundle is meant to be inspectable by Git-unaware tools, the CLI, and the browser app.
+Most commands are additive. `run` creates the core summary; `validate` adds acceptance checks; `report` generates Markdown and plots; `render` adds geometry exports; `transport` adds native R-Z RKDG scalar transport artifacts; `deplete` adds the native sparse depletion matrix; `transient`, `transient-sweep`, `economics`, and external integration commands append their own domain artifacts. The bundle is meant to be inspectable by Git-unaware tools, the CLI, and the browser app.
 
 See [results/README.md](results/README.md) for the full file-by-file contract.
 
@@ -110,6 +110,8 @@ For routine Windows development, use the checked-in wrappers:
 
 ```powershell
 .\scripts\Run-Reactor.cmd run example_pin --no-solver
+.\scripts\Run-Reactor.cmd transport immersed_pool_reference
+.\scripts\Run-Reactor.cmd deplete immersed_pool_reference
 .\scripts\Run-Reactor.cmd report example_pin
 .\scripts\Run-Tests.cmd
 ```
@@ -123,7 +125,7 @@ reactor render tmsr_lf1_core
 reactor report example_pin
 ```
 
-OpenMC-backed runs remain a separate solver path. Dry-run workflows are the default Windows path for geometry, reporting, reduced-order flow, and browser-launched runs. Solver-backed OpenMC benchmarks should be run only through the documented OpenMC-capable runtime path.
+The native transport and depletion commands use NumPy plus SciPy sparse matrix routines when SciPy is installed by the repo-local runtime. OpenMC-backed runs remain a separate solver path. Dry-run workflows are the default Windows path for geometry, reporting, reduced-order flow, and browser-launched runs. Solver-backed OpenMC benchmarks should be run only through the documented OpenMC-capable runtime path.
 
 ## Validation Posture
 
@@ -134,6 +136,7 @@ This repository is useful because it exposes uncertainty instead of pretending i
 | MSRE historical validation | Source dossiers, acceptance bands, assumption logs, and quality gates exist, but the first-criticality case is intentionally not marked benchmark-ready until a source-indexed geometry/material reconstruction and solver-backed bundle are published |
 | TMSR-LF1-inspired core | Literature-backed operating point and property-uncertainty context, but still a traceable surrogate rather than a proprietary plant replica |
 | Reduced-order transients | Point-kinetics-like proxy with flowing-fuel precursor transport screens, cleanup/depletion placeholders, and uncertainty ensembles |
+| Native advanced physics | Additive R-Z SSP-RK3 precursor transport and sparse Bateman depletion artifacts for verification and reporting; not yet a replacement for `physics_core` |
 | Geometry exports | Procedural CSG-derived render assets, mesh checks, OBJ/STL/glTF exports, and image overlays |
 | Commercial planning | Finance and schedule model for `flagship_grid_msr`, separated from benchmark and research cases |
 

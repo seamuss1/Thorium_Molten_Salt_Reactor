@@ -460,9 +460,62 @@ F_{\mathrm{DH,loop}}
 1-F_{\mathrm{DH,core}}
 $$
 
-and also reports source fractions by configured loop segment. This is a
-screening handoff for thermal-hydraulic reporting and solver export; it is not
-a high-order RKDG transport solve or a depletion-chain heat source calculation.
+and also reports source fractions by configured loop segment. This remains the
+reduced-order screening handoff used by `physics_core`.
+
+## Native R-Z RKDG Scalar Transport
+
+The additive `reactor transport <case>` path writes native high-fidelity
+precursor artifacts without replacing `physics_core`. Version 1 uses a
+structured axisymmetric R-Z mesh, polynomial-order DG field metadata, and an
+SSP-RK3 finite-volume/DG-compatible update for scalar advection,
+diffusion, decay, source, cleanup, and outlet terms:
+
+$$
+\frac{\partial C_g}{\partial t}
++
+u_z\frac{\partial C_g}{\partial z}
+=
+D_g\nabla^2_{r,z}C_g
+-
+(\lambda_g+k_{\mathrm{cleanup}})C_g
++
+S_g(r,z).
+$$
+
+The axis boundary uses a finite no-flux condition, radial walls use zero
+normal flux, and axial boundaries use upwind inlet/outlet fluxes. The native
+artifacts are `transport_mesh.json`, `transport_summary.json`, and
+`transport_solution.npz`. Reports and the browser show mesh/order/time-step,
+CFL, minimum field value, source fractions, and conservation residuals.
+
+## Native Sparse Depletion Matrix
+
+The additive `reactor deplete <case>` path solves constant-rate isotope
+evolution with a sparse Bateman matrix:
+
+$$
+\frac{d\mathbf{n}}{dt}
+=
+A(t)\mathbf{n}
++
+\mathbf{b}(t),
+$$
+
+where `A` contains decay, neutron transmutation, fission-yield production,
+online removal, and optional inter-zone transfer terms, while `b` contains
+feed/source terms. The default stepper uses SciPy
+`scipy.sparse.linalg.expm_multiply`; a dense NumPy fallback is available for
+small verification chains in runtimes that have not yet been bootstrapped with
+SciPy. The repo-local test chain lives at
+`resources/depletion/tiny_thorium_chain.yaml`, and OpenMC-style XML chain
+imports are supported for realistic depletion-chain handoffs.
+
+The native depletion artifacts are `depletion_chain.json`,
+`depletion_summary.json`, `depletion_history.json`, and
+`depletion_matrix.npz`. Reports and the browser surface the chain source,
+isotope count, zone count, matrix nonzeros, inventory deltas, feed/removal
+totals, and atom-balance residuals.
 
 The xenon piece remains an explicit proxy:
 
@@ -482,7 +535,10 @@ The current implementation records:
 - `xenon_removal_fraction`
 - `protactinium_holdup_days`
 
-These assumptions currently parameterize reduced-order poison, breeding, and cleanup proxies; they are not full depletion-chain transport calculations.
+These assumptions parameterize reduced-order poison, breeding, and cleanup
+proxies. Full native depletion-chain calculations are emitted separately by
+`reactor deplete` and are not yet predictor-corrector coupled back into the
+transient proxy.
 
 ## Salt Chemistry Proxy
 

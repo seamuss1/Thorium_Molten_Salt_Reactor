@@ -29,6 +29,8 @@ The command entrypoint is [`cli.py`](cli.py). It keeps command dispatch thin and
 | [`bop/steady_state.py`](bop/steady_state.py) | Balance-of-plant closure and electric output estimates |
 | [`physics_core.py`](physics_core.py) | Compact physics metrics used by reports and transients |
 | [`precursors.py`](precursors.py) | Flowing-fuel delayed-neutron precursor model helpers |
+| [`transport/`](transport) | Native structured R-Z SSP-RK3 transport for precursor-like scalar fields |
+| [`depletion/`](depletion) | Native sparse Bateman depletion matrix, YAML/OpenMC chain import, and inventory stepping |
 | [`transient.py`](transient.py) | Single-scenario reduced-order transient proxy |
 | [`transient_sweep.py`](transient_sweep.py) | Vectorized uncertainty ensemble with backend selection |
 | [`runtime_benchmark.py`](runtime_benchmark.py) | Backend timing and GPU/XPU viability checks |

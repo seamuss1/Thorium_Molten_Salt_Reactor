@@ -21,6 +21,8 @@ Every run bundle should be readable after the fact without consulting mutable ca
 | `render` | Extends latest or selected bundle | `geometry/exports/*.png`, `*.svg`, `*.obj`, `*.stl`, `*.gltf`, `*_mesh_validation.json`, `render_assets.json` |
 | `transient` | Extends or creates bundle | `transient.json`, transient metrics folded into `summary.json`, transient plots after report |
 | `transient-sweep` | Extends or creates bundle | `transient_sweep.json`, p05/p50/p95 metrics, backend report, envelope plots |
+| `transport` | Extends or creates bundle | `transport_mesh.json`, `transport_summary.json`, `transport_solution.npz`, RKDG metrics folded into `summary.json` |
+| `deplete` | Extends or creates bundle | `depletion_chain.json`, `depletion_summary.json`, `depletion_history.json`, `depletion_matrix.npz`, depletion metrics folded into `summary.json` |
 | `economics` | Extends or creates bundle | `finance.json`, `schedule.json`, `cash_flow.csv`, `cost_breakdown.csv`, `project_plan.json`, finance plots |
 | integration exporters | Extends or creates bundle | `<tool>_integration.json`, `<tool>_handoff.json`, generated input decks |
 
@@ -38,6 +40,8 @@ Every run bundle should be readable after the fact without consulting mutable ca
 | `report.md` | Human-readable generated report for the run |
 | `plots_manifest.json` | Plot names, paths, and display labels consumed by the web app |
 | `render_assets.json` | Geometry export paths and available visual views |
+| `transport_summary.json` | Native R-Z RKDG mesh/order/time-step, source-fraction, and conservation diagnostics when `transport` has run |
+| `depletion_summary.json` | Native sparse depletion chain, matrix, inventory-delta, feed/removal, and atom-balance diagnostics when `deplete` has run |
 
 ## Geometry Exports
 

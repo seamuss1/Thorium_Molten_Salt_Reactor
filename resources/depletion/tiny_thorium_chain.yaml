@@ -1,0 +1,36 @@
+name: tiny_thorium_test_chain
+description: Small repo-local depletion chain for native matrix tests and examples.
+nuclides:
+  - name: Th232
+    initial_atoms: 1.0e20
+    reactions:
+      - type: capture
+        target: Pa233
+        default_rate_per_s: 1.0e-8
+  - name: Pa233
+    half_life_s: 2332800.0
+    decay_modes:
+      - type: beta-
+        target: U233
+        branching_ratio: 1.0
+  - name: U233
+    initial_atoms: 1.0e18
+    reactions:
+      - type: fission
+        default_rate_per_s: 2.0e-9
+        yields:
+          I135: 0.063
+          Xe135: 0.002
+  - name: I135
+    half_life_s: 23652.0
+    decay_modes:
+      - type: beta-
+        target: Xe135
+        branching_ratio: 1.0
+  - name: Xe135
+    half_life_s: 32904.0
+    decay_modes:
+      - type: beta-
+        target: Cs135
+        branching_ratio: 1.0
+  - name: Cs135

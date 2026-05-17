@@ -133,6 +133,8 @@ def _validate_case_schema(path: Path, raw: Mapping[str, Any]) -> None:
     _validate_simulation_settings(path, raw.get("simulation"))
     _validate_optional_transient_settings(path, raw.get("transient"))
     _validate_optional_depletion_settings(path, raw.get("depletion"))
+    _validate_optional_transport_solver_settings(path, raw.get("transport_solver"))
+    _validate_optional_depletion_solver_settings(path, raw.get("depletion_solver"))
     _validate_optional_chemistry_settings(path, raw.get("chemistry"))
     _validate_optional_properties_settings(path, raw.get("properties"))
     _validate_optional_property_uncertainty_settings(path, raw.get("property_uncertainty"))
@@ -440,6 +442,103 @@ def _validate_optional_depletion_settings(path: Path, depletion: Any) -> None:
     ):
         if field_name in depletion:
             _require_number(path, f"depletion.{field_name}", depletion[field_name])
+    native_matrix = depletion.get("native_matrix")
+    if native_matrix is not None:
+        _validate_depletion_solver_mapping(path, native_matrix, "depletion.native_matrix")
+
+
+def _validate_optional_transport_solver_settings(path: Path, transport_solver: Any) -> None:
+    if transport_solver is None:
+        return
+    if not isinstance(transport_solver, Mapping):
+        raise ConfigError(f"Case config {path} optional 'transport_solver' section must be a mapping.")
+    mesh = transport_solver.get("mesh", "rz_structured")
+    if mesh != "rz_structured":
+        raise ConfigError(f"Case config {path} transport_solver.mesh '{mesh}' is unsupported. Supported value: rz_structured.")
+    for field_name in ("radial_cells", "axial_cells"):
+        if field_name in transport_solver:
+            _require_positive_int(path, f"transport_solver.{field_name}", transport_solver[field_name])
+    if "polynomial_order" in transport_solver:
+        polynomial_order = _require_non_negative_int(path, "transport_solver.polynomial_order", transport_solver["polynomial_order"])
+        if polynomial_order > 3:
+            raise ConfigError(f"Case config {path} transport_solver.polynomial_order above 3 is not supported in the native v1 solver.")
+    for field_name in (
+        "duration_s",
+        "time_step_s",
+        "cfl",
+        "velocity_z_m_s",
+        "flow_fraction",
+        "diffusion_coefficient_m2_s",
+        "cleanup_rate_s",
+        "positivity_floor",
+    ):
+        if field_name in transport_solver:
+            value = _require_number(path, f"transport_solver.{field_name}", transport_solver[field_name])
+            if field_name in {"duration_s", "time_step_s", "cfl"} and value <= 0.0:
+                raise ConfigError(f"Case config {path} field 'transport_solver.{field_name}' must be positive.")
+            if field_name in {"flow_fraction", "diffusion_coefficient_m2_s", "cleanup_rate_s", "positivity_floor"} and value < 0.0:
+                raise ConfigError(f"Case config {path} field 'transport_solver.{field_name}' must be non-negative.")
+    custom_group_sets = transport_solver.get("custom_group_sets")
+    if custom_group_sets is not None:
+        if not isinstance(custom_group_sets, list):
+            raise ConfigError(f"Case config {path} transport_solver.custom_group_sets must be a list.")
+        for index, group_set in enumerate(custom_group_sets, start=1):
+            if not isinstance(group_set, Mapping):
+                raise ConfigError(f"Case config {path} transport_solver.custom_group_sets[{index}] must be a mapping.")
+            groups = group_set.get("groups")
+            if not isinstance(groups, list) or not groups:
+                raise ConfigError(f"Case config {path} transport_solver.custom_group_sets[{index}].groups must be a non-empty list.")
+            _validate_transport_groups(path, groups, f"transport_solver.custom_group_sets[{index}].groups")
+
+
+def _validate_optional_depletion_solver_settings(path: Path, depletion_solver: Any) -> None:
+    if depletion_solver is None:
+        return
+    _validate_depletion_solver_mapping(path, depletion_solver, "depletion_solver")
+
+
+def _validate_depletion_solver_mapping(path: Path, depletion_solver: Any, prefix: str) -> None:
+    if not isinstance(depletion_solver, Mapping):
+        raise ConfigError(f"Case config {path} optional '{prefix}' section must be a mapping.")
+    if "steps" in depletion_solver:
+        _require_positive_int(path, f"{prefix}.steps", depletion_solver["steps"])
+    for field_name in ("time_step_s", "time_step_days", "matrix_timestep_days"):
+        if field_name in depletion_solver:
+            value = _require_number(path, f"{prefix}.{field_name}", depletion_solver[field_name])
+            if value <= 0.0:
+                raise ConfigError(f"Case config {path} field '{prefix}.{field_name}' must be positive.")
+    for mapping_name in ("reaction_rates_per_s", "removal_rates_per_s", "feed_atoms_per_s"):
+        if mapping_name in depletion_solver and not isinstance(depletion_solver[mapping_name], Mapping):
+            raise ConfigError(f"Case config {path} {prefix}.{mapping_name} must be a mapping.")
+    for text_name in ("chain_path", "chain_format"):
+        if text_name in depletion_solver and not str(depletion_solver[text_name]).strip():
+            raise ConfigError(f"Case config {path} {prefix}.{text_name} must not be empty.")
+    zones = depletion_solver.get("zones")
+    if zones is not None:
+        if not isinstance(zones, list) or not zones:
+            raise ConfigError(f"Case config {path} {prefix}.zones must be a non-empty list.")
+        for index, zone in enumerate(zones, start=1):
+            if isinstance(zone, Mapping):
+                if not str(zone.get("name", "")).strip():
+                    raise ConfigError(f"Case config {path} {prefix}.zones[{index}].name must not be empty.")
+            elif not str(zone).strip():
+                raise ConfigError(f"Case config {path} {prefix}.zones[{index}] must not be empty.")
+
+
+def _validate_transport_groups(path: Path, groups: Any, field_prefix: str) -> None:
+    total_yield = 0.0
+    for index, group in enumerate(groups, start=1):
+        if not isinstance(group, Mapping):
+            raise ConfigError(f"Case config {path} {field_prefix}[{index}] must be a mapping.")
+        decay_constant = _require_number(path, f"{field_prefix}[{index}].decay_constant_s", group.get("decay_constant_s"))
+        if decay_constant <= 0.0:
+            raise ConfigError(f"Case config {path} field '{field_prefix}[{index}].decay_constant_s' must be positive.")
+        yield_fraction = _require_number(path, f"{field_prefix}[{index}].yield_fraction", group.get("yield_fraction"))
+        if yield_fraction < 0.0:
+            raise ConfigError(f"Case config {path} field '{field_prefix}[{index}].yield_fraction' must be non-negative.")
+        total_yield += yield_fraction
+    if total_yield <= 0.0:
+        raise ConfigError(f"Case config {path} {field_prefix} total yield_fraction must be positive.")
 
 
 def _validate_optional_chemistry_settings(path: Path, chemistry: Any) -> None:

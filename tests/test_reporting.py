@@ -228,6 +228,41 @@ def test_report_includes_reduced_order_flow_section() -> None:
                             },
                         }
                     },
+                    "transport_solver": {
+                        "status": "completed",
+                        "model": "native_rz_rkdg_scalar_transport_v1",
+                        "mesh": {"type": "rz_structured", "radial_cells": 4, "axial_cells": 8},
+                        "polynomial_order": 1,
+                        "time_integration": "ssp_rk3",
+                        "time_step_s": 0.01,
+                        "cfl": 0.35,
+                        "conservation_residual": 2.0e-8,
+                        "minimum_field_value": 0.0,
+                        "source_fractions": {
+                            "delayed_neutron_precursors": {"outlet_source_fraction": 0.12}
+                        },
+                        "artifacts": {"solution_path": "transport_solution.npz"},
+                    },
+                    "depletion_matrix": {
+                        "status": "completed",
+                        "model": "native_sparse_bateman_depletion_matrix_v1",
+                        "backend": "scipy_sparse_expm_multiply",
+                        "chain_name": "tiny_thorium_test_chain",
+                        "chain_format": "yaml",
+                        "isotope_count": 6,
+                        "zone_count": 1,
+                        "matrix_shape": [6, 6],
+                        "matrix_nonzero_entries": 9,
+                        "steps": 1,
+                        "time_step_days": 0.01,
+                        "inventory_delta_fraction": -0.001,
+                        "feed_total_atoms": 0.0,
+                        "atom_balance_residual": 1.0e-10,
+                        "artifacts": {
+                            "matrix_path": "depletion_matrix.npz",
+                            "history_path": "depletion_history.json",
+                        },
+                    },
                     "primary_system": {
                         "loop_hydraulics": {
                             "total_pressure_drop_kpa": 31.5,
@@ -289,6 +324,12 @@ def test_report_includes_reduced_order_flow_section() -> None:
         assert "## Physics Core Transport" in report
         assert "finite_volume_decay_heat_precursor_transport" in report
         assert "heat_exchanger_and_offgas_contact" in report
+        assert "## Native RKDG Transport" in report
+        assert "native_rz_rkdg_scalar_transport_v1" in report
+        assert "transport_solution.npz" in report
+        assert "## Native Sparse Depletion" in report
+        assert "tiny_thorium_test_chain" in report
+        assert "depletion_matrix.npz" in report
         assert "31.5" in report
         assert "63.4" in report
     finally:

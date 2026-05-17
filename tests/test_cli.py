@@ -128,6 +128,18 @@ def test_cli_registers_runtime_benchmark_command() -> None:
     assert namespace.fail_on_gpu_fallback is True
 
 
+def test_cli_registers_native_transport_and_depletion_commands() -> None:
+    parser = build_parser()
+    transport = parser.parse_args(["transport", "immersed_pool_reference", "--run-id", "native"])
+    deplete = parser.parse_args(["deplete", "immersed_pool_reference", "--run-id", "native", "--reuse-run-id"])
+
+    assert transport.command == "transport"
+    assert transport.case == "immersed_pool_reference"
+    assert transport.run_id == "native"
+    assert deplete.command == "deplete"
+    assert deplete.reuse_run_id is True
+
+
 def test_cli_explicit_run_id_creation_rejects_collision(tmp_path: Path) -> None:
     existing = create_result_bundle(tmp_path, "example_pin", "fixed")
 

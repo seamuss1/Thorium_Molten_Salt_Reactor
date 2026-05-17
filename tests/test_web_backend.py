@@ -141,6 +141,25 @@ def test_web_run_detail_exposes_curated_output_sections() -> None:
                     "runtime_performance": {"sample_steps_per_s": 9000.0},
                     "numerical_checks": {"status": "ok"},
                 },
+                "transport_solver": {
+                    "status": "completed",
+                    "model": "native_rz_rkdg_scalar_transport_v1",
+                    "mesh": {"radial_cells": 4, "axial_cells": 8},
+                    "polynomial_order": 1,
+                    "cfl": 0.35,
+                    "conservation_residual": 1.0e-8,
+                    "minimum_field_value": 0.0,
+                },
+                "depletion_matrix": {
+                    "status": "completed",
+                    "model": "native_sparse_bateman_depletion_matrix_v1",
+                    "backend": "numpy_dense_expm_fallback",
+                    "isotope_count": 6,
+                    "zone_count": 1,
+                    "matrix_nonzero_entries": 9,
+                    "atom_balance_residual": 1.0e-10,
+                    "inventory_delta_fraction": -0.001,
+                },
                 "fuel_cycle": {"fissile_inventory_kg": 80.0, "specific_power_mw_per_t_hm": 500.0},
                 "chemistry": {"corrosion_risk": "low", "corrosion_index": 1.01, "redox_state_ev": -0.02},
                 "tritium": {"removal_fraction": 0.66, "environmental_release_fraction": 0.18},
@@ -192,6 +211,7 @@ def test_web_run_detail_exposes_curated_output_sections() -> None:
             "primary_flow",
             "transient_response",
             "transient_uncertainty",
+            "advanced_physics",
             "fuel_chemistry",
             "validation_maturity",
             "commercial_planning",
@@ -199,6 +219,7 @@ def test_web_run_detail_exposes_curated_output_sections() -> None:
         }.issubset(sections)
         assert sections["plant_balance"]["metrics"][0]["label"] == "Thermal power"
         assert any(metric["label"] == "k-effective" for metric in sections["neutronics"]["metrics"])
+        assert any(metric["label"] == "Atom-balance residual" for metric in sections["advanced_physics"]["metrics"])
         assert sections["validation_maturity"]["status"] == "screening_backed"
         assert any(metric["label"] == "LCOE" for metric in sections["commercial_planning"]["metrics"])
     finally:

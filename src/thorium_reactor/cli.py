@@ -30,7 +30,15 @@ from thorium_reactor.transient_sweep import DEFAULT_TRANSIENT_SWEEP_SAMPLES
 
 
 INTEGRATION_COMMANDS = ("moose", "scale", "thermochimica", "saltproc", "moltres")
-EXTEND_EXISTING_RUN_COMMANDS = ("transient", "transient-sweep", "runtime-benchmark", "economics", *INTEGRATION_COMMANDS)
+NATIVE_ADVANCED_COMMANDS = ("transport", "deplete")
+EXTEND_EXISTING_RUN_COMMANDS = (
+    "transient",
+    "transient-sweep",
+    "runtime-benchmark",
+    "economics",
+    *NATIVE_ADVANCED_COMMANDS,
+    *INTEGRATION_COMMANDS,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
         "transient",
         "transient-sweep",
         "runtime-benchmark",
+        *NATIVE_ADVANCED_COMMANDS,
         "economics",
         *INTEGRATION_COMMANDS,
     ):
@@ -144,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_case_config(case_config_path(repo_root, args.case))
 
-    if args.command in {"build", "run", "benchmark", "transient", "transient-sweep", "runtime-benchmark", "economics", *INTEGRATION_COMMANDS}:
+    if args.command in {"build", "run", "benchmark", "transient", "transient-sweep", "runtime-benchmark", "economics", *NATIVE_ADVANCED_COMMANDS, *INTEGRATION_COMMANDS}:
         allow_existing = bool(args.reuse_run_id or (args.run_id is not None and args.command in EXTEND_EXISTING_RUN_COMMANDS))
         bundle = _load_or_create_bundle(repo_root, config.name, args.run_id, allow_existing=allow_existing)
         inputs = ensure_bundle_inputs(repo_root, bundle, config)
@@ -272,6 +281,48 @@ def main(argv: list[str] | None = None) -> int:
         print(bundle.root)
         print(runtime_benchmark["recommendation"].get("backend"))
         print(runtime_benchmark["recommendation"].get("speedup_vs_reference"))
+        return 0
+
+    if args.command == "transport":
+        from thorium_reactor.transport import run_transport_case
+
+        summary_path = bundle.root / "summary.json"
+        if summary_path.exists():
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        else:
+            summary = run_case(
+                config,
+                bundle,
+                benchmark=benchmark,
+                solver_enabled=False,
+                provenance=provenance,
+            )
+        transport = run_transport_case(config, bundle, summary)
+        generate_summary_plots(bundle, summary)
+        print(bundle.root)
+        print(transport["status"])
+        print(transport["conservation_residual"])
+        return 0
+
+    if args.command == "deplete":
+        from thorium_reactor.depletion import run_depletion_case
+
+        summary_path = bundle.root / "summary.json"
+        if summary_path.exists():
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        else:
+            summary = run_case(
+                config,
+                bundle,
+                benchmark=benchmark,
+                solver_enabled=False,
+                provenance=provenance,
+            )
+        depletion = run_depletion_case(config, bundle, summary)
+        generate_summary_plots(bundle, summary)
+        print(bundle.root)
+        print(depletion["status"])
+        print(depletion["atom_balance_residual"])
         return 0
 
     if args.command == "economics":
