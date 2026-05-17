@@ -5,11 +5,14 @@ upgrades in this repository. The implemented changes from this review are the
 segmented delayed-neutron precursor transport model, molten-salt property
 uncertainty screen, tritium distribution screen, graphite irradiation lifetime
 screen, summary-derived deterministic physics-core loop residence handoff, and
-static adjoint-shape weighting for flowing-fuel precursor worth now documented
-in `docs/current-model-equations.md`.
+static adjoint-shape weighting for flowing-fuel precursor worth. The May 17,
+2026 follow-up also made the existing deterministic decay-heat precursor
+transport explicit in reports and metrics with core and external-loop segment
+source fractions. These implemented equations are documented in
+`docs/current-model-equations.md`.
 
 The May 2026 refresh prioritized primary or official-lab sources published since
-2024-05-08. It did not identify a reason to replace the repository's
+2024-05-17. It did not identify a reason to replace the repository's
 reduced-order architecture, but it did support focused implementation upgrades:
 the deterministic finite-volume physics-core precursor handoff now uses
 summary-derived external-loop residence time instead of a fixed nominal loop
@@ -18,6 +21,42 @@ source by the deterministic adjoint/shape importance profile. A May 2026
 follow-up added an MSRE pump-transient benchmark screen so reports carry the
 published one-dimensional model error envelope and flag bypass-like salt
 inventory that can limit early transient reactivity predictions.
+
+## May 17, 2026 Follow-Up
+
+The latest 24-month screen found one focused implementation opportunity rather
+than a need to replace the repository's architecture. Deng et al. published a
+2026 RELAP5/RKDG kinetics module that solves delayed-neutron precursor transport
+and a simplified decay-heat model consistently over primary-loop control
+volumes, validating against MSRE startup, coastdown, and reactivity-insertion
+tests before applying the model to MSBR transients. Acierno et al. separately
+reported MSFR reduced-order thermal-fluid work that carries both six DNP groups
+and three decay-heat precursor groups for future multiphysics coupling. The
+repository already had a finite-volume decay-heat precursor screen inside
+`physics_core`, but it was not visible enough to users.
+
+Repository action: expose the decay-heat precursor model as a first-class
+transport report, add literature source metadata, report core versus
+external-loop source fractions, identify the dominant loop segment, publish
+summary metrics, validate configured decay-heat groups, and document the
+equations. This remains a reduced-order finite-volume screen, not the high-order
+RKDG method from the 2026 paper.
+
+Sources: https://doi.org/10.1016/j.applthermaleng.2026.129983 and
+https://doi.org/10.1080/00295450.2025.2530813
+
+Other checked items did not justify narrow code changes. The 2026 thermal-MSR
+code-to-code benchmark by Pfahl et al. reinforces the existing DNP drift,
+temperature-feedback, and simplified heat-exchanger direction. The 2026
+multi-point depletion model by Elhareef and Wu is important for future
+depletion work but would require a connected-cell isotope inventory matrix, not
+a small patch. INL Virtual Test Bed MSRE lower-plenum CFD documentation
+supports future channel inlet/profile validation, while the current repository
+does not yet have a radial lower-plenum model to calibrate.
+
+Sources: https://doi.org/10.1016/j.nucengdes.2026.114790,
+https://doi.org/10.3390/jne7010017, and
+https://virtualtestbed.inl.gov/msr/msre/lp_nekrs_model.html
 
 ## May 2026 Model Impact Assessment
 
@@ -34,7 +73,7 @@ context until higher-fidelity data or architecture exists.
 | Chemistry | Recent multiphysics and fission-product transport work supports coupling chemistry, cleanup, and species state. The available public findings did not provide a small defensible replacement for the current redox/impurity/corrosion proxy. | No chemistry model change. Existing chemistry outputs remain explicitly labeled as proxy/screening values. |
 | Depletion | Current literature points toward online processing and inventory-control coupling, but implementing that well would require depletion-chain transport or SaltProc-style integration beyond this reduced-order patch. | No depletion code change. Existing depletion fields remain assumption metadata and reduced-order transient terms. |
 | Validation | MSRE remains the strongest public validation anchor, and recent CAD/CSG OpenMC plus Squirrel/Griffin/Pronghorn work increases confidence that MSRE pump and natural-circulation cases are the right next validation targets. | No new benchmark dataset was added in this pass. The literature note now records the validation relevance and the implemented metric can be compared against MSRE flowing-fuel delayed-neutron worth studies. |
-| Reporting | The original repository outputs reported precursor loss but not an importance-weighted delayed-neutron worth. It also lacked a concise validation note for the expected error of one-dimensional MSRE pump-transient reductions. | Reports now expose weighted `beta_eff`, `beta_eff_basis`, `unweighted_beta_eff`, `delayed_neutron_flow_loss_pcm`, precursor-coupling fractions, and an MSRE pump-transient benchmark screen with startup/coastdown error bands and non-active salt inventory fractions. |
+| Reporting | The original repository outputs reported precursor loss but not an importance-weighted delayed-neutron worth. It also lacked a concise validation note for the expected error of one-dimensional MSRE pump-transient reductions and did not surface decay-heat precursor source partitioning. | Reports now expose weighted `beta_eff`, `beta_eff_basis`, `unweighted_beta_eff`, `delayed_neutron_flow_loss_pcm`, precursor-coupling fractions, decay-heat precursor core/loop/segment source fractions, and an MSRE pump-transient benchmark screen with startup/coastdown error bands and non-active salt inventory fractions. |
 
 ## Main Findings
 
@@ -169,6 +208,8 @@ The implemented models are intentionally reduced-order bridges:
   finite-volume precursor handoffs,
 - adjoint-shape-weighted deterministic beta-effective and flowing-fuel delayed
   neutron loss metrics,
+- three-group decay-heat precursor source partitioning over the same
+  finite-volume core and external-loop cells,
 - implicit advection-decay stepping for numerical stability,
 - residence-time scaling with transient flow fraction,
 - cleanup removal weighted by loop segment,

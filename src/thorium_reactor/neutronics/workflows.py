@@ -485,6 +485,19 @@ def run_case(
         summary["metrics"]["physics_core_precursor_transport_loss_fraction"] = physics_core["precursor_transport"][
             "transport_loss_fraction"
         ]
+        decay_heat = physics_core["precursor_transport"].get("decay_heat_precursors", {})
+        if decay_heat:
+            summary["metrics"]["physics_core_core_decay_heat_source_fraction"] = decay_heat[
+                "core_decay_heat_source_fraction"
+            ]
+            summary["metrics"]["physics_core_loop_decay_heat_source_fraction"] = decay_heat[
+                "loop_decay_heat_source_fraction"
+            ]
+            dominant_loop_segment = decay_heat.get("dominant_loop_segment", {})
+            if dominant_loop_segment:
+                summary["metrics"]["physics_core_dominant_loop_decay_heat_source_fraction"] = (
+                    dominant_loop_segment["decay_heat_source_fraction"]
+                )
         summary["metrics"]["physics_core_natural_circulation_fraction"] = physics_core["thermal_hydraulics"][
             "momentum_balance"
         ]["natural_circulation_fraction_of_nominal"]

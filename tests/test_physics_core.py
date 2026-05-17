@@ -59,13 +59,33 @@ def test_run_case_writes_coupled_physics_core_artifact() -> None:
         assert physics_core["precursor_transport"]["group_count"] == 6
         assert physics_core["precursor_transport"]["cell_count"] > physics_core["thermal_hydraulics"]["axial_node_count"]
         assert 0.0 < physics_core["precursor_transport"]["transport_loss_fraction"] < 1.0
-        assert 0.0 < physics_core["precursor_transport"]["decay_heat_precursors"]["core_decay_heat_source_fraction"] < 1.0
+        decay_heat = physics_core["precursor_transport"]["decay_heat_precursors"]
+        assert decay_heat["model"] == "finite_volume_decay_heat_precursor_transport"
+        assert decay_heat["source"] == "https://doi.org/10.1016/j.applthermaleng.2026.129983"
+        assert 0.0 < decay_heat["core_decay_heat_source_fraction"] < 1.0
+        assert 0.0 < decay_heat["loop_decay_heat_source_fraction"] < 1.0
+        assert decay_heat["core_decay_heat_source_fraction"] + decay_heat["loop_decay_heat_source_fraction"] == pytest.approx(
+            1.0,
+            abs=1.0e-6,
+        )
+        assert sum(
+            float(segment["decay_heat_source_fraction"])
+            for segment in decay_heat["segment_source_fractions"]
+        ) == pytest.approx(1.0, abs=1.0e-5)
+        assert decay_heat["dominant_loop_segment"]["region"] == "loop"
+        assert any(
+            segment["segment_id"] == "heat_exchanger_and_gas_contact"
+            for segment in decay_heat["segment_source_fractions"]
+        )
         assert sum(
             float(cell["delayed_neutron_source_fraction"])
             for cell in physics_core["precursor_transport"]["cells"]
         ) == pytest.approx(1.0, abs=1.0e-5)
         assert (bundle.root / "physics_core.json").exists()
         assert summary["metrics"]["physics_core_k_eff"] == physics_core["neutronics"]["k_eff"]
+        assert summary["metrics"]["physics_core_loop_decay_heat_source_fraction"] == decay_heat[
+            "loop_decay_heat_source_fraction"
+        ]
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
@@ -79,7 +99,14 @@ def test_physics_core_honors_configured_method_and_mesh_counts() -> None:
             "temperature_grid_c": [500.0, 625.0, 750.0],
         },
         "thermal_hydraulics": {"axial_nodes": 8},
-        "precursor_transport": {"loop_cells": 3, "diffusion_coefficient_m2_s": 1.0e-5},
+        "precursor_transport": {
+            "loop_cells": 3,
+            "diffusion_coefficient_m2_s": 1.0e-5,
+            "decay_heat_groups": [
+                {"name": "fast", "decay_constant_s": 0.09, "yield_fraction": 0.7},
+                {"name": "slow", "decay_constant_s": 0.004, "yield_fraction": 0.3},
+            ],
+        },
     }
     summary = {
         "bop": {"thermal_power_mw": 8.0, "primary_mass_flow_kg_s": 37.0, "primary_cp_kj_kgk": 1.6},
@@ -117,6 +144,8 @@ def test_physics_core_honors_configured_method_and_mesh_counts() -> None:
     assert 0.0 < physics_core["neutronics"]["precursor_coupling"][
         "adjoint_weighted_core_delayed_neutron_source_fraction"
     ] < 1.0
+    assert physics_core["precursor_transport"]["decay_heat_precursors"]["group_count"] == 2
+    assert physics_core["precursor_transport"]["decay_heat_precursors"]["total_yield_fraction"] == 1.0
     loop_cells = [
         cell for cell in physics_core["precursor_transport"]["cells"]
         if cell["region"] == "loop"

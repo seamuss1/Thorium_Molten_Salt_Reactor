@@ -209,6 +209,25 @@ def test_report_includes_reduced_order_flow_section() -> None:
                         "stagnant_salt_inventory_fraction": 0.03,
                         "interpretation": "Bypass-like inventory can affect early transient reactivity rates.",
                     },
+                    "physics_core": {
+                        "precursor_transport": {
+                            "model": "finite_volume_advection_diffusion_decay",
+                            "loop_residence_time_s": 4.5,
+                            "loop_residence_basis": "fuel_salt_inventory_minus_active_core_volume_over_primary_flow",
+                            "transport_loss_fraction": 0.31,
+                            "decay_heat_precursors": {
+                                "model": "finite_volume_decay_heat_precursor_transport",
+                                "core_decay_heat_source_fraction": 0.58,
+                                "loop_decay_heat_source_fraction": 0.42,
+                                "dominant_loop_segment": {
+                                    "region": "loop",
+                                    "segment_id": "heat_exchanger_and_offgas_contact",
+                                    "decay_heat_source_fraction": 0.2,
+                                },
+                                "source": "https://doi.org/10.1016/j.applthermaleng.2026.129983",
+                            },
+                        }
+                    },
                     "primary_system": {
                         "loop_hydraulics": {
                             "total_pressure_drop_kpa": 31.5,
@@ -267,6 +286,9 @@ def test_report_includes_reduced_order_flow_section() -> None:
         assert "## MSRE Pump Transient Validation" in report
         assert "11.0 to 21.0" in report
         assert "0.12" in report
+        assert "## Physics Core Transport" in report
+        assert "finite_volume_decay_heat_precursor_transport" in report
+        assert "heat_exchanger_and_offgas_contact" in report
         assert "31.5" in report
         assert "63.4" in report
     finally:

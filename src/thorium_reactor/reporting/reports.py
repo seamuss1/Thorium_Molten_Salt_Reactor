@@ -368,6 +368,39 @@ def generate_report(
         )
         lines.append(f"- Interpretation: {msre_pump_transient.get('interpretation', 'n/a')}")
 
+    physics_core = summary.get("physics_core", {})
+    if physics_core:
+        precursor_transport = physics_core.get("precursor_transport", {})
+        decay_heat = precursor_transport.get("decay_heat_precursors", {}) if isinstance(precursor_transport, dict) else {}
+        if precursor_transport or decay_heat:
+            lines.extend(["", "## Physics Core Transport", ""])
+            lines.append(f"- Precursor model: `{precursor_transport.get('model', 'n/a')}`")
+            lines.append(f"- Loop residence time (s): `{precursor_transport.get('loop_residence_time_s', 'n/a')}`")
+            lines.append(f"- Loop residence basis: `{precursor_transport.get('loop_residence_basis', 'n/a')}`")
+            lines.append(
+                "- Delayed-neutron transport loss fraction: "
+                f"`{precursor_transport.get('transport_loss_fraction', 'n/a')}`"
+            )
+            if decay_heat:
+                dominant_loop_segment = decay_heat.get("dominant_loop_segment", {})
+                lines.append(f"- Decay-heat precursor model: `{decay_heat.get('model', 'n/a')}`")
+                lines.append(
+                    "- Core decay-heat source fraction: "
+                    f"`{decay_heat.get('core_decay_heat_source_fraction', 'n/a')}`"
+                )
+                lines.append(
+                    "- External-loop decay-heat source fraction: "
+                    f"`{decay_heat.get('loop_decay_heat_source_fraction', 'n/a')}`"
+                )
+                if dominant_loop_segment:
+                    lines.append(
+                        "- Dominant loop decay-heat segment: "
+                        f"`{dominant_loop_segment.get('segment_id', 'n/a')}` "
+                        f"(`{dominant_loop_segment.get('decay_heat_source_fraction', 'n/a')}`)"
+                    )
+                if decay_heat.get("source"):
+                    lines.append(f"- Decay-heat transport source: `{decay_heat.get('source')}`")
+
     primary_system = summary.get("primary_system", {})
     if primary_system:
         loop_hydraulics = primary_system.get("loop_hydraulics", {})

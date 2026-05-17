@@ -11,6 +11,7 @@ The current workflow combines:
 - a 1D-style primary-loop hydraulic budget,
 - lumped heat-exchanger and thermal-profile calculations,
 - a reduced-order transient proxy for temperature, reactivity, segmented precursor transport, and cleanup scenarios,
+- a deterministic finite-volume handoff for delayed-neutron and decay-heat precursor source partitioning,
 - a steady-state salt chemistry proxy and transient chemistry/depletion coupling terms,
 - and literature-backed screening models for molten-salt property uncertainty, tritium distribution, and graphite irradiation lifetime.
 
@@ -421,6 +422,47 @@ $$
 The older unweighted core delayed-neutron source fraction remains in the JSON as
 `unweighted_beta_eff` and `core_delayed_neutron_source_absolute_fraction` for
 comparison.
+
+The same finite-volume ring is also used to screen decay-heat precursor
+transport. Recent 2025-2026 liquid-fueled MSR work emphasizes that decay heat
+is not released only in the core when fuel circulates through the primary loop.
+For decay-heat group `g`, the implemented screening equation is:
+
+$$
+\frac{dH_g}{dt}
++
+\nabla \cdot (uH_g)
+=
+\nabla \cdot (D_g\nabla H_g)
++
+q_gS_f
+-
+\lambda_gH_g
+-
+k_{\mathrm{cleanup}}H_g
+$$
+
+where `q_g` is the configured group weight. The default reduced-order set uses
+three decay-heat groups, following recent MSFR reduced-order-model practice for
+decay-heat precursor transport. Cases may override the group set through
+`physics_core.precursor_transport.decay_heat_groups`.
+
+The report aggregates the solved decay-heat source into:
+
+$$
+F_{\mathrm{DH,core}}
+=
+\frac{\sum_{j\in \mathrm{core}}\sum_g \lambda_gH_{g,j}}
+{\sum_j\sum_g \lambda_gH_{g,j}},
+\qquad
+F_{\mathrm{DH,loop}}
+=
+1-F_{\mathrm{DH,core}}
+$$
+
+and also reports source fractions by configured loop segment. This is a
+screening handoff for thermal-hydraulic reporting and solver export; it is not
+a high-order RKDG transport solve or a depletion-chain heat source calculation.
 
 The xenon piece remains an explicit proxy:
 

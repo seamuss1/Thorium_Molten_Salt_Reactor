@@ -668,6 +668,30 @@ def _validate_optional_physics_core_settings(path: Path, physics_core: Any) -> N
             )
             if value < 0.0:
                 raise ConfigError(f"Case config {path} physics_core.precursor_transport.diffusion_coefficient_m2_s must be non-negative.")
+        decay_heat_groups = precursor_transport.get("decay_heat_groups")
+        if decay_heat_groups is not None:
+            _validate_decay_heat_groups(path, decay_heat_groups)
+
+
+def _validate_decay_heat_groups(path: Path, groups: Any) -> None:
+    field_prefix = "physics_core.precursor_transport.decay_heat_groups"
+    if not isinstance(groups, list):
+        raise ConfigError(f"Case config {path} {field_prefix} must be a list.")
+    if not groups:
+        raise ConfigError(f"Case config {path} {field_prefix} must contain at least one group.")
+    total_yield = 0.0
+    for index, group in enumerate(groups, start=1):
+        if not isinstance(group, Mapping):
+            raise ConfigError(f"Case config {path} {field_prefix}[{index}] must be a mapping.")
+        decay_constant = _require_number(path, f"{field_prefix}[{index}].decay_constant_s", group.get("decay_constant_s"))
+        if decay_constant <= 0.0:
+            raise ConfigError(f"Case config {path} field '{field_prefix}[{index}].decay_constant_s' must be positive.")
+        yield_fraction = _require_number(path, f"{field_prefix}[{index}].yield_fraction", group.get("yield_fraction"))
+        if yield_fraction < 0.0:
+            raise ConfigError(f"Case config {path} field '{field_prefix}[{index}].yield_fraction' must be non-negative.")
+        total_yield += yield_fraction
+    if total_yield <= 0.0:
+        raise ConfigError(f"Case config {path} {field_prefix} total yield_fraction must be positive.")
 
 
 def _require_number(path: Path, field_name: str, value: Any) -> float:

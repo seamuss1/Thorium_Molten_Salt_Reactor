@@ -11,6 +11,9 @@ from thorium_reactor.precursors import normalize_loop_segments, normalize_precur
 PHYSICS_CORE_MODEL = "coupled_deterministic_physics_core_v1"
 FINITE_VOLUME_TH_MODEL = "one_dimensional_finite_volume_loop"
 FINITE_VOLUME_PRECURSOR_MODEL = "finite_volume_advection_diffusion_decay"
+FINITE_VOLUME_DECAY_HEAT_PRECURSOR_MODEL = "finite_volume_decay_heat_precursor_transport"
+DECAY_HEAT_PRECURSOR_TRANSPORT_SOURCE = "https://doi.org/10.1016/j.applthermaleng.2026.129983"
+DECAY_HEAT_PRECURSOR_ROM_SOURCE = "https://doi.org/10.1080/00295450.2025.2530813"
 DEFAULT_DETERMINISTIC_METHODS = ("diffusion", "sp3", "transport")
 SUPPORTED_DETERMINISTIC_METHODS = set(DEFAULT_DETERMINISTIC_METHODS)
 
@@ -39,6 +42,7 @@ def build_physics_core_summary(config: Any, summary: dict[str, Any]) -> dict[str
             "thermal_hydraulics_to_neutronics": "temperature-dependent multigroup cross sections",
             "flow_to_precursors": "finite-volume advection residence times",
             "precursors_to_neutronics": "core delayed-neutron source importance",
+            "decay_heat_to_thermal_hydraulics": "finite-volume core and external-loop source split",
         },
         "neutronics": neutronics,
         "thermal_hydraulics": thermal_hydraulics,
@@ -714,6 +718,7 @@ def _decay_heat_precursor_summary(
     group_results = []
     total_source = 0.0
     core_source = 0.0
+    cell_decay_heat_sources = [0.0 for _ in cells]
     for index, group in enumerate(groups):
         decay = max(float(group.get("decay_constant_s", 0.0)), 1.0e-12)
         yield_fraction = max(float(group.get("yield_fraction", 0.0)), 0.0)
@@ -724,8 +729,11 @@ def _decay_heat_precursor_summary(
             diffusion_m2_s=diffusion_m2_s,
             cleanup_rate_s=cleanup_rate_s,
         )
+        for cell_index, value in enumerate(inventory):
+            cell_decay_heat_sources[cell_index] += decay * value
         source = decay * sum(inventory)
         source_core = decay * sum(value for value, cell in zip(inventory, cells) if cell["region"] == "core")
+        source_loop = max(source - source_core, 0.0)
         total_source += source
         core_source += source_core
         group_results.append(
@@ -734,14 +742,70 @@ def _decay_heat_precursor_summary(
                 "decay_constant_s": _round_float(decay),
                 "yield_fraction": _round_float(yield_fraction),
                 "core_decay_heat_source_fraction": _round_float(source_core / max(source, 1.0e-12)),
+                "loop_decay_heat_source_fraction": _round_float(source_loop / max(source, 1.0e-12)),
             }
         )
+    loop_source = max(total_source - core_source, 0.0)
+    segment_source_fractions = _decay_heat_segment_source_fractions(cells, cell_decay_heat_sources)
     return {
+        "model": FINITE_VOLUME_DECAY_HEAT_PRECURSOR_MODEL,
+        "equation": "dH_g/dt + div(u H_g) = div(D_g grad H_g) + q_g S_f - lambda_g H_g - cleanup_g H_g",
+        "spatial_discretization": "same implicit finite-volume core and external-loop cells used for delayed-neutron precursors",
+        "basis": "Recent liquid-fueled MSR studies solve decay-heat precursor transport consistently with DNP transport because fuel circulation releases decay heat in both core and external-loop regions.",
+        "source": DECAY_HEAT_PRECURSOR_TRANSPORT_SOURCE,
+        "reduced_order_model_source": DECAY_HEAT_PRECURSOR_ROM_SOURCE,
         "group_count": len(group_results),
+        "total_yield_fraction": _round_float(sum(float(group["yield_fraction"]) for group in group_results)),
         "core_decay_heat_source_fraction": _round_float(core_source / max(total_source, 1.0e-12)),
-        "loop_decay_heat_source_fraction": _round_float(1.0 - core_source / max(total_source, 1.0e-12)),
+        "loop_decay_heat_source_fraction": _round_float(loop_source / max(total_source, 1.0e-12)),
+        "segment_source_fractions": segment_source_fractions,
+        "dominant_loop_segment": _dominant_loop_decay_heat_segment(segment_source_fractions),
         "groups": group_results,
     }
+
+
+def _decay_heat_segment_source_fractions(
+    cells: list[dict[str, Any]],
+    cell_decay_heat_sources: list[float],
+) -> list[dict[str, Any]]:
+    total_source = sum(cell_decay_heat_sources)
+    rollups: dict[tuple[str, str], float] = {}
+    order: list[tuple[str, str]] = []
+    for cell, source in zip(cells, cell_decay_heat_sources):
+        region = str(cell["region"])
+        segment_id = str(cell.get("segment_id", region))
+        if region == "core":
+            segment_id = "core"
+        key = (region, segment_id)
+        if key not in rollups:
+            rollups[key] = 0.0
+            order.append(key)
+        rollups[key] += max(float(source), 0.0)
+    return [
+        {
+            "region": region,
+            "segment_id": segment_id,
+            "decay_heat_source_fraction": _round_float(source / max(total_source, 1.0e-12)),
+        }
+        for region, segment_id in order
+        for source in [rollups[(region, segment_id)]]
+    ]
+
+
+def _dominant_loop_decay_heat_segment(segment_source_fractions: list[dict[str, Any]]) -> dict[str, Any]:
+    loop_segments = [
+        segment
+        for segment in segment_source_fractions
+        if segment.get("region") != "core"
+    ]
+    if not loop_segments:
+        return {}
+    return dict(
+        max(
+            loop_segments,
+            key=lambda segment: float(segment.get("decay_heat_source_fraction", 0.0)),
+        )
+    )
 
 
 def _cell_inventory_report(
