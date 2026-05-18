@@ -25,6 +25,22 @@ benchmark_model:
     - vessel_reflector_and_control_regions
     - fuel_salt_mole_and_isotopic_inventory
     - graphite_grade_density_impurity_and_sab
+uncertainty_sweep:
+  model: solver_backed_geometry_material_uq_v1
+  inputs: benchmarks/msre_first_criticality/uncertainty_inputs.yaml
+  sampler: sobol
+  samples: 32
+  seed: 42
+  max_parallel: 1
+  observable_ids: [keff]
+  enabled_parameter_ids:
+    - fuel_salt_density
+    - graphite_density
+    - u235_atom_fraction
+    - channel_pitch
+    - fuel_annulus_thickness
+    - pipe_thickness
+    - active_height
 properties:
   provider: evaluated_table
 materials:

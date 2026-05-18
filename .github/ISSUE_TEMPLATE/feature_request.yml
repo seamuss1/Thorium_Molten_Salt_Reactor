@@ -1,0 +1,68 @@
+name: Feature request
+description: Propose a new user-facing capability or major workflow improvement.
+title: "[Feature]: "
+labels:
+  - type:feature
+  - needs:triage
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or research workflow is blocked or awkward?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the behavior, artifact, screen, or command you want.
+    validations:
+      required: true
+  - type: dropdown
+    id: primary-area
+    attributes:
+      label: Primary area
+      options:
+        - web
+        - cli
+        - cases
+        - geometry
+        - physics
+        - transport
+        - depletion
+        - reporting
+        - benchmarks
+        - qa
+        - docs
+        - infra
+        - integrations
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] 
+        - [ ] 
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Design or implementation notes
+      description: Include sketches, screenshots, comparable workflows, or source references.
+  - type: dropdown
+    id: validation-impact
+    attributes:
+      label: Validation impact
+      options:
+        - none
+        - docs or presentation only
+        - generated artifact correctness
+        - benchmark or QA traceability
+        - physics/modeling result
+        - safety-relevant interpretation
+    validations:
+      required: true

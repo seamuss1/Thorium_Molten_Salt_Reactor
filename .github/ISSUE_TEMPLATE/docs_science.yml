@@ -1,0 +1,44 @@
+name: Docs or science note
+description: Improve README, docs, Science view content, formulas, or explanatory notes.
+title: "[Docs]: "
+labels:
+  - type:docs
+  - needs:triage
+body:
+  - type: dropdown
+    id: doc-area
+    attributes:
+      label: Documentation area
+      options:
+        - README
+        - Science view indexed docs
+        - case documentation
+        - benchmark documentation
+        - QA documentation
+        - web documentation
+        - runtime instructions
+        - generated reports
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: Requested change
+      description: What should be added, corrected, clarified, or removed?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence or source material
+      description: Include formulas, citations, result bundle paths, screenshots, or files to update.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] Markdown renders correctly
+        - [ ] Formulas use $...$ or $$...$$ where needed
+        - [ ] Links and referenced artifacts are valid
+    validations:
+      required: true

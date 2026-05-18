@@ -135,6 +135,7 @@ def _validate_case_schema(path: Path, raw: Mapping[str, Any]) -> None:
     _validate_optional_depletion_settings(path, raw.get("depletion"))
     _validate_optional_transport_solver_settings(path, raw.get("transport_solver"))
     _validate_optional_depletion_solver_settings(path, raw.get("depletion_solver"))
+    _validate_optional_uncertainty_sweep_settings(path, raw.get("uncertainty_sweep"))
     _validate_optional_chemistry_settings(path, raw.get("chemistry"))
     _validate_optional_properties_settings(path, raw.get("properties"))
     _validate_optional_property_uncertainty_settings(path, raw.get("property_uncertainty"))
@@ -572,6 +573,28 @@ def _validate_optional_properties_settings(path: Path, properties: Any) -> None:
         raise ConfigError(
             f"Case config {path} properties.provider '{provider}' is unsupported. Supported values: {supported}."
         )
+
+
+def _validate_optional_uncertainty_sweep_settings(path: Path, uncertainty_sweep: Any) -> None:
+    if uncertainty_sweep is None:
+        return
+    if not isinstance(uncertainty_sweep, Mapping):
+        raise ConfigError(f"Case config {path} optional 'uncertainty_sweep' section must be a mapping.")
+    if "samples" in uncertainty_sweep:
+        _require_positive_int(path, "uncertainty_sweep.samples", uncertainty_sweep["samples"])
+    if "seed" in uncertainty_sweep:
+        _require_non_negative_int(path, "uncertainty_sweep.seed", uncertainty_sweep["seed"])
+    if "max_parallel" in uncertainty_sweep:
+        _require_positive_int(path, "uncertainty_sweep.max_parallel", uncertainty_sweep["max_parallel"])
+    sampler = uncertainty_sweep.get("sampler")
+    if sampler is not None and sampler != "sobol":
+        raise ConfigError(f"Case config {path} uncertainty_sweep.sampler '{sampler}' is unsupported.")
+    for list_name in ("observable_ids", "enabled_parameter_ids"):
+        values = uncertainty_sweep.get(list_name)
+        if values is None:
+            continue
+        if not isinstance(values, list) or not all(str(item).strip() for item in values):
+            raise ConfigError(f"Case config {path} uncertainty_sweep.{list_name} must be a list of non-empty strings.")
 
 
 def _validate_optional_property_uncertainty_settings(path: Path, property_uncertainty: Any) -> None:

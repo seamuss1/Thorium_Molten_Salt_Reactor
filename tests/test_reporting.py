@@ -124,6 +124,77 @@ def test_generate_report_includes_benchmark_evidence_and_novelty_tracks() -> Non
         shutil.rmtree(scratch_root, ignore_errors=True)
 
 
+def test_report_includes_benchmark_uncertainty_sweep_section() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-uq" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "completed"},
+                    "metrics": {"keff": 1.0001},
+                    "uncertainty_sweep": {
+                        "status": "completed",
+                        "model": "solver_backed_geometry_material_uq_v1",
+                        "sample_count": 19,
+                        "completed_sample_count": 19,
+                        "failed_sample_count": 0,
+                        "coverage_status": "assumption_backed",
+                        "nominal_keff": 1.0001,
+                        "nominal_residual_pcm": 32.0,
+                        "input_interval_width_pcm": 145.0,
+                        "input_sigma_pcm": 37.0,
+                        "statistical_sigma_pcm": 1.0,
+                        "combined_uncertainty_pcm": 422.0,
+                        "normalized_residual_with_input": 0.08,
+                        "budget_path": "uncertainty_budget.json",
+                        "dominant_contributors": [
+                            {
+                                "parameter_id": "u235_atom_fraction",
+                                "ranking_score_pcm": 24.0,
+                                "source_backed": False,
+                            }
+                        ],
+                    },
+                    "uncertainty_budget": {
+                        "uncertainty_categories": {
+                            "input": {"status": "assumption_backed", "sigma_pcm": 37.0},
+                            "statistical": {"status": "quantified", "sigma_pcm": 1.0},
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        validation_path = scratch_root / "validation.json"
+        validation_path.write_text(json.dumps({"checks": [], "passed": True}), encoding="utf-8")
+
+        report = generate_report(
+            "msre_first_criticality",
+            {
+                "reactor": {
+                    "name": "MSRE First Criticality Harness",
+                    "family": "MSRE-inspired historical benchmark",
+                    "stage": "benchmark",
+                    "mode": "historic_benchmark",
+                }
+            },
+            summary_path,
+            validation_path,
+            None,
+            {},
+        )
+
+        assert "## Benchmark Uncertainty Sweep" in report
+        assert "assumption_backed" in report
+        assert "u235_atom_fraction" in report
+        assert "Uncertainty categories" in report
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
 def test_report_can_include_plot_outputs() -> None:
     scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-plots" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)

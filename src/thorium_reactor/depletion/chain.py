@@ -99,11 +99,34 @@ def load_yaml_chain(path: Path) -> DepletionChain:
 
 def load_openmc_xml_chain(path: Path) -> DepletionChain:
     root = ET.fromstring(path.read_text(encoding="utf-8"))
+    raw_nuclides = [raw for raw in root.findall(".//nuclide") if str(raw.get("name", "")).strip()]
+    fission_yields_by_name = {
+        str(raw.get("name", "")).strip(): _parse_openmc_fission_yields(raw)
+        for raw in raw_nuclides
+    }
+    fission_yield_parents = {
+        str(raw.get("name", "")).strip(): parent
+        for raw in raw_nuclides
+        for parent in [_openmc_fission_yield_parent(raw)]
+        if parent
+    }
+
+    def resolved_fission_yields(name: str, seen: set[str] | None = None) -> dict[str, float]:
+        yields = fission_yields_by_name.get(name, {})
+        if yields:
+            return yields
+        seen = set() if seen is None else seen
+        if name in seen:
+            return {}
+        seen.add(name)
+        parent = fission_yield_parents.get(name)
+        if parent:
+            return resolved_fission_yields(parent, seen)
+        return {}
+
     nuclides = []
-    for raw in root.findall(".//nuclide"):
+    for raw in raw_nuclides:
         name = str(raw.get("name", "")).strip()
-        if not name:
-            continue
         half_life = _optional_float(raw.get("half_life"))
         if half_life is None:
             half_life_node = raw.find("half_life")
@@ -119,28 +142,33 @@ def load_openmc_xml_chain(path: Path) -> DepletionChain:
                 )
             )
         reactions = []
+        fission_yields = resolved_fission_yields(name)
+        has_fission_reaction = False
         for reaction in raw.findall("reaction"):
+            reaction_type = str(reaction.get("type", "reaction"))
+            is_fission = reaction_type.lower() == "fission"
+            has_fission_reaction = has_fission_reaction or is_fission
             reactions.append(
                 DepletionReaction(
-                    reaction_type=str(reaction.get("type", "reaction")),
+                    reaction_type=reaction_type,
                     target=_empty_to_none(reaction.get("target")),
                     branching_ratio=float(reaction.get("branching_ratio", reaction.get("branching", 1.0))),
                     default_rate_per_s=float(reaction.get("rate_per_s", reaction.get("default_rate_per_s", 0.0))),
+                    fission_yields=fission_yields if is_fission else {},
                 )
             )
         for fission in raw.findall("neutron_fission"):
-            yields: dict[str, float] = {}
-            for product in fission.findall("yield"):
-                product_name = _empty_to_none(product.get("product") or product.get("name"))
-                if product_name:
-                    yields[product_name] = float(product.get("fraction", product.get("yield", 0.0)))
+            legacy_yields = _parse_legacy_fission_yields(fission)
+            has_fission_reaction = True
             reactions.append(
                 DepletionReaction(
                     reaction_type="fission",
                     default_rate_per_s=float(fission.get("rate_per_s", 0.0)),
-                    fission_yields=yields,
+                    fission_yields=legacy_yields or fission_yields,
                 )
             )
+        if fission_yields and not has_fission_reaction:
+            reactions.append(DepletionReaction(reaction_type="fission", fission_yields=fission_yields))
         nuclides.append(
             DepletionNuclide(
                 name=name,
@@ -157,6 +185,46 @@ def load_openmc_xml_chain(path: Path) -> DepletionChain:
         source_format="openmc_xml",
         nuclides=tuple(nuclides),
     )
+
+
+def _parse_openmc_fission_yields(nuclide_node: ET.Element) -> dict[str, float]:
+    container = nuclide_node.find("neutron_fission_yields")
+    if container is None:
+        return {}
+
+    yield_sets: list[tuple[float, dict[str, float]]] = []
+    for yield_node in container.findall("fission_yields"):
+        products = (yield_node.findtext("products") or "").split()
+        data = (yield_node.findtext("data") or "").split()
+        if not products or len(products) != len(data):
+            continue
+        energy = _optional_float(yield_node.get("energy"))
+        yield_sets.append(
+            (
+                energy if energy is not None else 0.0,
+                {product: float(value) for product, value in zip(products, data)},
+            )
+        )
+    if yield_sets:
+        yield_sets.sort(key=lambda item: item[0])
+        return yield_sets[0][1]
+    return _parse_legacy_fission_yields(container)
+
+
+def _parse_legacy_fission_yields(fission_node: ET.Element) -> dict[str, float]:
+    yields: dict[str, float] = {}
+    for product in fission_node.findall("yield"):
+        product_name = _empty_to_none(product.get("product") or product.get("name"))
+        if product_name:
+            yields[product_name] = float(product.get("fraction", product.get("yield", 0.0)))
+    return yields
+
+
+def _openmc_fission_yield_parent(nuclide_node: ET.Element) -> str | None:
+    container = nuclide_node.find("neutron_fission_yields")
+    if container is None:
+        return None
+    return _empty_to_none(container.get("parent"))
 
 
 def _parse_reactions(raw_reactions: Any, *, default_type: str) -> list[DepletionReaction]:

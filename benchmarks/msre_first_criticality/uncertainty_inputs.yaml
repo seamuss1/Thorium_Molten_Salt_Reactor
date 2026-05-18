@@ -1,0 +1,116 @@
+schema_version: 1
+case: msre_first_criticality
+title: MSRE first criticality geometry/material uncertainty inputs
+status: illustrative_harness_assumption_backed
+notes:
+  - Current entries exercise the solver-backed UQ workflow on the illustrative harness.
+  - They are not sufficient for benchmark-ready uncertainty coverage until source-indexed geometry and material reconstruction is complete.
+parameters:
+  - id: fuel_salt_density
+    label: Fuel-salt density scale
+    category: material
+    operation: material_density_relative
+    material: fuel_salt
+    units: relative
+    distribution: normal
+    mean: 1.0
+    sigma_fraction: 0.0102
+    bounds: [0.96, 1.04]
+    source_status: assumption_backed
+    source_backed: false
+    required_for_benchmark_ready: true
+    source_refs: [source-dossier]
+    note: Uses the current case material-property uncertainty as an illustrative input; not IRPhEP source-backed.
+  - id: graphite_density
+    label: Graphite density scale
+    category: material
+    operation: material_density_relative
+    material: graphite
+    units: relative
+    distribution: normal
+    mean: 1.0
+    sigma_fraction: 0.005
+    bounds: [0.98, 1.02]
+    source_status: assumption_backed
+    source_backed: false
+    required_for_benchmark_ready: true
+    source_refs: [osti-2020-report]
+    note: Graphite density is a known bias source, but the current open harness has not encoded benchmark-grade values.
+  - id: u235_atom_fraction
+    label: U-235 atom fraction scale
+    category: material
+    operation: nuclide_atom_fraction_relative
+    material: fuel_salt
+    nuclide: U235
+    units: relative
+    distribution: normal
+    mean: 1.0
+    sigma_fraction: 0.004
+    bounds: [0.985, 1.015]
+    source_status: assumption_backed
+    source_backed: false
+    required_for_benchmark_ready: true
+    source_refs: [osti-2020-report]
+    note: Exercises composition perturbation and renormalization until source-indexed fuel inventory is available.
+  - id: channel_pitch
+    label: Channel pitch scale
+    category: geometry
+    operation: geometry_scalar_relative
+    path: geometry.pitch
+    units: relative
+    distribution: normal
+    mean: 1.0
+    sigma_fraction: 0.0025
+    bounds: [0.99, 1.01]
+    source_status: assumption_backed
+    source_backed: false
+    required_for_benchmark_ready: true
+    source_refs: [irphep_2019_msre]
+    note: Placeholder machining-tolerance scale for the illustrative channel pitch.
+  - id: fuel_annulus_thickness
+    label: Fuel annulus thickness scale
+    category: geometry
+    operation: radial_layer_thickness_relative
+    layers_path: geometry.layers
+    layer: fuel_annulus
+    units: relative
+    distribution: normal
+    mean: 1.0
+    sigma_fraction: 0.006
+    bounds: [0.976, 1.024]
+    source_status: assumption_backed
+    source_backed: false
+    required_for_benchmark_ready: true
+    source_refs: [irphep_2019_msre]
+    note: Preserves downstream radial layer ordering while perturbing the fuel annulus thickness.
+  - id: pipe_thickness
+    label: Pipe wall thickness scale
+    category: geometry
+    operation: radial_layer_thickness_relative
+    layers_path: geometry.layers
+    layer: primary_pipe
+    units: relative
+    distribution: normal
+    mean: 1.0
+    sigma_fraction: 0.006
+    bounds: [0.976, 1.024]
+    source_status: assumption_backed
+    source_backed: false
+    required_for_benchmark_ready: true
+    source_refs: [irphep_2019_msre]
+    note: Exercises structural radial perturbation without claiming benchmark-grade pipe dimensions.
+  - id: active_height
+    label: Active height scale
+    category: geometry
+    operation: geometry_scalar_relative
+    path: geometry.height_cm
+    units: relative
+    distribution: normal
+    mean: 1.0
+    sigma_fraction: 0.0025
+    bounds: [0.99, 1.01]
+    source_status: assumption_backed
+    source_backed: false
+    required_for_benchmark_ready: true
+    source_refs: [irphep_2019_msre]
+    note: Placeholder active-height tolerance for the current layered-channel harness.

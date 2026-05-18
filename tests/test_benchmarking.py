@@ -46,6 +46,7 @@ def test_build_docker_openmc_command_targets_repo_compose_runtime() -> None:
         "tmsr_lf1_core",
         "--run-id",
         "benchmark-run",
+        "--reuse-run-id",
     ]
 
 

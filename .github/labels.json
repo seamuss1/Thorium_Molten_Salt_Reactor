@@ -1,0 +1,157 @@
+[
+  {
+    "name": "type:bug",
+    "color": "d73a4a",
+    "description": "Defect or incorrect behavior"
+  },
+  {
+    "name": "type:feature",
+    "color": "a2eeef",
+    "description": "New user-facing or workflow capability"
+  },
+  {
+    "name": "type:task",
+    "color": "cfd3d7",
+    "description": "Implementation, refactor, tooling, or maintenance task"
+  },
+  {
+    "name": "type:docs",
+    "color": "0075ca",
+    "description": "Documentation or science note work"
+  },
+  {
+    "name": "type:refactor",
+    "color": "fbca04",
+    "description": "Internal code restructuring without intended behavior change"
+  },
+  {
+    "name": "type:validation",
+    "color": "5319e7",
+    "description": "Benchmark, QA traceability, source evidence, or model validation work"
+  },
+  {
+    "name": "area:web",
+    "color": "1d76db",
+    "description": "FastAPI or React browser lab"
+  },
+  {
+    "name": "area:cli",
+    "color": "1d76db",
+    "description": "Command-line runtime and wrappers"
+  },
+  {
+    "name": "area:cases",
+    "color": "1d76db",
+    "description": "Case YAML portfolio and schema"
+  },
+  {
+    "name": "area:geometry",
+    "color": "1d76db",
+    "description": "Geometry generation, render, and exports"
+  },
+  {
+    "name": "area:physics",
+    "color": "1d76db",
+    "description": "Reduced-order physics, flow, and transient models"
+  },
+  {
+    "name": "area:transport",
+    "color": "1d76db",
+    "description": "Native transport workflows"
+  },
+  {
+    "name": "area:depletion",
+    "color": "1d76db",
+    "description": "Depletion chains and matrix workflows"
+  },
+  {
+    "name": "area:reporting",
+    "color": "1d76db",
+    "description": "Reports, plots, and result bundle presentation"
+  },
+  {
+    "name": "area:benchmarks",
+    "color": "1d76db",
+    "description": "Benchmark dossiers and validation targets"
+  },
+  {
+    "name": "area:qa",
+    "color": "1d76db",
+    "description": "Requirements and QA traceability"
+  },
+  {
+    "name": "area:docs",
+    "color": "1d76db",
+    "description": "Markdown docs, README, and Science view content"
+  },
+  {
+    "name": "area:infra",
+    "color": "1d76db",
+    "description": "Docker, runtime, dependency, and CI infrastructure"
+  },
+  {
+    "name": "area:integrations",
+    "color": "1d76db",
+    "description": "External code handoffs and integration adapters"
+  },
+  {
+    "name": "priority:p0",
+    "color": "b60205",
+    "description": "Urgent; blocks core use, validation integrity, or release readiness"
+  },
+  {
+    "name": "priority:p1",
+    "color": "d93f0b",
+    "description": "High priority"
+  },
+  {
+    "name": "priority:p2",
+    "color": "fbca04",
+    "description": "Medium priority"
+  },
+  {
+    "name": "priority:p3",
+    "color": "cfd3d7",
+    "description": "Low priority or backlog candidate"
+  },
+  {
+    "name": "size:S",
+    "color": "0e8a16",
+    "description": "Small, focused change"
+  },
+  {
+    "name": "size:M",
+    "color": "fbca04",
+    "description": "Moderate change with multiple touch points"
+  },
+  {
+    "name": "size:L",
+    "color": "d93f0b",
+    "description": "Large work; consider parent and sub-issues"
+  },
+  {
+    "name": "needs:triage",
+    "color": "ededed",
+    "description": "Needs initial classification and routing"
+  },
+  {
+    "name": "needs:info",
+    "color": "ededed",
+    "description": "Needs more context before it can be made ready"
+  },
+  {
+    "name": "needs:design",
+    "color": "ededed",
+    "description": "Needs design or scope decision before implementation"
+  },
+  {
+    "name": "needs:repro",
+    "color": "ededed",
+    "description": "Needs reproduction steps or failing evidence"
+  },
+  {
+    "name": "blocked",
+    "color": "b60205",
+    "description": "Blocked by another decision, issue, or external dependency"
+  }
+]

@@ -1,7 +1,32 @@
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from thorium_reactor.paths import create_result_bundle
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot, load_plot_manifest
+
+SVG_NS = {"svg": "http://www.w3.org/2000/svg"}
+
+
+def _svg_root(path: Path) -> ET.Element:
+    return ET.fromstring(path.read_text(encoding="utf-8"))
+
+
+def _axis_tick_labels(path: Path, axis: str) -> list[str]:
+    root = _svg_root(path)
+    return [
+        element.text or ""
+        for element in root.findall(".//svg:text", SVG_NS)
+        if element.attrib.get("data-axis") == axis
+    ]
+
+
+def _axis_tick_marks(path: Path, axis: str) -> list[ET.Element]:
+    root = _svg_root(path)
+    return [
+        element
+        for element in root.findall(".//svg:line", SVG_NS)
+        if element.attrib.get("data-axis") == axis
+    ]
 
 
 def test_generate_summary_plots_populates_plots_dir(tmp_path: Path) -> None:
@@ -131,6 +156,8 @@ def test_generate_summary_plots_emits_transient_plots_when_history_exists(tmp_pa
     assert "transient_fuel_temperature" in assets
     assert Path(assets["transient_power"]).exists()
     assert Path(assets["transient_fuel_temperature"]).exists()
+    assert _axis_tick_labels(Path(assets["transient_power"]), "x") == ["0", "10", "20"]
+    assert len(_axis_tick_marks(Path(assets["transient_power"]), "x")) == 3
 
 
 def test_generate_summary_plots_emits_transient_sweep_envelopes_when_history_exists(tmp_path: Path) -> None:
@@ -179,3 +206,60 @@ def test_generate_summary_plots_emits_transient_sweep_envelopes_when_history_exi
     assert "transient_sweep_fuel_temperature_envelope" in assets
     assert Path(assets["transient_sweep_power_envelope"]).exists()
     assert Path(assets["transient_sweep_fuel_temperature_envelope"]).exists()
+    assert _axis_tick_labels(Path(assets["transient_sweep_power_envelope"]), "x") == ["0", "5", "10"]
+    assert len(_axis_tick_marks(Path(assets["transient_sweep_power_envelope"]), "x")) == 3
+
+
+def test_line_plot_y_tick_labels_do_not_collapse_for_nonzero_range(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
+    transient_path = bundle.write_json(
+        "transient.json",
+        {
+            "history": [
+                {"time_s": 0.0, "power_fraction": 1.000001},
+                {"time_s": 5.0, "power_fraction": 1.000003},
+                {"time_s": 10.0, "power_fraction": 1.000005},
+            ]
+        },
+    )
+    summary = {
+        "case": "plot_case",
+        "metrics": {
+            "channel_count": 91,
+        },
+        "transient": {
+            "history_path": str(transient_path),
+        },
+        "neutronics": {
+            "status": "completed",
+        },
+    }
+
+    assets = generate_summary_plots(bundle, summary)
+    y_tick_labels = _axis_tick_labels(Path(assets["transient_power"]), "y")
+
+    assert y_tick_labels
+    assert len(set(y_tick_labels)) > 1
+
+
+def test_zero_valued_bar_entries_do_not_render_filled_bar_rects(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
+    validation = {
+        "case": "plot_case",
+        "checks": [
+            {"status": "pass"},
+        ],
+    }
+
+    assets = generate_validation_plot(bundle, validation)
+    root = _svg_root(Path(assets["validation_summary"]))
+    bar_rects = [
+        element
+        for element in root.findall(".//svg:rect", SVG_NS)
+        if element.attrib.get("rx") == "6"
+    ]
+    text_values = [element.text or "" for element in root.findall(".//svg:text", SVG_NS)]
+
+    assert len(bar_rects) == 1
+    assert "fail" in text_values
+    assert "pending" in text_values

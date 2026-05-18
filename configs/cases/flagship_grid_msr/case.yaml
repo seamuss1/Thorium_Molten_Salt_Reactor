@@ -467,6 +467,200 @@ processing:
   volatile_removal: helium_sparging
   noble_gas_path: offgas_hold_up
   protactinium_strategy: configurable_holdup
+transient:
+  duration_s: 900.0
+  time_step_s: 0.25
+  power_response_time_s: 1.8
+  fuel_temperature_response_time_s: 6.0
+  graphite_temperature_response_time_s: 24.0
+  coolant_temperature_response_time_s: 9.0
+  precursor_inventory_response_time_s: 4.0
+  precursor_transport_response_time_s: 2.0
+  xenon_response_time_s: 220.0
+  reactivity_to_power_scale_pcm: 520.0
+  fuel_temperature_feedback_pcm_per_c: -3.2
+  graphite_temperature_feedback_pcm_per_c: -0.9
+  coolant_temperature_feedback_pcm_per_c: -0.55
+  precursor_worth_pcm: 185.0
+  precursor_transport_model: loop_segment_six_group_advection_decay
+  delayed_neutron_precursor_groups:
+    - { name: group_1, decay_constant_s: 0.0124, yield_fraction: 0.000215 }
+    - { name: group_2, decay_constant_s: 0.0305, yield_fraction: 0.001424 }
+    - { name: group_3, decay_constant_s: 0.111, yield_fraction: 0.001274 }
+    - { name: group_4, decay_constant_s: 0.301, yield_fraction: 0.002568 }
+    - { name: group_5, decay_constant_s: 1.14, yield_fraction: 0.000748 }
+    - { name: group_6, decay_constant_s: 3.01, yield_fraction: 0.000273 }
+  xenon_worth_pcm_per_fraction: -130.0
+  depletion_reactivity_worth_pcm_per_fraction: 340.0
+  protactinium_penalty_pcm_per_fraction: -150.0
+  chemistry_redox_worth_pcm_per_ev: -95.0
+  chemistry_impurity_worth_pcm_per_fraction: -260.0
+  max_power_fraction: 2.4
+  ensemble:
+    uncertainties:
+      event_reactivity_sigma_fraction: 0.18
+      flow_sigma_fraction: 0.11
+      heat_sink_sigma_fraction: 0.12
+      cleanup_sigma_fraction: 0.18
+      temperature_feedback_sigma_fraction: 0.08
+      precursor_worth_sigma_fraction: 0.10
+      xenon_worth_sigma_fraction: 0.12
+      sink_offset_sigma_c: 7.5
+      redox_setpoint_sigma_ev: 0.006
+      impurity_ingress_sigma_fraction: 0.28
+      gas_stripping_sigma_fraction: 0.08
+  scenarios:
+    - name: flagship_grid_stress
+      duration_s: 900.0
+      time_step_s: 0.25
+      events:
+        - time_s: 30.0
+          reactivity_step_pcm: 55.0
+        - time_s: 120.0
+          flow_fraction: 0.78
+        - time_s: 210.0
+          heat_sink_fraction: 0.76
+        - time_s: 300.0
+          sink_temp_offset_c: 15.0
+        - time_s: 390.0
+          cleanup_multiplier: 0.45
+        - time_s: 480.0
+          impurity_ingress_multiplier: 2.0
+        - time_s: 570.0
+          redox_setpoint_shift_ev: 0.010
+        - time_s: 660.0
+          gas_stripping_efficiency: 0.70
+        - time_s: 780.0
+          reactivity_step_pcm: -25.0
+          flow_fraction: 0.95
+          heat_sink_fraction: 0.92
+          cleanup_multiplier: 1.0
+    - name: flagship_load_follow_recovery
+      duration_s: 300.0
+      time_step_s: 0.5
+      events:
+        - time_s: 20.0
+          reactivity_step_pcm: 35.0
+        - time_s: 90.0
+          flow_fraction: 0.88
+        - time_s: 160.0
+          reactivity_step_pcm: -15.0
+          flow_fraction: 1.0
+depletion:
+  chain: thorium_u233_cleanup_proxy
+  cleanup_scenario: flagship_online_cleanup
+  volatile_removal_efficiency: 0.82
+  xenon_removal_fraction: 0.92
+  protactinium_holdup_days: 2.5
+  initial_fissile_inventory_fraction: 1.0
+  fissile_burn_fraction_per_day_full_power: 0.00075
+  breeding_gain_fraction_per_day: 0.00058
+  minor_actinide_sink_fraction_per_day: 0.00010
+chemistry:
+  model: salt_redox_cleanup_proxy
+  target_redox_state_ev: -0.028
+  initial_redox_state_ev: -0.020
+  redox_control_time_days: 2.2
+  oxidant_ingress_fraction_per_day: 0.00024
+  impurity_capture_efficiency: 0.68
+  gas_stripping_efficiency: 0.90
+  noble_metal_plateout_fraction: 0.13
+  corrosion_acceleration_per_ev: 4.2
+  tritium_release_fraction: 0.34
+loop_segments:
+  - id: core_to_primary_heat_exchanger
+    residence_fraction: 0.34
+    cleanup_weight: 0.15
+  - id: primary_heat_exchanger_and_offgas
+    residence_fraction: 0.28
+    cleanup_weight: 1.6
+  - id: pump_and_cold_leg_return
+    residence_fraction: 0.22
+    cleanup_weight: 0.35
+  - id: cleanup_bypass_and_drain_header
+    residence_fraction: 0.16
+    cleanup_weight: 2.1
+transport_solver:
+  mesh: rz_structured
+  radial_cells: 36
+  axial_cells: 72
+  polynomial_order: 1
+  duration_s: 5.0
+  cfl: 0.35
+  diffusion_coefficient_m2_s: 1.0e-5
+  positivity_floor: 0.0
+  custom_group_sets:
+    - name: noble_gas_cleanup_lag
+      groups:
+        - { name: iodine_135_lag, decay_constant_s: 2.93e-5, yield_fraction: 0.35 }
+        - { name: xenon_135_lag, decay_constant_s: 2.11e-5, yield_fraction: 0.45 }
+        - { name: krypton_88_lag, decay_constant_s: 6.78e-3, yield_fraction: 0.20 }
+    - name: corrosion_product_tracers
+      groups:
+        - { name: nickel_activation, decay_constant_s: 1.0e-6, yield_fraction: 0.35 }
+        - { name: chromium_activation, decay_constant_s: 2.0e-6, yield_fraction: 0.25 }
+        - { name: insoluble_plateout, decay_constant_s: 3.0e-5, yield_fraction: 0.40 }
+depletion_solver:
+  chain_path: resources/depletion/flagship_thorium_chain.yaml
+  chain_format: yaml
+  steps: 24
+  time_step_days: 3.0
+  zones: [core, primary_loop, cleanup_system]
+  initial_inventory_atoms:
+    core:
+      Th232: 8.0e23
+      Pa233: 4.0e19
+      U233: 6.5e21
+      U234: 4.0e20
+      U235: 8.0e19
+      U238: 1.2e20
+    primary_loop:
+      Th232: 2.4e23
+      Pa233: 1.2e19
+      U233: 1.8e21
+      U234: 1.2e20
+      U235: 2.4e19
+      U238: 3.6e19
+    cleanup_system:
+      Th232: 2.0e22
+      Pa233: 1.0e18
+      U233: 1.5e20
+      U234: 1.0e19
+      U235: 2.0e18
+      U238: 3.0e18
+  reaction_rates_per_s:
+    core:
+      Th232: { capture: 1.25e-8 }
+      Pa233: { capture: 1.8e-9 }
+      U233: { fission: 3.6e-9, capture: 9.0e-10 }
+      U234: { capture: 2.0e-10 }
+      U235: { fission: 9.0e-10, capture: 4.0e-10 }
+      U238: { capture: 3.0e-10 }
+      Pu239: { fission: 4.0e-10, capture: 2.0e-10 }
+    primary_loop:
+      Th232: { capture: 4.0e-9 }
+      U233: { fission: 1.2e-9, capture: 3.0e-10 }
+      U235: { fission: 3.0e-10, capture: 1.0e-10 }
+      Pu239: { fission: 1.0e-10 }
+    cleanup_system:
+      Th232: { capture: 1.0e-9 }
+      U233: { fission: 2.0e-10, capture: 1.0e-10 }
+  removal_rates_per_s:
+    cleanup_system:
+      Xe135: 1.8e-5
+      Kr88: 2.4e-5
+      I135: 2.0e-6
+      Sr90: 3.0e-8
+      Sm149: 1.0e-8
+  feed_atoms_per_s:
+    core:
+      Th232: 2.0e13
+      U233: 6.0e10
+  zone_transfers_per_s:
+    - { from: core, to: primary_loop, rate_per_s: 0.018 }
+    - { from: primary_loop, to: core, rate_per_s: 0.016 }
+    - { from: primary_loop, to: cleanup_system, rate_per_s: 0.0025 }
+    - { from: cleanup_system, to: primary_loop, rate_per_s: 0.0018 }
 economics:
   cost_basis: inl_2024_smr_conservative
   default_scenario: conservative_foak

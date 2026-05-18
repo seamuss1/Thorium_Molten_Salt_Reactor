@@ -19,7 +19,7 @@ Each case is intentionally self-contained. The CLI snapshots the YAML into every
 | [`msre_u233_zero_power`](msre_u233_zero_power/case.yaml) | historic benchmark | U-233-focused zero-power MSRE harness | `.\scripts\Run-Reactor.cmd validate msre_u233_zero_power` |
 | [`tmsr_lf1_core`](tmsr_lf1_core/case.yaml) | full-core surrogate | Detailed TMSR-LF1-inspired CSG, thermal outputs, transient proxy, and uncertainty sweep | `.\scripts\Run-Reactor.cmd render tmsr_lf1_core` |
 | [`immersed_pool_reference`](immersed_pool_reference/case.yaml) | full-core demonstrator | Immersed-pool geometry, primary loop, heat-sink-loss transient, and flow animation assets | `.\scripts\Run-Reactor.cmd transient immersed_pool_reference --scenario partial_heat_sink_loss` |
-| [`flagship_grid_msr`](flagship_grid_msr/case.yaml) | commercial planning | 300 MWe grid-planning target with cost, construction schedule, and plant schematic outputs | `.\scripts\Run-Reactor.cmd economics flagship_grid_msr --scenario conservative_foak` |
+| [`flagship_grid_msr`](flagship_grid_msr/case.yaml) | commercial planning | 300 MWe grid target with plant economics plus stress transient, GPU sweep, native transport, and multi-zone depletion workloads | `.\scripts\Run-Reactor.cmd transient-sweep flagship_grid_msr --scenario flagship_grid_stress --prefer-gpu` |
 
 ## Case Anatomy
 
@@ -70,3 +70,5 @@ Examples:
 .\scripts\Run-Reactor.cmd transient-sweep tmsr_lf1_core --run-id readme-demo --scenario mild_reactivity_insertion --samples 512
 .\scripts\Run-Reactor.cmd report tmsr_lf1_core --run-id readme-demo
 ```
+
+For the flagship commercial case, `flagship_grid_stress` is intentionally heavier than the smoke scenarios: 900 s at 0.25 s resolution, multiple coupled reactivity/flow/heat-sink/chemistry events, 36 x 72 native R-Z transport, extra transported tracer groups, and a 3-zone native depletion matrix using `resources/depletion/flagship_thorium_chain.yaml`.

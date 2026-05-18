@@ -58,6 +58,12 @@ RAW_ARTIFACTS = (
     "transient.json",
     "transient_sweep.json",
     "runtime_benchmark.json",
+    "uncertainty_manifest.json",
+    "uncertainty_samples.json",
+    "uncertainty_results.json",
+    "uncertainty_budget.json",
+    "uncertainty_summary.json",
+    "uncertainty_execution.json",
     "benchmark_execution.json",
     "finance.json",
     "schedule.json",
@@ -295,6 +301,7 @@ class WebRepository:
         self._add_advanced_physics_section(sections, summary)
         self._add_transient_section(sections, summary)
         self._add_transient_sweep_section(sections, summary)
+        self._add_uncertainty_sweep_section(sections, summary)
         self._add_fuel_chemistry_section(sections, summary)
         self._add_validation_section(sections, summary, validation if isinstance(validation, Mapping) else {})
         self._add_commercial_section(sections, summary)
@@ -560,6 +567,43 @@ class WebRepository:
                     if first_present(sweep.get("backend"), backend_report.get("selected"))
                     else None,
                     f"p95 peak power {format_value(sweep.get('peak_power_fraction_p95'))}",
+                ]
+            ),
+            notes=notes,
+        )
+
+    def _add_uncertainty_sweep_section(self, sections: list[OutputSection], summary: Mapping[str, Any]) -> None:
+        sweep = as_mapping(summary.get("uncertainty_sweep"))
+        if not sweep:
+            return
+        metrics = output_metrics(
+            ("Samples", sweep.get("sample_count"), "count", "number"),
+            ("Completed", sweep.get("completed_sample_count"), "count", "number"),
+            ("Failed", sweep.get("failed_sample_count"), "count", "number"),
+            ("Coverage", sweep.get("coverage_status"), None, "text"),
+            ("Nominal keff", sweep.get("nominal_keff"), "k-effective", "number"),
+            ("Input interval width", sweep.get("input_interval_width_pcm"), "pcm", "number"),
+            ("Input sigma", sweep.get("input_sigma_pcm"), "pcm", "number"),
+            ("Statistical sigma", sweep.get("statistical_sigma_pcm"), "pcm", "number"),
+            ("Combined uncertainty", sweep.get("combined_uncertainty_pcm"), "pcm", "number"),
+        )
+        notes = []
+        contributors = sweep.get("dominant_contributors", [])
+        if isinstance(contributors, list) and contributors:
+            notes.append("Top contributor: " + str(contributors[0].get("parameter_id", "n/a")))
+        self._append_section(
+            sections,
+            "benchmark_uncertainty",
+            "Benchmark uncertainty sweep",
+            metrics=metrics,
+            status=sweep.get("status"),
+            summary=make_sentence(
+                [
+                    f"{sweep.get('completed_sample_count')} completed samples"
+                    if sweep.get("completed_sample_count") is not None
+                    else None,
+                    f"coverage {sweep.get('coverage_status')}" if sweep.get("coverage_status") else None,
+                    f"input width {format_value(sweep.get('input_interval_width_pcm'))} pcm",
                 ]
             ),
             notes=notes,

@@ -389,15 +389,16 @@ def _write_bar_chart_svg(
     bar_width = min(72.0, step * 0.6)
     colors = palette or ["#1f77b4", "#2c3e50", "#d35400", "#16a085", "#8e44ad"]
 
+    grid_values = _axis_tick_values(min_value, max_value, 5)
+    grid_labels = _format_tick_labels(grid_values)
     grid_lines: list[str] = []
-    for index in range(5):
-        grid_value = min_value + (span * index / 4.0)
+    for grid_value, grid_label in zip(grid_values, grid_labels):
         grid_y = value_to_y(grid_value)
         grid_lines.append(
             f'<line x1="{left}" y1="{grid_y:.2f}" x2="{width - right}" y2="{grid_y:.2f}" stroke="#d7dce2" stroke-width="1" />'
         )
         grid_lines.append(
-            f'<text x="{left - 12}" y="{grid_y + 4:.2f}" text-anchor="end" font-size="12" fill="#5c6670">{_format_value(grid_value)}</text>'
+            f'<text x="{left - 12}" y="{grid_y + 4:.2f}" text-anchor="end" font-size="12" fill="#5c6670" data-axis="y">{escape(grid_label)}</text>'
         )
 
     bars: list[str] = []
@@ -407,9 +408,10 @@ def _write_bar_chart_svg(
         rect_y = min(value_y, baseline_y)
         rect_height = max(abs(value_y - baseline_y), 1.5)
         color = colors[index % len(colors)]
-        bars.append(
-            f'<rect x="{center_x - bar_width / 2:.2f}" y="{rect_y:.2f}" width="{bar_width:.2f}" height="{rect_height:.2f}" rx="6" fill="{color}" />'
-        )
+        if value != 0.0:
+            bars.append(
+                f'<rect x="{center_x - bar_width / 2:.2f}" y="{rect_y:.2f}" width="{bar_width:.2f}" height="{rect_height:.2f}" rx="6" fill="{color}" data-series="bar" />'
+            )
         value_label_y = rect_y - 10 if value >= 0 else rect_y + rect_height + 16
         bars.append(
             f'<text x="{center_x:.2f}" y="{value_label_y:.2f}" text-anchor="middle" font-size="12" fill="#334155">{escape(_format_value(value))}</text>'
@@ -490,15 +492,28 @@ def _write_xy_line_chart_svg(
 
     polyline_points = " ".join(f"{value_to_x(x_value):.2f},{value_to_y(y_value):.2f}" for x_value, y_value in points)
 
+    grid_values = _axis_tick_values(min_value, max_value, 5)
+    grid_labels = _format_tick_labels(grid_values)
     grid_lines: list[str] = []
-    for index in range(5):
-        grid_value = min_value + (span * index / 4.0)
+    for grid_value, grid_label in zip(grid_values, grid_labels):
         grid_y = value_to_y(grid_value)
         grid_lines.append(
             f'<line x1="{left}" y1="{grid_y:.2f}" x2="{width - right}" y2="{grid_y:.2f}" stroke="#d7dce2" stroke-width="1" />'
         )
         grid_lines.append(
-            f'<text x="{left - 12}" y="{grid_y + 4:.2f}" text-anchor="end" font-size="12" fill="#5c6670">{_format_value(grid_value)}</text>'
+            f'<text x="{left - 12}" y="{grid_y + 4:.2f}" text-anchor="end" font-size="12" fill="#5c6670" data-axis="y">{escape(grid_label)}</text>'
+        )
+
+    x_tick_values = _axis_tick_values(min_x, max_x, 3)
+    x_tick_labels = _format_tick_labels(x_tick_values)
+    x_ticks: list[str] = []
+    for tick_value, tick_label in zip(x_tick_values, x_tick_labels):
+        tick_x = value_to_x(tick_value)
+        x_ticks.append(
+            f'<line x1="{tick_x:.2f}" y1="{height - bottom}" x2="{tick_x:.2f}" y2="{height - bottom + 7}" stroke="#475569" stroke-width="1.25" data-axis="x" />'
+        )
+        x_ticks.append(
+            f'<text x="{tick_x:.2f}" y="{height - bottom + 24}" text-anchor="middle" font-size="12" fill="#5c6670" data-axis="x">{escape(tick_label)}</text>'
         )
 
     svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
@@ -507,6 +522,7 @@ def _write_xy_line_chart_svg(
   <line x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" stroke="#475569" stroke-width="1.5" />
   <line x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" stroke="#475569" stroke-width="1.5" />
   {''.join(grid_lines)}
+  {''.join(x_ticks)}
   <polyline fill="none" stroke="#1d4ed8" stroke-width="3" points="{polyline_points}" />
   <text x="{width / 2:.2f}" y="{height - 26}" text-anchor="middle" font-size="13" fill="#334155">{escape(x_label)}</text>
   <text x="24" y="{height / 2:.2f}" text-anchor="middle" font-size="13" fill="#334155" transform="rotate(-90 24 {height / 2:.2f})">{escape(y_label)}</text>
@@ -571,15 +587,28 @@ def _write_uncertainty_band_chart_svg(
         ]
     )
 
+    grid_values = _axis_tick_values(min_value, max_value, 5)
+    grid_labels = _format_tick_labels(grid_values)
     grid_lines: list[str] = []
-    for index in range(5):
-        grid_value = min_value + (span * index / 4.0)
+    for grid_value, grid_label in zip(grid_values, grid_labels):
         grid_y = value_to_y(grid_value)
         grid_lines.append(
             f'<line x1="{left}" y1="{grid_y:.2f}" x2="{width - right}" y2="{grid_y:.2f}" stroke="#d7dce2" stroke-width="1" />'
         )
         grid_lines.append(
-            f'<text x="{left - 12}" y="{grid_y + 4:.2f}" text-anchor="end" font-size="12" fill="#5c6670">{_format_value(grid_value)}</text>'
+            f'<text x="{left - 12}" y="{grid_y + 4:.2f}" text-anchor="end" font-size="12" fill="#5c6670" data-axis="y">{escape(grid_label)}</text>'
+        )
+
+    x_tick_values = _axis_tick_values(min_x, max_x, 3)
+    x_tick_labels = _format_tick_labels(x_tick_values)
+    x_ticks: list[str] = []
+    for tick_value, tick_label in zip(x_tick_values, x_tick_labels):
+        tick_x = value_to_x(tick_value)
+        x_ticks.append(
+            f'<line x1="{tick_x:.2f}" y1="{height - bottom}" x2="{tick_x:.2f}" y2="{height - bottom + 7}" stroke="#475569" stroke-width="1.25" data-axis="x" />'
+        )
+        x_ticks.append(
+            f'<text x="{tick_x:.2f}" y="{height - bottom + 24}" text-anchor="middle" font-size="12" fill="#5c6670" data-axis="x">{escape(tick_label)}</text>'
         )
 
     svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
@@ -588,6 +617,7 @@ def _write_uncertainty_band_chart_svg(
   <line x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" stroke="#475569" stroke-width="1.5" />
   <line x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" stroke="#475569" stroke-width="1.5" />
   {''.join(grid_lines)}
+  {''.join(x_ticks)}
   <polygon points="{band_polygon}" fill="#93c5fd" fill-opacity="0.42" />
   <polyline fill="none" stroke="#60a5fa" stroke-width="2" points="{lower_polyline}" />
   <polyline fill="none" stroke="#1d4ed8" stroke-width="3" points="{median_polyline}" />
@@ -691,3 +721,72 @@ def _format_value(value: float) -> str:
     if magnitude >= 1.0:
         return f"{value:.3f}"
     return f"{value:.4f}"
+
+
+def _axis_tick_values(min_value: float, max_value: float, count: int) -> list[float]:
+    if count <= 0:
+        return []
+    if count == 1 or min_value == max_value:
+        return [min_value]
+
+    span = max_value - min_value
+    tick_values = [min_value + (span * index / (count - 1)) for index in range(count)]
+    unique_values: list[float] = []
+    tolerance = max(abs(span), 1.0) * 1e-12
+    for value in tick_values:
+        if not any(math.isclose(value, existing, rel_tol=0.0, abs_tol=tolerance) for existing in unique_values):
+            unique_values.append(value)
+    return unique_values
+
+
+def _format_tick_labels(values: list[float]) -> list[str]:
+    if not values:
+        return []
+
+    candidates: list[tuple[int, float, int, list[str]]] = []
+
+    def add_candidate(labels: list[str], preference: int) -> None:
+        if len(set(labels)) != len(labels):
+            return
+        max_length = max(len(label) for label in labels)
+        average_length = sum(len(label) for label in labels) / len(labels)
+        candidates.append((max_length, average_length, preference, labels))
+
+    add_candidate([_format_value(value) for value in values], 0)
+
+    for precision in range(3, 13):
+        add_candidate([_normalize_numeric_label(f"{value:.{precision}g}") for value in values], 1)
+
+    for decimals in range(0, 13):
+        add_candidate([_format_fixed_tick(value, decimals) for value in values], 2)
+
+    for decimals in range(1, 13):
+        add_candidate([_format_scientific_tick(value, decimals) for value in values], 3)
+
+    if candidates:
+        return min(candidates)[3]
+    return [_normalize_numeric_label(f"{value:.15g}") for value in values]
+
+
+def _format_fixed_tick(value: float, decimals: int) -> str:
+    label = f"{value:.{decimals}f}"
+    if "." in label:
+        label = label.rstrip("0").rstrip(".")
+    return _normalize_numeric_label(label)
+
+
+def _format_scientific_tick(value: float, decimals: int) -> str:
+    if value == 0.0:
+        return "0"
+    mantissa, exponent = f"{value:.{decimals}e}".split("e")
+    mantissa = mantissa.rstrip("0").rstrip(".")
+    return _normalize_numeric_label(f"{mantissa}e{exponent}")
+
+
+def _normalize_numeric_label(label: str) -> str:
+    try:
+        if float(label) == 0.0 and label.startswith("-"):
+            return label[1:]
+    except ValueError:
+        return label
+    return label

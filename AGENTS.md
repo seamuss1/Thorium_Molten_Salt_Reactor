@@ -65,6 +65,18 @@ npm.cmd run test
 - The Science view indexes `README.md` and `docs/*.md`. Use H1 headings for readable titles, and write formulas as Markdown math with `$...$` or `$$...$$` so the React/KaTeX renderer can display them.
 - After web UI changes, verify `http://localhost:18488/api/health` and click through Dashboard, Cases, Builder, Runs, Science, and 3D in the browser.
 
+## GitHub Issues And Projects
+
+- Use the repo Project `Thorium Reactor Workboard`: `https://github.com/users/seamuss1/projects/1`.
+- Issue lifecycle is: `Inbox` -> `Needs Info` / `Needs Design` -> `Triaged` -> `Ready` -> `In Progress` -> `Review` -> `Done`.
+- Use Project `Status` for lifecycle. Use labels/fields for classification: `type:*`, `area:*`, `priority:p*`, `size:*`, `roadmap:*`, `blocked`, and `needs:design`.
+- When adding an issue, use the closest issue template, include acceptance criteria and verification, add it to the Project, and set `Status` to `Inbox` unless it is already actionable.
+- Move an issue to `Ready` only when scope, acceptance criteria, priority/size/area, verification, and blockers are clear.
+- When starting work, set `Status` to `In Progress`, work from a branch, and keep the issue updated if scope or blockers change.
+- Open PRs with `Closes #<issue>` or `Fixes #<issue>`, and set the issue/Project item to `Review`.
+- Close issues only after acceptance criteria are met and verification is recorded. Prefer merge-linked auto-close; otherwise close manually with `completed`, `not planned`, or `duplicate`.
+- Do not close parent/tracking issues until their required child issues are done or explicitly deferred.
+
 ## Testing
 
 Run the full suite:

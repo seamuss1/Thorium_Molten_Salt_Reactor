@@ -1,0 +1,229 @@
+name: flagship_thorium_stress_chain
+description: Medium-size repo-local thorium depletion chain for flagship stress simulations.
+nuclides:
+  - name: Th232
+    initial_atoms: 1.0e20
+    reactions:
+      - type: capture
+        target: Pa233
+        default_rate_per_s: 1.0e-8
+  - name: Pa233
+    initial_atoms: 1.0e17
+    half_life_s: 2332800.0
+    decay_modes:
+      - type: beta-
+        target: U233
+        branching_ratio: 1.0
+    reactions:
+      - type: capture
+        target: U234
+        default_rate_per_s: 1.0e-9
+  - name: U233
+    initial_atoms: 1.0e18
+    reactions:
+      - type: fission
+        default_rate_per_s: 3.0e-9
+        yields:
+          I135: 0.063
+          Xe135: 0.0025
+          Kr88: 0.036
+          Sr90: 0.058
+          Zr95: 0.065
+          Nd149: 0.012
+          Sm149: 0.001
+      - type: capture
+        target: U234
+        default_rate_per_s: 8.0e-10
+  - name: U234
+    initial_atoms: 1.0e17
+    reactions:
+      - type: capture
+        target: U235
+        default_rate_per_s: 2.0e-10
+  - name: U235
+    initial_atoms: 1.0e16
+    reactions:
+      - type: fission
+        default_rate_per_s: 8.0e-10
+        yields:
+          I135: 0.061
+          Xe135: 0.002
+          Kr88: 0.034
+          Sr90: 0.056
+          Zr95: 0.064
+          Nd149: 0.011
+          Sm149: 0.001
+      - type: capture
+        target: U236
+        default_rate_per_s: 4.0e-10
+  - name: U236
+    initial_atoms: 1.0e15
+    reactions:
+      - type: capture
+        target: Np237
+        default_rate_per_s: 1.0e-10
+  - name: U238
+    initial_atoms: 1.0e15
+    reactions:
+      - type: capture
+        target: Np239
+        default_rate_per_s: 2.0e-10
+  - name: Np237
+    initial_atoms: 1.0e14
+    reactions:
+      - type: capture
+        target: Pu238
+        default_rate_per_s: 8.0e-11
+  - name: Np239
+    initial_atoms: 1.0e12
+    half_life_s: 203520.0
+    decay_modes:
+      - type: beta-
+        target: Pu239
+        branching_ratio: 1.0
+  - name: Pu238
+    initial_atoms: 1.0e12
+    half_life_s: 2769246720.0
+    decay_modes:
+      - type: alpha
+        target: U234
+        branching_ratio: 1.0
+    reactions:
+      - type: capture
+        target: Pu239
+        default_rate_per_s: 5.0e-11
+  - name: Pu239
+    initial_atoms: 1.0e12
+    reactions:
+      - type: fission
+        default_rate_per_s: 3.0e-10
+        yields:
+          I135: 0.066
+          Xe135: 0.002
+          Kr88: 0.037
+          Sr90: 0.054
+          Zr95: 0.062
+          Nd149: 0.010
+          Sm149: 0.0012
+      - type: capture
+        target: Pu240
+        default_rate_per_s: 2.0e-10
+  - name: Pu240
+    initial_atoms: 1.0e11
+    reactions:
+      - type: capture
+        target: Pu241
+        default_rate_per_s: 1.0e-10
+  - name: Pu241
+    initial_atoms: 1.0e10
+    half_life_s: 451353600.0
+    decay_modes:
+      - type: beta-
+        target: Am241
+        branching_ratio: 1.0
+    reactions:
+      - type: fission
+        default_rate_per_s: 2.0e-10
+        yields:
+          I135: 0.065
+          Xe135: 0.002
+          Sr90: 0.052
+          Zr95: 0.060
+          Nd149: 0.010
+  - name: Am241
+    initial_atoms: 1.0e9
+    half_life_s: 13640832000.0
+    decay_modes:
+      - type: alpha
+        target: Np237
+        branching_ratio: 1.0
+  - name: I135
+    initial_atoms: 1.0e12
+    half_life_s: 23652.0
+    decay_modes:
+      - type: beta-
+        target: Xe135
+        branching_ratio: 1.0
+  - name: Xe135
+    initial_atoms: 1.0e11
+    half_life_s: 32904.0
+    decay_modes:
+      - type: beta-
+        target: Cs135
+        branching_ratio: 1.0
+    reactions:
+      - type: capture
+        target: Cs135
+        default_rate_per_s: 2.5e-8
+  - name: Cs135
+    initial_atoms: 1.0e10
+  - name: Kr88
+    initial_atoms: 1.0e10
+    half_life_s: 10224.0
+    decay_modes:
+      - type: beta-
+        target: Rb88
+        branching_ratio: 1.0
+  - name: Rb88
+    initial_atoms: 1.0e9
+    half_life_s: 1066.0
+    decay_modes:
+      - type: beta-
+        target: Sr88
+        branching_ratio: 1.0
+  - name: Sr88
+    initial_atoms: 1.0e9
+  - name: Sr90
+    initial_atoms: 1.0e10
+    half_life_s: 908835840.0
+    decay_modes:
+      - type: beta-
+        target: Y90
+        branching_ratio: 1.0
+  - name: Y90
+    initial_atoms: 1.0e9
+    half_life_s: 230400.0
+    decay_modes:
+      - type: beta-
+        target: Zr90
+        branching_ratio: 1.0
+  - name: Zr90
+    initial_atoms: 1.0e9
+  - name: Zr95
+    initial_atoms: 1.0e10
+    half_life_s: 5538240.0
+    decay_modes:
+      - type: beta-
+        target: Nb95
+        branching_ratio: 1.0
+  - name: Nb95
+    initial_atoms: 1.0e9
+    half_life_s: 3024000.0
+    decay_modes:
+      - type: beta-
+        target: Mo95
+        branching_ratio: 1.0
+  - name: Mo95
+    initial_atoms: 1.0e9
+  - name: Nd149
+    initial_atoms: 1.0e10
+    half_life_s: 6220.0
+    decay_modes:
+      - type: beta-
+        target: Pm149
+        branching_ratio: 1.0
+  - name: Pm149
+    initial_atoms: 1.0e9
+    half_life_s: 191520.0
+    decay_modes:
+      - type: beta-
+        target: Sm149
+        branching_ratio: 1.0
+  - name: Sm149
+    initial_atoms: 1.0e9
+    reactions:
+      - type: capture
+        target: Sm150
+        default_rate_per_s: 1.0e-8
+  - name: Sm150
+    initial_atoms: 1.0e8

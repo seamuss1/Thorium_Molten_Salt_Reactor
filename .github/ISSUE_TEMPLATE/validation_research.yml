@@ -1,0 +1,64 @@
+name: Validation or research item
+description: Track benchmark evidence, scientific assumptions, model validation, or source-backed research.
+title: "[Validation]: "
+labels:
+  - type:validation
+  - area:benchmarks
+  - needs:triage
+body:
+  - type: dropdown
+    id: target
+    attributes:
+      label: Target
+      options:
+        - MSRE first criticality
+        - MSRE zero-power physics
+        - MSRE U-233 zero-power
+        - TMSR-LF1 surrogate
+        - immersed pool reference
+        - flagship grid MSR
+        - cross-case method
+        - literature review
+        - QA traceability
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Research or validation question
+      description: What uncertainty, evidence gap, benchmark target, or model assumption is being resolved?
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: Sources and evidence
+      description: Cite source documents, benchmark files, docs pages, result bundles, or assumptions.
+      placeholder: |
+        - benchmarks/...
+        - docs/...
+        - results/<case>/<run_id>/...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] Source-indexed evidence is recorded
+        - [ ] Assumptions or validation bands are updated
+        - [ ] Tests or QA records cover the change
+    validations:
+      required: true
+  - type: dropdown
+    id: maturity
+    attributes:
+      label: Validation maturity impact
+      options:
+        - exploratory
+        - improves traceability
+        - changes acceptance band
+        - changes benchmark readiness
+        - changes user-facing interpretation
+    validations:
+      required: true

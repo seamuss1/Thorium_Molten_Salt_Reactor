@@ -62,3 +62,19 @@ The deficiency is fixed when `reactor benchmark msre_first_criticality
 --docker-openmc` produces a bundle whose report says `Benchmark ready: true`
 and whose keff residual is evaluated against combined benchmark and Monte Carlo
 uncertainty, not a placeholder band.
+
+## Solver-Backed UQ Sweep
+
+The issue #9 geometry/material uncertainty workflow is launched separately from
+the browser-safe job set:
+
+```powershell
+.\scripts\Run-Reactor.cmd uncertainty-sweep msre_first_criticality --run-id msre-uq-openmc --docker-openmc --samples 32 --resume
+```
+
+The command creates a root bundle with `uncertainty_budget.json`,
+`uncertainty_samples.json`, `uncertainty_results.json`, and plots, plus one
+OpenMC child bundle per nominal, one-at-a-time, and Sobol sample. Current MSRE
+inputs are still assumption-backed, so the generated uncertainty section is a
+solver-backed workflow demonstration rather than benchmark-ready coverage until
+the source-indexed geometry/material issues are complete.

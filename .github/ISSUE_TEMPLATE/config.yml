@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Project workflow guide
+    url: https://github.com/seamuss1/Thorium_Molten_Salt_Reactor/blob/main/docs/github-projects.md
+    about: Use this guide to understand issue states, labels, and Project fields.

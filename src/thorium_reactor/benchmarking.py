@@ -215,6 +215,8 @@ def run_solver_backed_benchmark(
         cwd=str(repo_root),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     if completed.returncode != 0:
@@ -282,6 +284,7 @@ def build_docker_openmc_command(case_name: str, run_id: str) -> list[str]:
         case_name,
         "--run-id",
         run_id,
+        "--reuse-run-id",
     ]
 
 

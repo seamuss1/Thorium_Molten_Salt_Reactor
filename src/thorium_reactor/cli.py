@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from json import JSONDecodeError
 from pathlib import Path
 
@@ -27,15 +28,18 @@ from thorium_reactor.qa import build_requirements_summary
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot, load_plot_manifest
 from thorium_reactor.reporting.reports import generate_report
 from thorium_reactor.transient_sweep import DEFAULT_TRANSIENT_SWEEP_SAMPLES
+from thorium_reactor.uncertainty import DEFAULT_UNCERTAINTY_SWEEP_SAMPLES
 
 
 INTEGRATION_COMMANDS = ("moose", "scale", "thermochimica", "saltproc", "moltres")
 NATIVE_ADVANCED_COMMANDS = ("transport", "deplete")
+UNCERTAINTY_COMMANDS = ("uncertainty-sweep",)
 EXTEND_EXISTING_RUN_COMMANDS = (
     "transient",
     "transient-sweep",
     "runtime-benchmark",
     "economics",
+    *UNCERTAINTY_COMMANDS,
     *NATIVE_ADVANCED_COMMANDS,
     *INTEGRATION_COMMANDS,
 )
@@ -58,6 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
         "benchmark",
         "transient",
         "transient-sweep",
+        *UNCERTAINTY_COMMANDS,
         "runtime-benchmark",
         *NATIVE_ADVANCED_COMMANDS,
         "economics",
@@ -83,6 +88,27 @@ def build_parser() -> argparse.ArgumentParser:
             command.add_argument("--prefer-gpu", action="store_true", help="Deprecated alias for --backend auto.")
             command.add_argument("--backend", default="auto", choices=["auto", "python", "numpy", "torch-cpu", "torch-xpu"], help="Array backend for transient ensemble integration.")
             command.add_argument("--dtype", default="float32", choices=["float32", "float64"], help="Array dtype for vector backends.")
+        if command_name == "uncertainty-sweep":
+            command.add_argument(
+                "--samples",
+                type=int,
+                default=DEFAULT_UNCERTAINTY_SWEEP_SAMPLES,
+                help="Number of Sobol geometry/material samples to run, excluding nominal and OAT samples.",
+            )
+            command.add_argument("--seed", type=int, default=42, help="Random seed for the Sobol scramble.")
+            command.add_argument("--sampler", default="sobol", choices=["sobol"], help="Uncertainty sample design.")
+            command.add_argument("--max-parallel", type=int, default=1, help="Maximum concurrent child OpenMC samples.")
+            command.add_argument("--resume", action="store_true", help="Reuse completed child sample bundles.")
+            command.add_argument(
+                "--require-source-backed",
+                action="store_true",
+                help="Fail if enabled uncertainty parameters are not source-backed.",
+            )
+            command.add_argument(
+                "--docker-openmc",
+                action="store_true",
+                help="Run the full uncertainty sweep inside the Docker Compose openmc service.",
+            )
         if command_name == "runtime-benchmark":
             command.add_argument("--scenario", default=None, help="Named transient scenario from the case config.")
             command.add_argument("--samples", type=int, default=1048576, help="Number of ensemble trajectories per backend.")
@@ -153,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_case_config(case_config_path(repo_root, args.case))
 
-    if args.command in {"build", "run", "benchmark", "transient", "transient-sweep", "runtime-benchmark", "economics", *NATIVE_ADVANCED_COMMANDS, *INTEGRATION_COMMANDS}:
+    if args.command in {"build", "run", "benchmark", "transient", "transient-sweep", "runtime-benchmark", "economics", *UNCERTAINTY_COMMANDS, *NATIVE_ADVANCED_COMMANDS, *INTEGRATION_COMMANDS}:
         allow_existing = bool(args.reuse_run_id or (args.run_id is not None and args.command in EXTEND_EXISTING_RUN_COMMANDS))
         bundle = _load_or_create_bundle(repo_root, config.name, args.run_id, allow_existing=allow_existing)
         inputs = ensure_bundle_inputs(repo_root, bundle, config)
@@ -250,6 +276,62 @@ def main(argv: list[str] | None = None) -> int:
         print(bundle.root)
         print(transient_sweep["backend"])
         print(transient_sweep["metrics"]["peak_power_fraction_p95"])
+        return 0
+
+    if args.command == "uncertainty-sweep":
+        from thorium_reactor.uncertainty import run_docker_uncertainty_sweep, run_uncertainty_sweep_case
+
+        if args.docker_openmc and os.environ.get("THORIUM_REACTOR_RUNTIME_SERVICE") != "openmc":
+            execution = run_docker_uncertainty_sweep(
+                repo_root,
+                config.name,
+                bundle.run_id,
+                samples=args.samples,
+                seed=args.seed,
+                sampler=args.sampler,
+                max_parallel=args.max_parallel,
+                resume=args.resume,
+                require_source_backed=args.require_source_backed,
+            )
+            bundle.write_json("uncertainty_execution.json", execution)
+            if execution["returncode"] != 0:
+                raise RuntimeError(execution.get("stderr") or "Docker OpenMC uncertainty sweep failed.")
+            summary_path = bundle.root / "summary.json"
+            if not summary_path.exists():
+                raise FileNotFoundError(
+                    f"No summary found for uncertainty sweep case '{config.name}' in {bundle.root}."
+                )
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        else:
+            summary = run_uncertainty_sweep_case(
+                repo_root,
+                config,
+                bundle,
+                benchmark,
+                samples=args.samples,
+                seed=args.seed,
+                sampler=args.sampler,
+                max_parallel=args.max_parallel,
+                resume=args.resume,
+                require_source_backed=args.require_source_backed,
+                provenance=provenance,
+            )
+        validation = validate_case(config, bundle, summary=summary, benchmark=benchmark, provenance=provenance)
+        generate_validation_plot(bundle, validation)
+        plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
+        report = generate_report(
+            config.name,
+            config.data,
+            bundle.root / "summary.json",
+            bundle.root / "validation.json",
+            None,
+            benchmark,
+            plot_assets,
+            provenance=provenance,
+        )
+        bundle.write_text("report.md", report)
+        print(bundle.root)
+        print(summary.get("uncertainty_sweep", {}).get("coverage_status", "missing"))
         return 0
 
     if args.command == "runtime-benchmark":

@@ -600,6 +600,43 @@ def generate_report(
         lines.append(f"- Peak corrosion index p95: `{transient_sweep.get('peak_corrosion_index_p95', 'n/a')}`")
         lines.append(f"- Sweep history: `{transient_sweep.get('history_path', 'n/a')}`")
 
+    uncertainty_sweep = summary.get("uncertainty_sweep", {})
+    uncertainty_budget = summary.get("uncertainty_budget", {})
+    if uncertainty_sweep:
+        lines.extend(["", "## Benchmark Uncertainty Sweep", ""])
+        lines.append(f"- Status: `{uncertainty_sweep.get('status', 'n/a')}`")
+        lines.append(f"- Model: `{uncertainty_sweep.get('model', 'n/a')}`")
+        lines.append(f"- Samples: `{uncertainty_sweep.get('sample_count', 'n/a')}`")
+        lines.append(f"- Completed samples: `{uncertainty_sweep.get('completed_sample_count', 'n/a')}`")
+        lines.append(f"- Failed samples: `{uncertainty_sweep.get('failed_sample_count', 'n/a')}`")
+        lines.append(f"- Coverage status: `{uncertainty_sweep.get('coverage_status', 'n/a')}`")
+        lines.append(f"- Nominal keff: `{uncertainty_sweep.get('nominal_keff', 'n/a')}`")
+        lines.append(f"- Nominal residual (pcm): `{uncertainty_sweep.get('nominal_residual_pcm', 'n/a')}`")
+        lines.append(f"- Input interval width (pcm): `{uncertainty_sweep.get('input_interval_width_pcm', 'n/a')}`")
+        lines.append(f"- Input sigma (pcm): `{uncertainty_sweep.get('input_sigma_pcm', 'n/a')}`")
+        lines.append(f"- Statistical sigma (pcm): `{uncertainty_sweep.get('statistical_sigma_pcm', 'n/a')}`")
+        lines.append(f"- Combined uncertainty (pcm): `{uncertainty_sweep.get('combined_uncertainty_pcm', 'n/a')}`")
+        lines.append(
+            f"- Normalized residual with input uncertainty: "
+            f"`{uncertainty_sweep.get('normalized_residual_with_input', 'n/a')}`"
+        )
+        lines.append(f"- Budget artifact: `{uncertainty_sweep.get('budget_path', 'n/a')}`")
+        for contributor in uncertainty_sweep.get("dominant_contributors", []):
+            lines.append(
+                f"- Contributor `{contributor.get('parameter_id', 'parameter')}`: "
+                f"ranking_score_pcm=`{contributor.get('ranking_score_pcm', 'n/a')}`, "
+                f"source_backed=`{contributor.get('source_backed', 'n/a')}`"
+            )
+        categories = uncertainty_budget.get("uncertainty_categories", {})
+        if categories:
+            lines.append("- Uncertainty categories:")
+            for name, payload in categories.items():
+                if isinstance(payload, dict):
+                    lines.append(
+                        f"- `{name}`: status=`{payload.get('status', 'n/a')}`, "
+                        f"sigma_pcm=`{payload.get('sigma_pcm', 'n/a')}`"
+                    )
+
     benchmark_residuals = summary.get("benchmark_residuals", {})
     if benchmark_residuals:
         lines.extend(["", "## Benchmark Residuals", ""])

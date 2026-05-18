@@ -10,6 +10,8 @@ The browser Science view indexes the top-level [README.md](../README.md) and eve
 | [thermal-hydraulics-modeling-strategy.md](thermal-hydraulics-modeling-strategy.md) | The modeling ladder from whole-loop reduced-order screens to local CFD |
 | [recent-msr-simulation-literature.md](recent-msr-simulation-literature.md) | Literature context behind delayed-neutron transport, property uncertainty, and realism upgrades |
 | [msre-first-criticality-validation-plan.md](msre-first-criticality-validation-plan.md) | What the MSRE benchmark path still needs before claiming benchmark-ready status |
+| [nonconformance-corrective-action-log.md](nonconformance-corrective-action-log.md) | Open nonconformance and corrective-action records for benchmark, QA, documentation, and validation deficiencies |
+| [export-control-sensitive-information-review.md](export-control-sensitive-information-review.md) | Export-control and sensitive-information screen for contributions, generated artifacts, and releases |
 | [reactor-taxonomy-and-flagship.md](reactor-taxonomy-and-flagship.md) | Case roles: smoke tests, research cases, benchmarks, surrogates, and the flagship planning target |
 | [browser-front-end.md](browser-front-end.md) | Browser lab runtime, access controls, run safety, and development checks |
 | [openmsr-review.md](openmsr-review.md) | Notes from adjacent open MSR projects and where this repo can borrow ideas |

@@ -8,6 +8,7 @@ RUN python -m pip install --no-cache-dir \
     "PyYAML>=6.0" \
     "numpy>=1.26" \
     "Pillow>=10.0" \
+    "scipy>=1.12" \
     "matplotlib>=3.8" \
     "pytest>=8.0"
 

@@ -46,6 +46,17 @@ def test_flagship_case_declares_commercial_grid_characteristics() -> None:
     assert config.geometry["render_layout"]["primary_loop"]["pipes"]
     assert config.economics["default_scenario"] == "conservative_foak"
     assert str(config.project_schedule["project_start"]) == "2026-05-02"
+    stress = config.data["transient"]["scenarios"][0]
+    assert stress["name"] == "flagship_grid_stress"
+    assert stress["duration_s"] / stress["time_step_s"] >= 3600
+    assert len(stress["events"]) >= 8
+    transport = config.data["transport_solver"]
+    assert transport["radial_cells"] * transport["axial_cells"] >= 2500
+    assert sum(len(group_set["groups"]) for group_set in transport["custom_group_sets"]) >= 6
+    depletion_solver = config.data["depletion_solver"]
+    chain = yaml.safe_load((REPO_ROOT / depletion_solver["chain_path"]).read_text(encoding="utf-8"))
+    assert len(chain["nuclides"]) >= 24
+    assert len(depletion_solver["zones"]) * depletion_solver["steps"] * len(chain["nuclides"]) >= 2000
 
 
 def test_core_case_manifest_has_expected_channel_count() -> None:

@@ -1,0 +1,86 @@
+name: Bug report
+description: Report a reproducible failure or incorrect behavior.
+title: "[Bug]: "
+labels:
+  - type:bug
+  - needs:triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for defects in the CLI, web lab, simulation bundles, docs rendering, model outputs, or repo tooling.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - web
+        - cli
+        - cases
+        - geometry
+        - physics
+        - transport
+        - depletion
+        - reporting
+        - benchmarks
+        - qa
+        - docs
+        - infra
+        - integrations
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Include commands, selected case, browser route, or run bundle path.
+      placeholder: |
+        1. .\scripts\Run-Reactor.cmd ...
+        2. Open http://localhost:18488/...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Logs, screenshots, stack traces, result bundle files, or failing test names.
+      render: text
+  - type: dropdown
+    id: validation-impact
+    attributes:
+      label: Validation impact
+      options:
+        - none
+        - docs or presentation only
+        - generated artifact correctness
+        - benchmark or QA traceability
+        - physics/modeling result
+        - safety-relevant interpretation
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What proves this is fixed?
+      placeholder: |
+        - [ ] Failing path now succeeds
+        - [ ] Regression test or documented verification added
+        - [ ] Result bundle/report output remains traceable
+    validations:
+      required: true

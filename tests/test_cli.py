@@ -5,6 +5,7 @@ import pytest
 from thorium_reactor.cli import _load_or_create_bundle, build_parser, resolve_benchmark_runtime
 from thorium_reactor.paths import create_result_bundle
 from thorium_reactor.transient_sweep import DEFAULT_TRANSIENT_SWEEP_SAMPLES
+from thorium_reactor.uncertainty import DEFAULT_UNCERTAINTY_SWEEP_SAMPLES
 
 
 def test_cli_registers_all_commands() -> None:
@@ -126,6 +127,39 @@ def test_cli_registers_runtime_benchmark_command() -> None:
     assert namespace.samples == 128
     assert namespace.backends == "python,numpy"
     assert namespace.fail_on_gpu_fallback is True
+
+
+def test_cli_registers_uncertainty_sweep_command() -> None:
+    parser = build_parser()
+    namespace = parser.parse_args(
+        [
+            "uncertainty-sweep",
+            "msre_first_criticality",
+            "--samples",
+            "64",
+            "--seed",
+            "19",
+            "--docker-openmc",
+            "--resume",
+            "--require-source-backed",
+        ]
+    )
+
+    assert namespace.command == "uncertainty-sweep"
+    assert namespace.case == "msre_first_criticality"
+    assert namespace.samples == 64
+    assert namespace.seed == 19
+    assert namespace.docker_openmc is True
+    assert namespace.resume is True
+    assert namespace.require_source_backed is True
+
+
+def test_cli_uncertainty_sweep_defaults_to_publication_sized_ensemble() -> None:
+    parser = build_parser()
+    namespace = parser.parse_args(["uncertainty-sweep", "msre_first_criticality"])
+
+    assert namespace.samples == DEFAULT_UNCERTAINTY_SWEEP_SAMPLES
+    assert namespace.sampler == "sobol"
 
 
 def test_cli_registers_native_transport_and_depletion_commands() -> None:

@@ -176,7 +176,7 @@ def run_depletion_case(config: Any, bundle: Any, summary: dict[str, Any]) -> dic
         "records": history_records,
     }
     bundle.write_json("depletion_history.json", history_payload)
-    balance = _atom_balance_residual(matrix_result, initial, inventory)
+    balance = _atom_balance_diagnostic(matrix_result, initial, inventory)
     initial_total = float(np.sum(initial))
     final_total = float(np.sum(inventory))
     depletion_summary = {
@@ -200,7 +200,10 @@ def run_depletion_case(config: Any, bundle: Any, summary: dict[str, Any]) -> dic
         "inventory_delta_fraction": _round_float((final_total - initial_total) / max(initial_total, 1.0)),
         "feed_total_atoms": _round_float(float(np.sum(matrix_result.feed_vector)) * dt_s * steps),
         "removal_rate_weighted_initial_atoms_per_s": _round_float(float(np.sum(matrix_result.removal_rates * initial))),
-        "atom_balance_residual": _round_float(balance),
+        "atom_balance_residual": _round_optional_float(balance["residual"]),
+        "atom_balance_basis": balance["basis"],
+        "atom_balance_status": balance["status"],
+        "net_source_sink_rate_initial_atoms_per_s": _round_float(balance["net_source_sink_rate_initial_atoms_per_s"]),
         "artifacts": {
             "chain_path": "depletion_chain.json",
             "summary_path": "depletion_summary.json",
@@ -285,7 +288,14 @@ def _dense_expm_action(matrix: np.ndarray, vector: np.ndarray, dt_s: float) -> n
         values, vectors = np.linalg.eig(scaled)
         inverse = np.linalg.inv(vectors)
         result = vectors @ (np.exp(values) * (inverse @ vector))
-        return np.real_if_close(result, tol=1000).astype(float)
+        result = np.real_if_close(result, tol=1000)
+        if np.iscomplexobj(result):
+            real_norm = float(np.linalg.norm(np.real(result), ord=np.inf))
+            imag_norm = float(np.linalg.norm(np.imag(result), ord=np.inf))
+            if imag_norm > max(1.0e-6, 1.0e-8 * max(real_norm, 1.0)):
+                return _rk4_action(matrix, vector, dt_s)
+            result = np.real(result)
+        return np.asarray(result, dtype=float)
     except np.linalg.LinAlgError:
         return _rk4_action(matrix, vector, dt_s)
 
@@ -328,14 +338,29 @@ def _nonzero_count(matrix: Any) -> int:
     return int(np.count_nonzero(matrix))
 
 
-def _atom_balance_residual(matrix_result: DepletionMatrixResult, initial: np.ndarray, final: np.ndarray) -> float:
+def _atom_balance_diagnostic(
+    matrix_result: DepletionMatrixResult,
+    initial: np.ndarray,
+    final: np.ndarray,
+) -> dict[str, float | str | None]:
     dense = _as_dense(matrix_result.matrix)
     column_sums = np.sum(dense, axis=0)
     closed_matrix = np.allclose(column_sums, 0.0, atol=1.0e-14) and np.allclose(matrix_result.feed_vector, 0.0)
     scale = max(float(np.sum(np.abs(initial))), float(np.sum(np.abs(final))), 1.0)
+    net_source_sink_rate = float(np.sum(dense @ initial) + np.sum(matrix_result.feed_vector))
     if closed_matrix:
-        return abs(float(np.sum(final) - np.sum(initial))) / scale
-    return abs(float(np.sum(final) - np.sum(initial))) / scale
+        return {
+            "residual": abs(float(np.sum(final) - np.sum(initial))) / scale,
+            "basis": "closed_chain_total_atoms_conserved",
+            "status": "closed_chain",
+            "net_source_sink_rate_initial_atoms_per_s": net_source_sink_rate,
+        }
+    return {
+        "residual": None,
+        "basis": "not_applicable_open_system",
+        "status": "open_system_sources_or_sinks_present",
+        "net_source_sink_rate_initial_atoms_per_s": net_source_sink_rate,
+    }
 
 
 def _history_record(matrix_result: DepletionMatrixResult, inventory: np.ndarray, *, time_s: float, step: int) -> dict[str, Any]:
@@ -421,12 +446,13 @@ def _initial_inventory_vector(
 def _material_inventory_defaults(config: Any, nuclide_names: Sequence[str]) -> dict[str, float]:
     fuel = getattr(config, "materials", {}).get("fuel_salt", {})
     raw_nuclides = fuel.get("nuclides", []) if isinstance(fuel, Mapping) else []
-    defaults = {name: 0.0 for name in nuclide_names}
+    requested = set(nuclide_names)
+    defaults: dict[str, float] = {}
     for item in raw_nuclides if isinstance(raw_nuclides, list) else []:
         if not isinstance(item, Mapping):
             continue
         name = str(item.get("name", ""))
-        if name in defaults:
+        if name in requested:
             defaults[name] = max(float(item.get("ao", 0.0)), 0.0) * 1.0e24
     return defaults
 
@@ -441,3 +467,9 @@ def _time_step_seconds(settings: Mapping[str, Any]) -> float:
 
 def _round_float(value: Any, digits: int = 10) -> float:
     return round(float(value), digits)
+
+
+def _round_optional_float(value: Any, digits: int = 10) -> float | None:
+    if value is None:
+        return None
+    return _round_float(value, digits)

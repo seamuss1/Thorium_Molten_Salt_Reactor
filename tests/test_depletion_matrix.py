@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 
@@ -120,6 +121,39 @@ def test_openmc_xml_mini_chain_import(tmp_path) -> None:
     assert math.isclose(chain.nuclides[0].half_life_s or 0.0, 10.0)
 
 
+def test_openmc_xml_imports_neutron_fission_yield_blocks(tmp_path) -> None:
+    path = tmp_path / "fission_chain.xml"
+    path.write_text(
+        """
+<depletion_chain name="mini_fission">
+  <nuclide name="U233" reactions="1">
+    <reaction type="fission" rate_per_s="0.05" />
+    <neutron_fission_yields>
+      <energies>0.0253 500000.0</energies>
+      <fission_yields energy="0.0253">
+        <products>I135 Xe135</products>
+        <data>0.063 0.002</data>
+      </fission_yields>
+      <fission_yields energy="500000.0">
+        <products>I135 Xe135</products>
+        <data>0.05 0.003</data>
+      </fission_yields>
+    </neutron_fission_yields>
+  </nuclide>
+  <nuclide name="I135" />
+  <nuclide name="Xe135" />
+</depletion_chain>
+""".strip(),
+        encoding="utf-8",
+    )
+
+    chain = load_depletion_chain(path, source_format="openmc")
+    fission = chain.nuclides[0].reactions[0]
+
+    assert fission.reaction_type == "fission"
+    assert fission.fission_yields == {"I135": 0.063, "Xe135": 0.002}
+
+
 def test_depletion_case_writes_native_artifacts(tmp_path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     config = load_case_config(repo_root / "configs" / "cases" / "immersed_pool_reference" / "case.yaml")
@@ -140,4 +174,61 @@ def test_depletion_case_writes_native_artifacts(tmp_path) -> None:
     assert (bundle.root / "depletion_summary.json").exists()
     assert (bundle.root / "depletion_history.json").exists()
     assert (bundle.root / "depletion_matrix.npz").exists()
-    assert summary["metrics"]["depletion_matrix_atom_balance_residual"] >= 0.0
+    assert depletion["atom_balance_basis"] in {"closed_chain_total_atoms_conserved", "not_applicable_open_system"}
+
+
+def test_depletion_case_uses_chain_initial_atoms_when_material_is_absent(tmp_path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    chain_path = tmp_path / "synthetic_chain.yaml"
+    chain_path.write_text(
+        """
+name: synthetic_initial_inventory
+nuclides:
+  - name: Synthetic999
+    initial_atoms: 123.0
+""".strip(),
+        encoding="utf-8",
+    )
+    config = load_case_config(repo_root / "configs" / "cases" / "immersed_pool_reference" / "case.yaml")
+    config.data["depletion_solver"] = {
+        "chain_path": str(chain_path),
+        "steps": 1,
+        "time_step_s": 1.0,
+    }
+    bundle = create_result_bundle(tmp_path, config.name, "depletion-initial-test")
+
+    depletion = run_depletion_case(config, bundle, {"metrics": {}})
+    history = json.loads((bundle.root / "depletion_history.json").read_text(encoding="utf-8"))
+
+    assert depletion["initial_total_atoms"] == pytest.approx(123.0)
+    assert history["records"][0]["zones"]["core"]["inventory_atoms"]["Synthetic999"] == pytest.approx(123.0)
+
+
+def test_open_depletion_case_marks_atom_balance_not_applicable(tmp_path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    chain_path = tmp_path / "feed_removal_chain.yaml"
+    chain_path.write_text(
+        """
+name: feed_removal_open_system
+nuclides:
+  - name: Synthetic999
+    initial_atoms: 100.0
+""".strip(),
+        encoding="utf-8",
+    )
+    config = load_case_config(repo_root / "configs" / "cases" / "immersed_pool_reference" / "case.yaml")
+    config.data["depletion_solver"] = {
+        "chain_path": str(chain_path),
+        "steps": 1,
+        "time_step_s": 10.0,
+        "removal_rates_per_s": {"Synthetic999": 0.1},
+        "feed_atoms_per_s": {"Synthetic999": 10.0},
+    }
+    bundle = create_result_bundle(tmp_path, config.name, "depletion-open-test")
+
+    depletion = run_depletion_case(config, bundle, {"metrics": {}})
+
+    assert depletion["final_total_atoms"] == pytest.approx(100.0)
+    assert depletion["atom_balance_residual"] is None
+    assert depletion["atom_balance_basis"] == "not_applicable_open_system"
+    assert depletion["atom_balance_status"] == "open_system_sources_or_sinks_present"
