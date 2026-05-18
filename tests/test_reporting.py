@@ -7,7 +7,7 @@ from thorium_reactor.benchmarking import assess_benchmark_traceability, build_be
 from thorium_reactor.config import load_case_config, load_yaml
 from thorium_reactor.paths import create_result_bundle
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot
-from thorium_reactor.reporting.reports import generate_report
+from thorium_reactor.reporting.reports import build_presentation_qa, generate_report
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -251,8 +251,16 @@ def test_report_can_include_plot_outputs() -> None:
         )
 
         assert "## Plot Outputs" in report
-        assert "metrics_overview" in report
         assert "validation_summary" in report
+        plot_outputs = _section(report, "## Plot Outputs")
+        start_here = _section(report, "## Start Here")
+        assert "metrics_overview" not in plot_outputs
+        assert "Metrics overview plot" in start_here
+        assert "Appendix / Raw Artifacts" in start_here
+        manifest_payload = json.loads((bundle.root / "plots_manifest.json").read_text(encoding="utf-8"))
+        assert manifest_payload["figures"]["metrics_overview"]["path"] == "plots/metrics_overview.svg"
+        qa = json.loads((bundle.root / "presentation_qa.json").read_text(encoding="utf-8"))
+        assert qa["passed"] is True
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
@@ -370,7 +378,7 @@ def test_report_adds_front_artifact_index_for_result_bundles() -> None:
         assert "### Primary Evidence" in report
         assert "Run summary JSON" in report
         assert "Validation checks" in report
-        assert "Metrics overview plot" in report
+        assert "Metrics overview plot" in _section(report, "## Start Here")
         assert "Render PNG geometry" in report
         assert "Benchmark context" in report
         assert "### Appendix / Raw Artifacts" in report
@@ -1139,6 +1147,170 @@ def test_report_includes_transient_sweep_section() -> None:
         assert "partial_heat_sink_loss" in report
         assert "512" in report
         assert "1.14" in report
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_report_writes_validation_claims_limitations_and_qa_artifacts() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-reporting-ready-issues" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "case": "tmsr_lf1_core",
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "dry-run"},
+                    "metrics": {"keff": 1.01, "channel_count": 91},
+                    "benchmark_quality": {
+                        "quality_stage": "benchmark_blocked",
+                        "benchmark_ready": False,
+                        "gates": [{"id": "keff_core_band", "status": "fail", "message": "keff is not solver-backed."}],
+                    },
+                    "chemistry": {
+                        "model": "salt_redox_cleanup_proxy",
+                        "redox_state_ev": -0.02,
+                        "target_redox_state_ev": -0.03,
+                        "impurity_fraction": 0.0001,
+                        "corrosion_risk": "high",
+                    },
+                    "tritium": {
+                        "model": "tmsr_lithium_salt_tritium_distribution_screen",
+                        "environmental_release_fraction": 0.12,
+                        "removal_fraction": 0.88,
+                    },
+                    "fuel_cycle": {
+                        "depletion_chain": "thorium_u233_cleanup_proxy",
+                        "cleanup_turnover_days": 10.0,
+                        "specific_power_mw_per_t_hm": 988.23,
+                    },
+                    "graphite_lifetime": {
+                        "screening_status": "watch",
+                        "estimated_lifespan_years": 0.54166,
+                        "lifetime_margin": 0.067708,
+                    },
+                    "flow": {
+                        "reduced_order": {
+                            "active_flow": {
+                                "channel_count": 1,
+                                "representative_velocity_m_s": 4.0,
+                            }
+                        }
+                    },
+                    "primary_system": {
+                        "inventory": {
+                            "coolant_salt": {"net_pool_inventory_m3": 0.0},
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        validation_path = scratch_root / "validation.json"
+        validation_path.write_text(
+            json.dumps(
+                {
+                    "checks": [
+                        {"name": "keff_core_band", "status": "pending", "message": "Awaiting solver-backed keff."},
+                        {"name": "physics::active_channel_velocity_reasonable", "status": "fail", "message": "Too high."},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "tmsr_lf1_core",
+            {
+                "reactor": {
+                    "name": "TMSR-LF1-Inspired Core",
+                    "family": "TMSR-LF1-inspired MSR",
+                    "stage": "full-core",
+                    "design_power_mwth": 250.0,
+                    "benchmark": "benchmarks/tmsr_lf1/benchmark.yaml",
+                }
+            },
+            summary_path,
+            validation_path,
+            None,
+        )
+
+        assert "## Results Generated In This Run" in report
+        assert "## Validation And Blockers" in report
+        assert "| keff_core_band | keff | pending | high | Awaiting solver-backed keff. |" in report
+        assert "## Interpretation" in report
+        assert "## Limitations" in report
+        assert "## Result Claims" in report
+        assert "## Method Cards" in report
+        assert "Chemistry proxy" in report
+        assert "Tritium screen" in report
+        assert "Fuel-cycle proxy" in report
+        assert "keff_core_band" not in _section(report, "## Validation Appendix").splitlines()[4:]
+        assert (scratch_root / "validation_summary.json").exists()
+        assert (scratch_root / "validation_details.csv").exists()
+        assert (scratch_root / "limitations_matrix.json").exists()
+        assert (scratch_root / "result_claims.json").exists()
+        assert (scratch_root / "design_readiness.json").exists()
+        assert (scratch_root / "presentation_qa.json").exists()
+
+        validation_summary = json.loads((scratch_root / "validation_summary.json").read_text(encoding="utf-8"))
+        assert validation_summary["status_counts"]["pending"] == 1
+        assert validation_summary["details_json"] == "validation_summary.json"
+        assert validation_summary["details_csv"] == "validation_details.csv"
+        assert validation_summary["blockers"][0]["name"] == "keff_core_band"
+        limitations = json.loads((scratch_root / "limitations_matrix.json").read_text(encoding="utf-8"))
+        assert {row["area"] for row in limitations} >= {"neutronics_status", "benchmark_quality", "cross_code_validation"}
+        readiness = json.loads((scratch_root / "design_readiness.json").read_text(encoding="utf-8"))
+        severe_metrics = {item["metric"]: item["severity"] for item in readiness["findings"]}
+        assert severe_metrics["graphite_lifetime"] == "disqualifying_for_claimed_use"
+        assert severe_metrics["coolant_salt_inventory"] == "major_concern"
+        assert severe_metrics["active_flow_channel_count"] == "major_concern"
+        assert severe_metrics["specific_power"] == "major_concern"
+        assert readiness["commercial_or_build_candidate_language_allowed"] is False
+        claims = json.loads((scratch_root / "result_claims.json").read_text(encoding="utf-8"))
+        assert any(claim["evidence_tier"] == "curated_validation_summary" for claim in claims)
+        qa = json.loads((scratch_root / "presentation_qa.json").read_text(encoding="utf-8"))
+        assert qa["passed"] is True
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_presentation_qa_catches_bad_report_bundle() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-reporting-presentation-qa" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        (scratch_root / "summary.json").write_text(json.dumps({"neutronics": {"status": "dry-run"}}), encoding="utf-8")
+        (scratch_root / "plots_manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "figures": {
+                        "bad": {
+                            "plot_id": "bad",
+                            "path": "C:/outside/bad.svg",
+                            "caption": "",
+                            "quality_status": "publication_ready",
+                            "report_section": "primary",
+                            "units": {"y": "mixed"},
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        report_text = "## Results Generated In This Run\n\n- `summary.json`\n\n## Validation And Blockers\n\n- none\n\n"
+
+        qa = build_presentation_qa(scratch_root, report_text=report_text + "- raw `None`\n")
+
+        failed = {check["name"] for check in qa["checks"] if check["status"] == "fail"}
+        assert not qa["passed"]
+        assert "report::required_sections_nonempty" in failed
+        assert "report::no_raw_python_none" in failed
+        assert "figures::manifest_metadata" in failed
+        assert "figures::no_mixed_unit_primary_charts" in failed
+        assert "figures::portable_paths" in failed
+        assert "report::dry_run_proxy_warning" in failed
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 

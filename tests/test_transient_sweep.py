@@ -67,8 +67,16 @@ def test_run_transient_sweep_case_produces_accelerated_bundle(tmp_path: Path) ->
     assert payload["backend_report"]["selected"] == payload["backend"]
     assert payload["runtime_performance"]["sample_steps_per_s"] > 0.0
     assert payload["numerical_checks"]["status"] == "ok"
+    assert payload["ensemble_definition"]["ensemble_meaning"] == "stress_test_envelope"
+    assert payload["ensemble_definition"]["sampler"] == "pseudo_random_independent_normal"
+    assert payload["ensemble_definition"]["percentile_definitions"].startswith("p05/p50/p95")
+    assert any(
+        item["parameter"] == "flow_sigma_fraction" and item["units"] == "fraction"
+        for item in payload["ensemble_definition"]["varied_parameters"]
+    )
     assert summary["transient_sweep"]["samples"] == 128
     assert summary["transient_sweep"]["backend"] in {"python", "numpy", "torch-xpu"}
+    assert summary["transient_sweep"]["ensemble_definition"]["correlation_assumptions"].startswith("independent")
     assert summary["transient_sweep"]["final_core_delayed_neutron_source_fraction_p50"] > 0.0
     assert summary["transient_sweep"]["numerical_checks"]["status"] == "ok"
     assert (bundle.root / "transient_sweep.json").exists()

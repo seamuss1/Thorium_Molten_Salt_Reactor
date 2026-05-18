@@ -67,16 +67,21 @@ def test_generate_summary_plots_populates_plots_dir(tmp_path: Path) -> None:
 
     assert payload["schema_version"] == 2
     assert legacy_manifest["metrics_overview"] == assets["metrics_overview"]
-    assert catalog["bop_balance"]["path"] == assets["bop_balance"]
+    assert catalog["bop_balance"]["path"] == "plots/bop_balance.svg"
     assert metrics_figure["plot_id"] == "metrics_overview"
-    assert metrics_figure["path"] == assets["metrics_overview"]
+    assert metrics_figure["path"] == "plots/metrics_overview.svg"
     assert metrics_figure["title"] == "Metrics overview"
     assert metrics_figure["caption"]
-    assert metrics_figure["quality_status"] == "publication_ready"
-    assert metrics_figure["report_section"] == "primary"
+    assert metrics_figure["quality_status"] == "appendix_only"
+    assert metrics_figure["status"] == "available_appendix_only"
+    assert metrics_figure["method_tier"] == "mixed_unit_summary_diagnostic"
+    assert metrics_figure["report_section"] == "appendix"
     assert metrics_figure["axes"]["x"] == "Metric"
     assert metrics_figure["units"]["y"] == "mixed"
     assert metrics_figure["conclusion"]
+    assert not Path(metrics_figure["path"]).is_absolute()
+    assert metrics_figure["source_artifacts"][0]["role"] == "rendered_figure"
+    assert metrics_figure["source_artifacts"][0]["path"] == "plots/metrics_overview.svg"
 
 
 def test_generate_summary_plots_emits_flow_interface_plot_when_available(tmp_path: Path) -> None:
@@ -317,6 +322,9 @@ def test_generate_summary_plots_emits_transient_sweep_envelopes_when_history_exi
     assert "transient_sweep_fuel_temperature_envelope" in assets
     assert Path(assets["transient_sweep_power_envelope"]).exists()
     assert Path(assets["transient_sweep_fuel_temperature_envelope"]).exists()
+    figure = load_figure_catalog(bundle.root / "plots_manifest.json")["transient_sweep_power_envelope"]
+    assert "stress-test ensemble percentiles" in figure["caption"]
+    assert "not calibrated UQ" in figure["conclusion"]
     assert _axis_tick_labels(Path(assets["transient_sweep_power_envelope"]), "x") == ["0", "5", "10"]
     assert len(_axis_tick_marks(Path(assets["transient_sweep_power_envelope"]), "x")) == 3
 

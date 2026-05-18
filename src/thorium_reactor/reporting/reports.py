@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 import math
 import re
+from csv import DictWriter
+from io import StringIO
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
 
 from thorium_reactor.benchmarking import assess_benchmark_traceability
+from thorium_reactor.reporting.plots import load_figure_catalog
 
 
 def generate_report(
@@ -42,6 +45,17 @@ def generate_report(
     model_validity = summary.get("model_validity", {})
     validation_maturity = summary.get("validation_maturity") or benchmark_traceability.get("validation_maturity", {})
     benchmark_quality = summary.get("benchmark_quality") or benchmark_traceability.get("benchmark_quality", {})
+    validation_summary = _materialize_validation_summary_artifacts(summary_path.parent, validation, benchmark_quality)
+    limitations_matrix = _ensure_limitations_matrix(summary, validation, benchmark_quality, validation_maturity)
+    design_readiness = _classify_design_readiness(summary, validation, benchmark_quality)
+    result_claims = _materialize_result_claims(summary_path.parent, config, summary, validation_summary, limitations_matrix, design_readiness)
+    summary["limitations_matrix"] = limitations_matrix
+    summary["design_readiness"] = design_readiness
+    summary["result_claims"] = result_claims
+    try:
+        summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+    except OSError:
+        pass
 
     lines = [
         f"# {config['reactor']['name']}",
@@ -258,6 +272,13 @@ def generate_report(
 
     lines.extend(_build_key_metrics_lines(config, summary, benchmark_traceability, validation_maturity))
     lines.extend(_build_additional_metrics_lines(summary))
+    lines.extend(_build_results_generated_lines(summary_path.parent, summary))
+    lines.extend(_build_design_readiness_lines(design_readiness))
+    lines.extend(_build_validation_and_blocker_lines(validation_summary, benchmark_quality))
+    lines.extend(_build_interpretation_lines(summary, validation_summary, design_readiness, benchmark_quality))
+    lines.extend(_build_limitations_matrix_lines(limitations_matrix))
+    lines.extend(_build_result_claims_lines(result_claims))
+    lines.extend(_build_method_card_lines(summary))
 
     neutronics = summary.get("neutronics", {})
     simulation = neutronics.get("simulation", {})
@@ -625,6 +646,19 @@ def generate_report(
         lines.append(f"- Backend: `{transient_sweep.get('backend', 'n/a')}`")
         lines.append(f"- Samples: `{transient_sweep.get('samples', 'n/a')}`")
         lines.append(f"- Seed: `{transient_sweep.get('seed', 'n/a')}`")
+        ensemble_definition = transient_sweep.get("ensemble_definition", {})
+        if isinstance(ensemble_definition, dict):
+            lines.append(f"- Ensemble meaning: `{ensemble_definition.get('ensemble_meaning', 'stress_test_envelope')}`")
+            lines.append(f"- Sampler: `{ensemble_definition.get('sampler', 'independent_normal_perturbations')}`")
+            lines.append(f"- Correlation assumptions: `{ensemble_definition.get('correlation_assumptions', 'independent perturbations')}`")
+            lines.append(f"- Percentile definitions: `{ensemble_definition.get('percentile_definitions', 'sample percentiles by time step')}`")
+            for parameter in ensemble_definition.get("varied_parameters", [])[:8]:
+                if isinstance(parameter, dict):
+                    lines.append(
+                        f"- Varied `{parameter.get('parameter')}`: unit=`{parameter.get('units')}`, "
+                        f"distribution=`{parameter.get('distribution')}`, bounds=`{parameter.get('bounds')}`, "
+                        f"basis={parameter.get('physical_basis')}"
+                    )
         lines.append(f"- Duration (s): `{transient_sweep.get('duration_s', 'n/a')}`")
         lines.append(f"- Time step (s): `{transient_sweep.get('time_step_s', 'n/a')}`")
         lines.append(f"- Event count: `{transient_sweep.get('event_count', 'n/a')}`")
@@ -731,13 +765,20 @@ def generate_report(
             lines.append(f"- `{item.get('name', 'target')}`: " + ", ".join(parts))
 
     if validation:
-        lines.extend(["", "## Validation", ""])
+        lines.extend(["", "## Validation Appendix", ""])
+        details_path = validation_summary.get("details_json")
+        csv_path = validation_summary.get("details_csv")
+        if details_path:
+            lines.append(f"- Full validation detail JSON: `{details_path}`")
+        if csv_path:
+            lines.append(f"- Full validation detail CSV: `{csv_path}`")
         if model_validity:
             lines.append(f"- Model validity: `{model_validity.get('status', 'unknown')}`")
-        for check in validation.get("checks", []):
+        for group in validation_summary.get("groups", []):
             lines.append(
-                f"- {check['name']}: `{check['status']}`"
-                + (f" ({check['message']})" if check.get("message") else "")
+                f"- `{group.get('group', 'validation')}`: "
+                f"pass=`{group.get('pass', 0)}`, fail=`{group.get('fail', 0)}`, "
+                f"pending=`{group.get('pending', 0)}`, blocked=`{group.get('blocked', 0)}`"
             )
 
     integrations = summary.get("integrations", {})
@@ -760,8 +801,8 @@ def generate_report(
             if item.get("error"):
                 lines.append(f"- `{name}` note: {item.get('error')}")
 
+    lines.extend(["", "## Evidence Sources", ""])
     if benchmark.get("evidence"):
-        lines.extend(["", "## Evidence Trail", ""])
         for item in benchmark_traceability.get("evidence", []):
             lines.append(f"- {item.get('topic', 'evidence')}: {item.get('claim', 'n/a')}")
             if item.get("source"):
@@ -770,11 +811,17 @@ def generate_report(
                 lines.append(f"- Confidence: `{item['confidence']}`")
             if item.get("relevance"):
                 lines.append(f"- Why it matters here: {item['relevance']}")
+    else:
+        lines.append("- No benchmark evidence records were attached to this bundle.")
+    lines.extend(["", "## Evidence Trail", "", "- See Evidence Sources for source-backed claim context."])
 
+    lines.extend(["", "## Future Work / Novelty Tracks", ""])
     if benchmark.get("novelty_tracks"):
-        lines.extend(["", "## Novelty Tracks", ""])
         for track in benchmark["novelty_tracks"]:
             lines.append(f"- {track.get('name', 'untitled')}: {track.get('summary', '')}")
+    else:
+        lines.append("- No novelty-track claims were completed in this run; future-work language remains separated from generated results.")
+    lines.extend(["", "## Novelty Tracks", "", "- See Future Work / Novelty Tracks for proposed or future work items."])
 
     if geometry_assets:
         lines.extend(["", "## Geometry Outputs", ""])
@@ -782,9 +829,21 @@ def generate_report(
             lines.append(f"- {name}: `{path}`")
 
     if plot_assets:
+        catalog = load_figure_catalog(summary_path.parent / "plots_manifest.json")
+        primary_plots: list[tuple[str, str]] = []
+        appendix_plots: list[tuple[str, str]] = []
+        for name, path in sorted(plot_assets.items()):
+            entry = catalog.get(name, {})
+            if _is_primary_plot(name, entry):
+                primary_plots.append((name, path))
+            else:
+                appendix_plots.append((name, path))
+        plot_lines = primary_plots or appendix_plots
         lines.extend(["", "## Plot Outputs", ""])
-        for name, path in plot_assets.items():
+        for name, path in plot_lines:
             lines.append(f"- {name}: `{path}`")
+        if not primary_plots and appendix_plots:
+            lines.append("- Plot status: primary figures were unavailable; listed plots are appendix diagnostics.")
 
     lines.extend(
         [
@@ -796,7 +855,9 @@ def generate_report(
         ]
     )
 
-    return _render_report_lines(lines)
+    report_text = _render_report_lines(lines)
+    _materialize_presentation_qa(summary_path.parent, report_text)
+    return report_text
 
 
 _NUMERIC_LITERAL_PATTERN = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
@@ -869,6 +930,753 @@ _METRIC_UNIT_SUFFIXES = (
 )
 
 
+def _materialize_validation_summary_artifacts(
+    bundle_dir: Path,
+    validation: dict[str, Any],
+    benchmark_quality: dict[str, Any],
+) -> dict[str, Any]:
+    checks = validation.get("checks", []) if isinstance(validation, dict) else []
+    if not isinstance(checks, list):
+        checks = []
+    rows: list[dict[str, Any]] = []
+    counts = {"pass": 0, "fail": 0, "pending": 0, "blocked": 0, "other": 0}
+    group_counts: dict[str, dict[str, int]] = {}
+    blockers: list[dict[str, Any]] = []
+    failed_gate_ids = {
+        str(gate.get("id"))
+        for gate in benchmark_quality.get("gates", [])
+        if isinstance(gate, dict) and gate.get("status") == "fail"
+    }
+    for index, check in enumerate(checks, start=1):
+        if not isinstance(check, dict):
+            continue
+        name = str(check.get("name", f"check_{index}"))
+        status = str(check.get("status", "pending")).lower()
+        if status not in counts:
+            status = "other"
+        group = _validation_group(name)
+        benchmark_critical = _is_benchmark_critical_check(name, check, failed_gate_ids)
+        row = {
+            "name": name,
+            "group": group,
+            "status": status,
+            "benchmark_critical": benchmark_critical,
+            "blocker_importance": "high" if benchmark_critical and status in {"fail", "pending", "blocked"} else "normal",
+            "message": check.get("message", ""),
+        }
+        rows.append(row)
+        counts[status] += 1
+        grouped = group_counts.setdefault(group, {"pass": 0, "fail": 0, "pending": 0, "blocked": 0, "other": 0})
+        grouped[status] += 1
+        if benchmark_critical and status in {"fail", "pending", "blocked"}:
+            blockers.append(row)
+
+    groups = [{"group": group, **payload} for group, payload in sorted(group_counts.items())]
+    summary = {
+        "status_counts": counts,
+        "groups": groups,
+        "blockers": blockers,
+        "details": rows,
+        "details_json": None,
+        "details_csv": None,
+    }
+    if rows or validation:
+        details_json = bundle_dir / "validation_summary.json"
+        details_csv = bundle_dir / "validation_details.csv"
+        summary["details_json"] = details_json.name
+        summary["details_csv"] = details_csv.name
+        details_json.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+        details_csv.write_text(_validation_rows_csv(rows), encoding="utf-8")
+    return summary
+
+
+def _validation_rows_csv(rows: list[dict[str, Any]]) -> str:
+    output = StringIO()
+    fieldnames = ["name", "group", "status", "benchmark_critical", "blocker_importance", "message"]
+    writer = DictWriter(output, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: row.get(key, "") for key in fieldnames})
+    return output.getvalue()
+
+
+def _validation_group(name: str) -> str:
+    if "::" in name:
+        return name.split("::", 1)[0]
+    if "_" in name:
+        return name.split("_", 1)[0]
+    return "validation"
+
+
+def _is_benchmark_critical_check(name: str, check: dict[str, Any], failed_gate_ids: set[str]) -> bool:
+    lowered = name.lower()
+    if name in failed_gate_ids or lowered in failed_gate_ids:
+        return True
+    if any(token in lowered for token in ("keff", "criticality", "benchmark", "cross_code")):
+        return True
+    return str(check.get("evidence_category", "")).lower() == "physics_benchmark"
+
+
+def _ensure_limitations_matrix(
+    summary: dict[str, Any],
+    validation: dict[str, Any],
+    benchmark_quality: dict[str, Any],
+    validation_maturity: dict[str, Any],
+) -> list[dict[str, Any]]:
+    existing = summary.get("limitations_matrix")
+    if isinstance(existing, list) and existing:
+        return existing
+    neutronics_status = _neutronics_status(summary)
+    benchmark_ready = benchmark_quality.get("benchmark_ready") is True if benchmark_quality else False
+    validation_checks = validation.get("checks", []) if isinstance(validation, dict) else []
+    has_keff_pending = any(
+        isinstance(check, dict)
+        and "keff" in str(check.get("name", "")).lower()
+        and str(check.get("status", "")).lower() in {"pending", "blocked", "fail"}
+        for check in validation_checks
+    )
+    rows = [
+        _limitation_row(
+            "neutronics_status",
+            "major_concern" if neutronics_status != "completed" else "nominal",
+            "summary.json",
+            f"Neutronics status is {neutronics_status}; solver-backed OpenMC claims are blocked."
+            if neutronics_status != "completed"
+            else "Solver-backed neutronics result is recorded.",
+            "Run solver-backed benchmark workflow and publish the statepoint bundle."
+            if neutronics_status != "completed"
+            else "Maintain artifact provenance.",
+        ),
+        _limitation_row(
+            "benchmark_observable_availability",
+            "major_concern" if has_keff_pending or not benchmark_ready else "nominal",
+            "validation_summary.json",
+            "Benchmark-critical observables are failed, blocked, or pending."
+            if has_keff_pending or not benchmark_ready
+            else "Benchmark-critical observables are complete for this bundle.",
+            "Resolve pending/failed benchmark checks, including keff_core_band when present."
+            if has_keff_pending or not benchmark_ready
+            else "Retain benchmark quality evidence.",
+        ),
+        _limitation_row(
+            "property_uncertainty_source_backing",
+            "watch" if summary.get("property_uncertainty") else "major_concern",
+            "summary.json",
+            "Property uncertainty is present but remains a screening literature envelope."
+            if summary.get("property_uncertainty")
+            else "No property uncertainty summary is available in this run.",
+            "Replace proxy envelopes with source-indexed salt property covariance where available.",
+        ),
+        _limitation_row(
+            "surrogate_targets",
+            "watch" if validation_maturity.get("validation_maturity_stage") in {"screening_backed", "benchmark_ready"} else "major_concern",
+            "benchmark metadata",
+            "Some targets may remain surrogate or context-only.",
+            "Retire surrogate targets with literature-backed or solver-backed observables.",
+        ),
+        _limitation_row(
+            "depletion_balance",
+            _severity_from_residual(summary.get("depletion_matrix", {}).get("atom_balance_residual")),
+            "depletion_history.json",
+            "Native depletion balance is absent or screening-grade unless an atom-balance residual is reported.",
+            "Run native depletion and review atom-balance residuals before inventory claims.",
+        ),
+        _limitation_row(
+            "transport_coupling",
+            "watch" if summary.get("transport_solver") else "major_concern",
+            "transport_solution.npz",
+            "Transport coupling is reduced-order/native-screening, not full multiphysics validation.",
+            "Cross-check transport fields against an independent solver and couple back to thermal hydraulics.",
+        ),
+        _limitation_row(
+            "uncertainty_propagation",
+            "watch" if summary.get("uncertainty_sweep") else "major_concern",
+            "uncertainty_budget.json",
+            "Uncertainty propagation is missing or partial for benchmark claims.",
+            "Run source-backed benchmark uncertainty sweep with propagated keff uncertainty.",
+        ),
+        _limitation_row(
+            "cross_code_validation",
+            "nominal" if validation_maturity.get("cross_code_checks") and not validation_maturity.get("gaps") else "major_concern",
+            "benchmark metadata",
+            "Cross-code validation is incomplete or not declared.",
+            "Complete declared cross-code checks and record source artifacts.",
+        ),
+        _limitation_row(
+            "benchmark_quality",
+            "nominal" if benchmark_quality else "not_applicable",
+            "benchmark metadata",
+            "Benchmark quality gates are populated." if benchmark_quality else "No benchmark quality gates apply or were declared for this non-benchmark bundle.",
+            "Declare benchmark quality gates when promoting benchmark or validation claims." if not benchmark_quality else "Keep quality gates synchronized with evidence.",
+        ),
+    ]
+    return rows
+
+
+def _limitation_row(area: str, severity: str, evidence_artifact: str, consequence: str, next_action: str) -> dict[str, Any]:
+    return {
+        "area": area,
+        "severity": severity,
+        "evidence_artifact": evidence_artifact,
+        "consequence": consequence,
+        "next_action": next_action,
+    }
+
+
+def _severity_from_residual(value: Any) -> str:
+    if not isinstance(value, (int, float)):
+        return "major_concern"
+    return "nominal" if abs(float(value)) < 1.0e-6 else "watch"
+
+
+def _classify_design_readiness(
+    summary: dict[str, Any],
+    validation: dict[str, Any],
+    benchmark_quality: dict[str, Any],
+) -> dict[str, Any]:
+    findings: list[dict[str, Any]] = []
+    _add_readiness_finding(
+        findings,
+        "neutronics_evidence",
+        "nominal" if _is_solver_backed_neutronics(summary) else "major_concern",
+        "Solver-backed neutronics is required before design or benchmark claims.",
+        "summary.json",
+    )
+    if benchmark_quality:
+        _add_readiness_finding(
+            findings,
+            "benchmark_quality",
+            "nominal" if benchmark_quality.get("benchmark_ready") is True else "major_concern",
+            "Benchmark gates are not ready." if benchmark_quality.get("benchmark_ready") is not True else "Benchmark gates are ready.",
+            "benchmark metadata",
+        )
+    model_validity = summary.get("model_validity", {})
+    if isinstance(model_validity, dict) and model_validity.get("status") == "invalid":
+        _add_readiness_finding(findings, "model_validity", "major_concern", "Model validity checks failed.", "summary.json")
+    for check in validation.get("checks", []) if isinstance(validation, dict) else []:
+        if isinstance(check, dict) and str(check.get("status", "")).lower() == "fail":
+            _add_readiness_finding(findings, str(check.get("name", "validation")), "major_concern", str(check.get("message", "Validation check failed.")), "validation.json")
+    chemistry = summary.get("chemistry", {})
+    if isinstance(chemistry, dict):
+        risk = str(chemistry.get("corrosion_risk", "")).lower()
+        _add_readiness_finding(
+            findings,
+            "chemistry_corrosion",
+            {"low": "nominal", "moderate": "watch", "high": "major_concern"}.get(risk, "not_applicable"),
+            "Chemistry corrosion proxy is screening-only.",
+            "summary.json",
+        )
+    graphite = summary.get("graphite_lifetime", {})
+    if isinstance(graphite, dict) and graphite:
+        estimated_years = _as_float(graphite.get("estimated_lifespan_years"))
+        lifetime_margin = _as_float(graphite.get("lifetime_margin"))
+        graphite_severity = "nominal"
+        if estimated_years is not None and estimated_years < 1.0:
+            graphite_severity = "disqualifying_for_claimed_use"
+        elif lifetime_margin is not None and lifetime_margin < 0.25:
+            graphite_severity = "disqualifying_for_claimed_use"
+        elif estimated_years is not None and estimated_years < 8.0:
+            graphite_severity = "major_concern"
+        elif lifetime_margin is not None and lifetime_margin < 1.0:
+            graphite_severity = "major_concern"
+        elif graphite.get("screening_status") == "watch":
+            graphite_severity = "watch"
+        _add_readiness_finding(
+            findings,
+            "graphite_lifetime",
+            graphite_severity,
+            "Graphite lifetime is a screening literature model; short replacement intervals block commercial-readiness claims.",
+            "summary.json",
+        )
+    flow = summary.get("flow", {}).get("reduced_order", {}) if isinstance(summary.get("flow"), dict) else {}
+    active_flow = flow.get("active_flow", {}) if isinstance(flow, dict) else {}
+    metrics = summary.get("metrics", {}) if isinstance(summary.get("metrics"), dict) else {}
+    channel_count = _first_available(metrics.get("channel_count"), flow.get("channel_count") if isinstance(flow, dict) else None)
+    active_channel_count = active_flow.get("channel_count") if isinstance(active_flow, dict) else None
+    if isinstance(active_channel_count, (int, float)) and isinstance(channel_count, (int, float)):
+        if int(active_channel_count) <= 1 and int(channel_count) > 1:
+            _add_readiness_finding(
+                findings,
+                "active_flow_channel_count",
+                "major_concern",
+                "Only one active through-flow channel is modeled in a multi-channel geometry.",
+                "summary.json",
+            )
+    velocity = active_flow.get("representative_velocity_m_s") if isinstance(active_flow, dict) else None
+    if isinstance(velocity, (int, float)):
+        severity = "major_concern" if float(velocity) > 12.0 else "nominal"
+        _add_readiness_finding(findings, "active_channel_velocity", severity, "Representative velocity screening envelope.", "summary.json")
+    primary_system = summary.get("primary_system", {}) if isinstance(summary.get("primary_system"), dict) else {}
+    inventory = primary_system.get("inventory", {}) if isinstance(primary_system.get("inventory"), dict) else {}
+    coolant_salt = inventory.get("coolant_salt", {}) if isinstance(inventory.get("coolant_salt"), dict) else {}
+    coolant_inventory = _as_float(coolant_salt.get("net_pool_inventory_m3"))
+    if coolant_inventory is not None and coolant_inventory <= 0.0:
+        _add_readiness_finding(
+            findings,
+            "coolant_salt_inventory",
+            "major_concern",
+            "Coolant salt inventory is zero or negative while plant-loop claims require a physical inventory explanation.",
+            "summary.json",
+        )
+    fuel_cycle = summary.get("fuel_cycle", {}) if isinstance(summary.get("fuel_cycle"), dict) else {}
+    specific_power = _as_float(fuel_cycle.get("specific_power_mw_per_t_hm"))
+    if specific_power is not None:
+        if specific_power >= 1000.0:
+            severity = "disqualifying_for_claimed_use"
+        elif specific_power >= 500.0:
+            severity = "major_concern"
+        else:
+            severity = "nominal"
+        _add_readiness_finding(
+            findings,
+            "specific_power",
+            severity,
+            "Specific power is screened against heavy-metal inventory plausibility for design-readiness claims.",
+            "summary.json",
+        )
+    order = {severity: index for index, severity in enumerate(("not_applicable", "nominal", "watch", "major_concern", "disqualifying_for_claimed_use"))}
+    top = max((item["severity"] for item in findings), key=lambda value: order.get(value, 0), default="not_applicable")
+    severe = [item for item in findings if item["severity"] in {"major_concern", "disqualifying_for_claimed_use"}]
+    return {
+        "status": top,
+        "severe_finding_count": len(severe),
+        "findings": findings,
+        "commercial_or_build_candidate_language_allowed": len(severe) == 0,
+    }
+
+
+def _add_readiness_finding(findings: list[dict[str, Any]], metric: str, severity: str, basis: str, evidence_artifact: str) -> None:
+    if severity == "not_applicable":
+        return
+    findings.append(
+        {
+            "metric": metric,
+            "severity": severity,
+            "basis": basis,
+            "evidence_artifact": evidence_artifact,
+        }
+    )
+
+
+def _as_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return float(value)
+    return None
+
+
+def _materialize_result_claims(
+    bundle_dir: Path,
+    config: dict[str, Any],
+    summary: dict[str, Any],
+    validation_summary: dict[str, Any],
+    limitations_matrix: list[dict[str, Any]],
+    design_readiness: dict[str, Any],
+) -> list[dict[str, Any]]:
+    claims = [
+        {
+            "claim": "This report summarizes artifacts generated in the current result bundle.",
+            "status": "completed_result",
+            "evidence_artifact": "summary.json",
+            "evidence_tier": "generated_bundle",
+        },
+        {
+            "claim": "Validation and benchmark blockers are explicitly separated from raw validation details.",
+            "status": "completed_result" if validation_summary.get("details_json") else "not_applicable",
+            "evidence_artifact": validation_summary.get("details_json") or "validation.json",
+            "evidence_tier": "curated_validation_summary",
+        },
+        {
+            "claim": "Design/build readiness language is gated by severe screening findings.",
+            "status": "completed_result",
+            "evidence_artifact": "summary.json",
+            "evidence_tier": "screening_qa",
+        },
+        {
+            "claim": "Commercial or build-candidate claims are not supported while severe findings remain.",
+            "status": "blocked" if design_readiness.get("severe_finding_count", 0) else "completed_result",
+            "evidence_artifact": "summary.json",
+            "evidence_tier": "screening_qa",
+        },
+    ]
+    if summary.get("transient_sweep"):
+        claims.append(
+            {
+                "claim": "Transient sweep percentiles describe an ensemble envelope, not deterministic UQ unless source-backed distributions are declared.",
+                "status": "completed_result",
+                "evidence_artifact": "transient_sweep.json",
+                "evidence_tier": "proxy_ensemble",
+            }
+        )
+    if any(row["severity"] in {"major_concern", "disqualifying_for_claimed_use"} for row in limitations_matrix):
+        claims.append(
+            {
+                "claim": "Major limitations remain before benchmark-ready or design-ready claims.",
+                "status": "blocked",
+                "evidence_artifact": "limitations_matrix.json",
+                "evidence_tier": "limitations_matrix",
+            }
+        )
+    path = bundle_dir / "result_claims.json"
+    path.write_text(json.dumps(claims, indent=2, sort_keys=True), encoding="utf-8")
+    (bundle_dir / "limitations_matrix.json").write_text(json.dumps(limitations_matrix, indent=2, sort_keys=True), encoding="utf-8")
+    (bundle_dir / "design_readiness.json").write_text(json.dumps(design_readiness, indent=2, sort_keys=True), encoding="utf-8")
+    return claims
+
+
+def _build_results_generated_lines(bundle_dir: Path, summary: dict[str, Any]) -> list[str]:
+    lines = ["## Results Generated In This Run", ""]
+    artifacts = [
+        "summary.json",
+        "validation.json",
+        "report.md",
+        "validation_summary.json",
+        "validation_details.csv",
+        "limitations_matrix.json",
+        "result_claims.json",
+        "design_readiness.json",
+    ]
+    present = [name for name in artifacts if (bundle_dir / name).exists()]
+    if not present:
+        lines.append("- No report-side artifacts were materialized yet.")
+    else:
+        for name in present:
+            lines.append(f"- `{name}`")
+    if summary.get("neutronics"):
+        lines.append(f"- Neutronics status for this run: `{_neutronics_status(summary)}`")
+    lines.append("")
+    return lines
+
+
+def _build_design_readiness_lines(design_readiness: dict[str, Any]) -> list[str]:
+    lines = ["## Design Readiness", ""]
+    lines.append(f"- Overall screening severity: `{design_readiness.get('status', 'not_applicable')}`")
+    lines.append(f"- Severe finding count: `{design_readiness.get('severe_finding_count', 0)}`")
+    if not design_readiness.get("commercial_or_build_candidate_language_allowed", False):
+        lines.append("- Claim gate: commercial/build-candidate language is blocked by severe screening findings.")
+    severe = [
+        item
+        for item in design_readiness.get("findings", [])
+        if isinstance(item, dict) and item.get("severity") in {"major_concern", "disqualifying_for_claimed_use"}
+    ]
+    for item in severe[:8]:
+        lines.append(
+            f"- `{item.get('metric', 'metric')}`: severity=`{item.get('severity')}`, "
+            f"evidence=`{item.get('evidence_artifact')}`, basis={item.get('basis')}"
+        )
+    lines.append("")
+    return lines
+
+
+def _build_validation_and_blocker_lines(
+    validation_summary: dict[str, Any],
+    benchmark_quality: dict[str, Any],
+) -> list[str]:
+    lines = ["## Validation And Blockers", ""]
+    counts = validation_summary.get("status_counts", {})
+    if counts:
+        lines.append(
+            f"- Validation summary: pass=`{counts.get('pass', 0)}`, fail=`{counts.get('fail', 0)}`, "
+            f"pending=`{counts.get('pending', 0)}`, blocked=`{counts.get('blocked', 0)}`"
+        )
+    if benchmark_quality:
+        lines.append(f"- Benchmark ready: `{benchmark_quality.get('benchmark_ready', False)}`")
+        lines.append(f"- Benchmark quality stage: `{benchmark_quality.get('quality_stage', 'not_assessed')}`")
+    else:
+        lines.append("- Benchmark quality: `not_applicable` for this bundle, or no quality gates were declared.")
+    blockers = validation_summary.get("blockers", [])
+    if blockers:
+        lines.extend(["", "| Check | Group | Status | Importance | Message |", "| --- | --- | --- | --- | --- |"])
+        for blocker in blockers:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        str(blocker.get("name", "")),
+                        str(blocker.get("group", "")),
+                        str(blocker.get("status", "")),
+                        str(blocker.get("blocker_importance", "")),
+                        str(blocker.get("message", "")).replace("|", "/"),
+                    ]
+                )
+                + " |"
+            )
+    else:
+        lines.append("- No failed, pending, or blocked benchmark-critical validation checks were found.")
+    if validation_summary.get("details_json"):
+        lines.append(f"- Full detail artifacts: `{validation_summary.get('details_json')}`, `{validation_summary.get('details_csv')}`")
+    lines.append("")
+    return lines
+
+
+def _build_interpretation_lines(
+    summary: dict[str, Any],
+    validation_summary: dict[str, Any],
+    design_readiness: dict[str, Any],
+    benchmark_quality: dict[str, Any],
+) -> list[str]:
+    lines = ["## Interpretation", ""]
+    if _is_solver_backed_neutronics(summary):
+        lines.append("- Neutronics interpretation may use solver-backed result language for artifacts present in this bundle.")
+    else:
+        lines.append("- Neutronics interpretation is limited to dry-run/proxy diagnostics; no solver-backed OpenMC physics result is present.")
+    if validation_summary.get("blockers"):
+        lines.append("- Benchmark-critical blockers take precedence over pass counts from construction or diagnostic checks.")
+    if benchmark_quality and benchmark_quality.get("benchmark_ready") is not True:
+        lines.append("- Benchmark quality gates prevent benchmark-ready interpretation.")
+    if design_readiness.get("severe_finding_count", 0):
+        lines.append("- Severe engineering-screening findings prevent commercial/build-candidate interpretation.")
+    lines.append("")
+    return lines
+
+
+def _build_limitations_matrix_lines(limitations_matrix: list[dict[str, Any]]) -> list[str]:
+    lines = ["## Limitations", ""]
+    lines.extend(["| Area | Severity | Evidence | Consequence | Next action |", "| --- | --- | --- | --- | --- |"])
+    for row in limitations_matrix:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    str(row.get("area", "")),
+                    str(row.get("severity", "")),
+                    str(row.get("evidence_artifact", "")),
+                    str(row.get("consequence", "")).replace("|", "/"),
+                    str(row.get("next_action", "")).replace("|", "/"),
+                ]
+            )
+            + " |"
+        )
+    lines.append("")
+    return lines
+
+
+def _build_result_claims_lines(result_claims: list[dict[str, Any]]) -> list[str]:
+    lines = ["## Result Claims", ""]
+    lines.append("- Machine-readable claim map: `result_claims.json`")
+    for claim in result_claims:
+        lines.append(
+            f"- {claim.get('claim')}: status=`{claim.get('status')}`, "
+            f"tier=`{claim.get('evidence_tier')}`, artifact=`{claim.get('evidence_artifact')}`"
+        )
+    lines.append("")
+    return lines
+
+
+def _build_method_card_lines(summary: dict[str, Any]) -> list[str]:
+    cards: list[dict[str, str]] = []
+    if summary.get("chemistry"):
+        cards.append(
+            {
+                "name": "Chemistry proxy",
+                "model": str(summary["chemistry"].get("model", "salt_redox_cleanup_proxy")),
+                "equation": "corrosion_index = 1 + max(redox - target, 0) * acceleration + impurity_fraction",
+                "inputs": "redox state (eV), target redox (eV), impurity fraction, gas stripping fraction",
+                "basis": "configured case parameters and literature-screening assumptions",
+                "validity": "screening comparisons within configured molten-salt operating envelope",
+                "uncertainty": "sensitive to redox setpoint, impurity ingress, and cleanup efficiency",
+                "screening_reason": "not a thermochemical equilibrium or corrosion kinetics solver",
+                "artifact": "summary.json",
+            }
+        )
+    if summary.get("tritium"):
+        cards.append(
+            {
+                "name": "Tritium screen",
+                "model": str(summary["tritium"].get("model", summary["tritium"].get("basis", "tritium_distribution_screen"))),
+                "equation": "release = production * environmental_release_fraction after removal and retention partitions",
+                "inputs": "relative production, removal fraction, graphite retention fraction, release fraction",
+                "basis": "literature-backed distribution screen and configured chemistry removal assumptions",
+                "validity": "first-pass source-term ranking, not isotope transport",
+                "uncertainty": "sensitive to gas stripping, graphite retention, and permeation assumptions",
+                "screening_reason": "does not solve isotope generation, permeation, or plant release pathways",
+                "artifact": "summary.json",
+            }
+        )
+    if summary.get("fuel_cycle"):
+        cards.append(
+            {
+                "name": "Fuel-cycle proxy",
+                "model": str(summary["fuel_cycle"].get("depletion_chain", summary["fuel_cycle"].get("depletion_model", "thorium_cleanup_proxy"))),
+                "equation": "net fissile change = breeding gain - burnup - cleanup/removal penalties",
+                "inputs": "heavy-metal inventory (kg), fissile inventory (kg), cleanup turnover (days), removal efficiency",
+                "basis": "configured depletion/cleanup proxy or native sparse depletion artifact when present",
+                "validity": "screening balances and trend checks only",
+                "uncertainty": "sensitive to cleanup efficiency, protactinium holdup, and burn/breed coefficients",
+                "screening_reason": "not a full burnup, online-processing, or safeguards model",
+                "artifact": "summary.json",
+            }
+        )
+    if not cards:
+        return []
+    lines = ["## Method Cards", ""]
+    for card in cards:
+        lines.extend(
+            [
+                f"### {card['name']}",
+                "",
+                f"- Model: `{card['model']}`",
+                f"- Equation form: {card['equation']}",
+                f"- Inputs and units: {card['inputs']}",
+                f"- Calibration/source basis: {card['basis']}",
+                f"- Validity range: {card['validity']}",
+                f"- Uncertainty/sensitivity notes: {card['uncertainty']}",
+                f"- Screening-only reason: {card['screening_reason']}",
+                f"- Source artifacts: `{card['artifact']}`",
+                "",
+            ]
+        )
+    return lines
+
+
+def build_presentation_qa(bundle_dir: Path, report_text: str | None = None) -> dict[str, Any]:
+    bundle_dir = Path(bundle_dir)
+    if report_text is None:
+        report_path = bundle_dir / "report.md"
+        report_text = report_path.read_text(encoding="utf-8") if report_path.exists() else ""
+    checks: list[dict[str, Any]] = []
+    _qa_required_sections(checks, report_text)
+    _qa_no_raw_none(checks, bundle_dir, report_text)
+    _qa_figure_manifest(checks, bundle_dir)
+    _qa_dry_run_warning(checks, bundle_dir, report_text)
+    _qa_status_contradictions(checks, bundle_dir, report_text)
+    passed = all(check["status"] == "pass" for check in checks)
+    return {"passed": passed, "checks": checks}
+
+
+def _materialize_presentation_qa(bundle_dir: Path, report_text: str) -> None:
+    qa = build_presentation_qa(bundle_dir, report_text=report_text)
+    try:
+        (bundle_dir / "presentation_qa.json").write_text(json.dumps(qa, indent=2, sort_keys=True), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _qa_required_sections(checks: list[dict[str, Any]], report_text: str) -> None:
+    required = [
+        "## Results Generated In This Run",
+        "## Validation And Blockers",
+        "## Interpretation",
+        "## Limitations",
+        "## Future Work / Novelty Tracks",
+        "## Evidence Sources",
+    ]
+    missing_or_empty = []
+    for heading in required:
+        if heading not in report_text:
+            missing_or_empty.append(heading)
+            continue
+        section = _extract_section_text(report_text, heading)
+        if not any(line.strip() and not line.startswith("#") for line in section.splitlines()[1:]):
+            missing_or_empty.append(heading)
+    checks.append(_qa_check("report::required_sections_nonempty", not missing_or_empty, ", ".join(missing_or_empty)))
+
+
+def _qa_no_raw_none(checks: list[dict[str, Any]], bundle_dir: Path, report_text: str) -> None:
+    offenders = []
+    if "`None`" in report_text or ": None" in report_text:
+        offenders.append("report.md")
+    for path in bundle_dir.glob("*.json"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if '"None"' in text:
+            offenders.append(path.name)
+    checks.append(_qa_check("report::no_raw_python_none", not offenders, ", ".join(sorted(set(offenders)))))
+
+
+def _qa_figure_manifest(checks: list[dict[str, Any]], bundle_dir: Path) -> None:
+    manifest_path = bundle_dir / "plots_manifest.json"
+    if not manifest_path.exists():
+        plot_files_present = (bundle_dir / "plots").exists() and any((bundle_dir / "plots").iterdir())
+        passed = not plot_files_present
+        detail = "No plot manifest present." if passed else "Plot files exist without plots_manifest.json."
+        checks.append(_qa_check("figures::manifest_metadata", passed, detail))
+        checks.append(_qa_check("figures::no_mixed_unit_primary_charts", passed, detail))
+        checks.append(_qa_check("figures::portable_paths", passed, detail))
+        return
+    catalog = load_figure_catalog(manifest_path)
+    missing_metadata = [
+        plot_id
+        for plot_id, entry in catalog.items()
+        if not entry.get("caption") or not entry.get("quality_status") or not entry.get("status")
+    ]
+    mixed_primary = [
+        plot_id
+        for plot_id, entry in catalog.items()
+        if entry.get("report_section") == "primary" and any("mixed" in str(value).lower() for value in entry.get("units", {}).values())
+    ]
+    nonportable = [
+        plot_id
+        for plot_id, entry in catalog.items()
+        if _is_nonportable_manifest_path(str(entry.get("path", "")), bundle_dir)
+    ]
+    checks.append(_qa_check("figures::manifest_metadata", not missing_metadata, ", ".join(missing_metadata)))
+    checks.append(_qa_check("figures::no_mixed_unit_primary_charts", not mixed_primary, ", ".join(mixed_primary)))
+    checks.append(_qa_check("figures::portable_paths", not nonportable, ", ".join(nonportable)))
+
+
+def _qa_dry_run_warning(checks: list[dict[str, Any]], bundle_dir: Path, report_text: str) -> None:
+    summary = _read_json(bundle_dir / "summary.json")
+    status = str(summary.get("neutronics", {}).get("status", "")).lower() if isinstance(summary, dict) else ""
+    needs_warning = status and status != "completed"
+    has_warning = "dry-run/proxy" in report_text or "not a solver-backed OpenMC physics result" in report_text
+    checks.append(_qa_check("report::dry_run_proxy_warning", (not needs_warning) or has_warning, status))
+
+
+def _qa_status_contradictions(checks: list[dict[str, Any]], bundle_dir: Path, report_text: str) -> None:
+    summary = _read_json(bundle_dir / "summary.json")
+    status = str(summary.get("neutronics", {}).get("status", "")).lower() if isinstance(summary, dict) else ""
+    contradictions = []
+    if status and status != "completed" and "solver-backed OpenMC result" in report_text and "not a solver-backed OpenMC physics result" not in report_text:
+        contradictions.append("dry-run report claims solver-backed evidence")
+    artifact_status = summary.get("artifact_status", {}) if isinstance(summary, dict) else {}
+    groups = artifact_status.get("groups", {}) if isinstance(artifact_status, dict) else {}
+    openmc = groups.get("openmc", {}) if isinstance(groups, dict) else {}
+    if isinstance(openmc, dict) and openmc.get("state") in {"missing", "dry_run"} and "Build candidate: `true`" in report_text:
+        contradictions.append("build candidate true with missing/dry-run OpenMC artifacts")
+    checks.append(_qa_check("report::status_contradictions", not contradictions, "; ".join(contradictions)))
+
+
+def _qa_check(name: str, passed: bool, detail: str = "") -> dict[str, Any]:
+    return {
+        "name": name,
+        "status": "pass" if passed else "fail",
+        "detail": detail,
+    }
+
+
+def _extract_section_text(report_text: str, heading: str) -> str:
+    start = report_text.find(heading)
+    if start < 0:
+        return ""
+    next_heading = report_text.find("\n## ", start + len(heading))
+    return report_text[start:] if next_heading < 0 else report_text[start:next_heading]
+
+
+def _is_nonportable_manifest_path(path_text: str, bundle_dir: Path) -> bool:
+    if not path_text:
+        return True
+    if re.match(r"^[A-Za-z]:[\\/]", path_text) or path_text.startswith("\\\\"):
+        return True
+    path = Path(path_text)
+    if not path.is_absolute():
+        return False
+    return True
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _build_artifact_index_lines(
     *,
     summary_path: Path,
@@ -896,8 +1704,18 @@ def _build_artifact_index_lines(
             "pass/fail evidence for configured validation targets.",
         )
     if plot_assets:
+        catalog = load_figure_catalog(summary_path.parent / "plots_manifest.json")
         for name, path in sorted(plot_assets.items()):
-            _append_artifact(primary, f"{_humanize_label(name)} plot", path, "visual evidence generated from the run summary.")
+            entry = catalog.get(name, {})
+            target = primary if _is_primary_plot(name, entry) else appendix
+            description = str(
+                _first_available(
+                    entry.get("caption") if isinstance(entry, dict) else None,
+                    entry.get("conclusion") if isinstance(entry, dict) else None,
+                    "visual evidence generated from the run summary.",
+                )
+            )
+            _append_artifact(target, f"{_humanize_label(name)} plot", path, description)
     if geometry_assets:
         for name, path in sorted(geometry_assets.items()):
             _append_artifact(primary, f"{_humanize_label(name)} geometry", path, "rendered geometry evidence for reader inspection.")
@@ -953,6 +1771,17 @@ def _build_artifact_index_lines(
         lines.extend(["", "### Appendix / Raw Artifacts", "", *appendix])
     lines.append("")
     return lines
+
+
+def _is_primary_plot(plot_id: str, entry: dict[str, Any]) -> bool:
+    if isinstance(entry, dict) and entry:
+        if entry.get("report_section") != "primary":
+            return False
+        units = entry.get("units", {})
+        if isinstance(units, dict) and any("mixed" in str(value).lower() for value in units.values()):
+            return False
+        return True
+    return plot_id not in {"metrics_overview", "bop_balance", "transient_redox_state", "transient_fissile_inventory"}
 
 
 def _build_stage_manifest_lines(manifest_path: Path) -> list[str]:
@@ -1466,6 +2295,8 @@ def _classify_reactor_case(
     solver_backed = _is_solver_backed_neutronics(summary)
     benchmark_ready = benchmark_quality.get("benchmark_ready") is True if benchmark_quality else False
     evidence_limited = not solver_backed or not benchmark_ready
+    design_readiness = summary.get("design_readiness", {}) if isinstance(summary.get("design_readiness"), dict) else {}
+    severe_screening = int(design_readiness.get("severe_finding_count", 0) or 0) > 0
     if case_name == "example_pin":
         return {
             "role": "smoke/regression pin",
@@ -1488,12 +2319,14 @@ def _classify_reactor_case(
             "description": "Validation anchor for historical molten-salt reactor behavior, not a build candidate.",
         }
     if case_name == "flagship_grid_msr" or mode == "commercial_grid":
-        if evidence_limited:
+        if evidence_limited or severe_screening:
             blockers: list[str] = []
             if not solver_backed:
                 blockers.append("dry-run/proxy neutronics")
             if not benchmark_ready:
                 blockers.append("benchmark gates not ready")
+            if severe_screening:
+                blockers.append("severe engineering screening findings")
             blocker_text = " and ".join(blockers)
             return {
                 "role": "commercial flagship grid reactor planning case",
