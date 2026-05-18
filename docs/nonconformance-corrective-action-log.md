@@ -9,6 +9,19 @@ checks, benchmark quality gates, or issue tracking. It records the defect, the
 expected disposition, the corrective action, the owner, and the evidence needed
 before closure.
 
+## GitHub Issues And Nonconformance Records
+
+An existing GitHub issue also needs a nonconformance record when the issue
+identifies a deficiency that can affect benchmark, QA, documentation,
+validation, export-control, or release confidence. Use the issue to manage
+discussion and implementation work; use the `NCA-*` record to control the
+defect disposition, owner, status, and closure evidence before the affected
+artifact is promoted, externally shared, or relied on.
+
+A GitHub issue alone is sufficient for ordinary feature work, cleanup, or
+planning when it does not identify an artifact deficiency, evidence gap,
+misleading maturity claim, failed quality gate, accepted limitation, or release hold condition.
+
 ## Record Format
 
 Every nonconformance record must include these fields.

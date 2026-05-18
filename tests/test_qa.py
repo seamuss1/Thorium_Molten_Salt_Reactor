@@ -4,10 +4,12 @@ from pathlib import Path
 from thorium_reactor.cli import build_parser, main
 from thorium_reactor.qa import (
     REQUIRED_MATRIX_COLUMNS,
+    REQUIRED_NONCONFORMANCE_FIELDS,
     build_requirements_traceability_index,
     build_requirements_summary,
     load_requirement_records,
     load_traceability_matrix,
+    validate_nonconformance_log,
     validate_requirements_traceability,
 )
 
@@ -28,6 +30,7 @@ def test_requirements_traceability_artifacts_validate() -> None:
         "qa::traceability_matrix_links",
         "qa::artifact_and_test_links_exist",
         "qa::matrix_metadata_matches_requirements",
+        "qa::nonconformance_log_required_fields",
     }
 
 
@@ -80,6 +83,37 @@ def test_requirements_summary_is_machine_readable_for_dossiers() -> None:
     requirements_path = Path(summary["artifacts"]["requirements"])
     assert requirements_path.name == "requirements.yaml"
     assert requirements_path.parent.name == "qa"
+    assert Path(summary["artifacts"]["nonconformance_log"]).name == "nonconformance-corrective-action-log.md"
+    assert summary["nonconformance_log"]["rows"] >= 5
+    assert tuple(summary["nonconformance_log"]["columns"]) == REQUIRED_NONCONFORMANCE_FIELDS
+
+
+def test_nonconformance_log_declares_required_fields_and_rows() -> None:
+    result = validate_nonconformance_log(REPO_ROOT)
+
+    assert result["passed"] is True
+    assert result["errors"] == []
+    assert result["record_count"] >= 5
+    assert tuple(result["required_fields"]) == REQUIRED_NONCONFORMANCE_FIELDS
+    assert tuple(result["columns"]) == REQUIRED_NONCONFORMANCE_FIELDS
+    assert {check["name"] for check in result["checks"]} == {"qa::nonconformance_log_required_fields"}
+    assert {check["status"] for check in result["checks"]} == {"pass"}
+
+
+def test_nonconformance_log_explains_when_github_issue_needs_record() -> None:
+    text = (REPO_ROOT / "docs" / "nonconformance-corrective-action-log.md").read_text(encoding="utf-8")
+
+    assert "existing GitHub issue also needs a nonconformance record" in text
+    assert "misleading maturity claim" in text
+    assert "release hold condition" in text
+
+
+def test_export_control_review_triggers_name_operational_claims_and_solver_outputs() -> None:
+    text = (REPO_ROOT / "docs" / "export-control-sensitive-information-review.md").read_text(encoding="utf-8")
+
+    assert "| Operational claims |" in text
+    assert "external solver outputs" in text
+    assert "raw-derived solver outputs" in text
 
 
 def test_cli_qa_command_is_repo_level_and_machine_readable(capsys) -> None:

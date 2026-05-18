@@ -1,8 +1,14 @@
+import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from thorium_reactor.paths import create_result_bundle
-from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot, load_plot_manifest
+from thorium_reactor.reporting.plots import (
+    generate_summary_plots,
+    generate_validation_plot,
+    load_figure_catalog,
+    load_plot_manifest,
+)
 
 SVG_NS = {"svg": "http://www.w3.org/2000/svg"}
 
@@ -52,6 +58,25 @@ def test_generate_summary_plots_populates_plots_dir(tmp_path: Path) -> None:
     assert "bop_balance" in assets
     assert Path(assets["metrics_overview"]).exists()
     assert Path(assets["bop_balance"]).exists()
+
+    manifest_path = bundle.root / "plots_manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    legacy_manifest = load_plot_manifest(manifest_path)
+    catalog = load_figure_catalog(manifest_path)
+    metrics_figure = payload["figures"]["metrics_overview"]
+
+    assert payload["schema_version"] == 2
+    assert legacy_manifest["metrics_overview"] == assets["metrics_overview"]
+    assert catalog["bop_balance"]["path"] == assets["bop_balance"]
+    assert metrics_figure["plot_id"] == "metrics_overview"
+    assert metrics_figure["path"] == assets["metrics_overview"]
+    assert metrics_figure["title"] == "Metrics overview"
+    assert metrics_figure["caption"]
+    assert metrics_figure["quality_status"] == "publication_ready"
+    assert metrics_figure["report_section"] == "primary"
+    assert metrics_figure["axes"]["x"] == "Metric"
+    assert metrics_figure["units"]["y"] == "mixed"
+    assert metrics_figure["conclusion"]
 
 
 def test_generate_summary_plots_emits_flow_interface_plot_when_available(tmp_path: Path) -> None:
@@ -123,6 +148,27 @@ def test_generate_validation_plot_updates_manifest(tmp_path: Path) -> None:
     assert "validation_summary" in assets
     assert "validation_summary" in manifest
     assert Path(assets["validation_summary"]).exists()
+
+    figure = load_figure_catalog(bundle.root / "plots_manifest.json")["validation_summary"]
+    assert figure["plot_id"] == "validation_summary"
+    assert figure["quality_status"] == "publication_ready"
+    assert figure["units"]["y"] == "checks"
+    assert "failures" in figure["conclusion"]
+
+
+def test_load_plot_manifest_reads_legacy_flat_manifest(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "plots_manifest.json"
+    plot_path = tmp_path / "plots" / "legacy.svg"
+    manifest_path.write_text(json.dumps({"legacy_plot": str(plot_path)}), encoding="utf-8")
+
+    manifest = load_plot_manifest(manifest_path)
+    catalog = load_figure_catalog(manifest_path)
+
+    assert manifest == {"legacy_plot": str(plot_path)}
+    assert catalog["legacy_plot"]["plot_id"] == "legacy_plot"
+    assert catalog["legacy_plot"]["path"] == str(plot_path)
+    assert catalog["legacy_plot"]["quality_status"] == "diagnostic_only"
+    assert catalog["legacy_plot"]["caption"]
 
 
 def test_generate_summary_plots_emits_transient_plots_when_history_exists(tmp_path: Path) -> None:

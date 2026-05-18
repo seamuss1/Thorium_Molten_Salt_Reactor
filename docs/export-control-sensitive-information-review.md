@@ -22,8 +22,9 @@ of the following:
 | New data | Benchmark source dossiers, measured operating points, proprietary datasets, vendor values, experimental logs, survey data, or copied tables from restricted sources. |
 | Geometry | New reactor layouts, dimensions, lattice definitions, CAD-derived files, mesh exports, STL/OBJ/glTF artifacts, or geometry that could move a model from illustrative to build-specific. |
 | Material details | Fuel salt composition, isotopic vectors, enrichment, impurity limits, graphite grade, structural alloys, reprocessing chemistry, online cleanup, source terms, or burnup/depletion details. |
+| Operational claims | Claims about startup, shutdown, control response, power maneuvering, margins, accident response, maintenance, fuel processing, online cleanup, safeguards posture, or operating procedures for a real or benchmark-derived facility. |
 | External contributions | Pull requests, issues, comments, attachments, imported files, partner data, generated patches, or examples submitted by people outside the trusted maintainer group. |
-| Generated artifacts | Reports, plots, result bundles, solver input decks, external-code handoff files, notebooks, screenshots, mesh exports, or archives prepared for release. |
+| Generated artifacts | Reports, plots, result bundles, solver input decks, external solver outputs, raw-derived solver outputs, external-code handoff files, notebooks, screenshots, mesh exports, or archives prepared for release. |
 | Release packaging | README claims, documentation maps, tagged releases, GitHub artifacts, paper drafts, presentations, demos, or externally shared result bundles. |
 
 ## Content Classes

@@ -9,6 +9,174 @@ from typing import Any
 
 from thorium_reactor.neutronics.openmc_compat import openmc
 
+FIGURE_CATALOG_SCHEMA_VERSION = 2
+
+_DEFAULT_FIGURE_METADATA: dict[str, Any] = {
+    "title": "Generated plot",
+    "caption": "Generated reporting figure.",
+    "quality_status": "diagnostic_only",
+    "report_section": "appendix",
+    "axes": {},
+    "units": {},
+    "conclusion": "Review alongside the source report data before using in presentation material.",
+}
+
+_FIGURE_METADATA: dict[str, dict[str, Any]] = {
+    "metrics_overview": {
+        "title": "Metrics overview",
+        "caption": "Bar chart of numeric top-level run metrics from the summary payload.",
+        "quality_status": "publication_ready",
+        "report_section": "primary",
+        "axes": {"x": "Metric", "y": "Reported value"},
+        "units": {"y": "mixed"},
+        "conclusion": "Use as a quick scan of reported case metrics; units vary by metric.",
+    },
+    "bop_balance": {
+        "title": "Balance of plant overview",
+        "caption": "Numeric balance-of-plant outputs plotted as a compact comparison chart.",
+        "quality_status": "publication_ready",
+        "report_section": "primary",
+        "axes": {"x": "BOP metric", "y": "Reported value"},
+        "units": {"y": "mixed, commonly MW"},
+        "conclusion": "Use to confirm the thermal and electric plant quantities reported for the case.",
+    },
+    "finance_cost_waterfall": {
+        "title": "Capital cost breakdown",
+        "caption": "Capital cost components scaled from USD into billions of USD.",
+        "quality_status": "publication_ready",
+        "report_section": "primary",
+        "axes": {"x": "Cost component", "y": "Capitalized cost"},
+        "units": {"y": "B USD"},
+        "conclusion": "Use as the primary cost-driver figure for completed finance runs.",
+    },
+    "finance_annual_cost_stack": {
+        "title": "Annualized cost stack",
+        "caption": "Annual operating and financing cost components scaled into millions of USD per year.",
+        "quality_status": "publication_ready",
+        "report_section": "primary",
+        "axes": {"x": "Annual cost component", "y": "Annualized cost"},
+        "units": {"y": "M USD/yr"},
+        "conclusion": "Use to compare annual cost contributors after finance completion.",
+    },
+    "finance_construction_cash_flow": {
+        "title": "Construction cash flow",
+        "caption": "Cumulative capitalized construction cost by project month.",
+        "quality_status": "publication_ready",
+        "report_section": "primary",
+        "axes": {"x": "Construction month", "y": "Capitalized cost"},
+        "units": {"x": "month", "y": "B USD"},
+        "conclusion": "Use to show when capital is committed across the construction schedule.",
+    },
+    "project_schedule_gantt": {
+        "title": "Project schedule",
+        "caption": "Planning-grade Gantt view from project start through commercial operation.",
+        "quality_status": "appendix_only",
+        "report_section": "appendix",
+        "axes": {"x": "Calendar year", "y": "Project phase"},
+        "units": {"x": "year", "bar": "months"},
+        "conclusion": "Use as appendix context unless the schedule basis has been independently reviewed.",
+    },
+    "flow_interfaces": {
+        "title": "Flow interface channel counts",
+        "caption": "Counts channels by plenum and reflector interface categories.",
+        "quality_status": "diagnostic_only",
+        "report_section": "appendix",
+        "axes": {"x": "Interface metric", "y": "Channel count"},
+        "units": {"y": "channels"},
+        "conclusion": "Use as a geometry connectivity diagnostic rather than a final performance claim.",
+    },
+    "active_flow_allocation": {
+        "title": "Active through-flow allocation",
+        "caption": "Reduced-order flow allocation by channel or component variant.",
+        "quality_status": "publication_ready",
+        "report_section": "primary",
+        "axes": {"x": "Variant", "y": "Allocated mass flow"},
+        "units": {"y": "kg/s"},
+        "conclusion": "Use to communicate how active coolant flow is distributed in the reduced-order model.",
+    },
+    "keff_history": {
+        "title": "k-effective history",
+        "caption": "Generation-by-generation k-effective values loaded from the OpenMC statepoint.",
+        "quality_status": "diagnostic_only",
+        "report_section": "appendix",
+        "axes": {"x": "Generation", "y": "k-effective"},
+        "units": {"y": "dimensionless"},
+        "conclusion": "Use to assess convergence behavior before presenting neutronics results.",
+    },
+    "benchmark_residuals": {
+        "title": "Benchmark residuals",
+        "caption": "Residuals between benchmark targets and computed case values.",
+        "quality_status": "publication_ready",
+        "report_section": "primary",
+        "axes": {"x": "Benchmark target", "y": "Residual"},
+        "units": {"y": "target units"},
+        "conclusion": "Use to identify which validation targets drive benchmark mismatch.",
+    },
+    "transient_power": {
+        "title": "Transient power fraction",
+        "caption": "Time history of normalized power during the transient run.",
+        "quality_status": "publication_ready",
+        "report_section": "primary",
+        "axes": {"x": "Time", "y": "Power fraction"},
+        "units": {"x": "s", "y": "dimensionless"},
+        "conclusion": "Use as the primary transient response figure for power behavior.",
+    },
+    "transient_fuel_temperature": {
+        "title": "Transient fuel temperature",
+        "caption": "Time history of fuel temperature during the transient run.",
+        "quality_status": "publication_ready",
+        "report_section": "primary",
+        "axes": {"x": "Time", "y": "Fuel temperature"},
+        "units": {"x": "s", "y": "C"},
+        "conclusion": "Use as the primary transient thermal response figure.",
+    },
+    "transient_redox_state": {
+        "title": "Transient redox state",
+        "caption": "Time history of the modeled redox state during the transient run.",
+        "quality_status": "appendix_only",
+        "report_section": "appendix",
+        "axes": {"x": "Time", "y": "Redox state"},
+        "units": {"x": "s", "y": "eV"},
+        "conclusion": "Use as supporting chemistry context when redox assumptions are in scope.",
+    },
+    "transient_fissile_inventory": {
+        "title": "Transient fissile inventory",
+        "caption": "Time history of normalized fissile inventory during the transient run.",
+        "quality_status": "appendix_only",
+        "report_section": "appendix",
+        "axes": {"x": "Time", "y": "Fissile inventory fraction"},
+        "units": {"x": "s", "y": "dimensionless"},
+        "conclusion": "Use as appendix context for inventory sensitivity during transients.",
+    },
+    "transient_sweep_power_envelope": {
+        "title": "Transient sweep power envelope",
+        "caption": "Uncertainty band showing p05, p50, and p95 power-fraction histories.",
+        "quality_status": "publication_ready",
+        "report_section": "primary",
+        "axes": {"x": "Time", "y": "Power fraction"},
+        "units": {"x": "s", "y": "dimensionless"},
+        "conclusion": "Use to present the median power response and uncertainty spread.",
+    },
+    "transient_sweep_fuel_temperature_envelope": {
+        "title": "Transient sweep fuel temperature envelope",
+        "caption": "Uncertainty band showing p05, p50, and p95 fuel-temperature histories.",
+        "quality_status": "publication_ready",
+        "report_section": "primary",
+        "axes": {"x": "Time", "y": "Fuel temperature"},
+        "units": {"x": "s", "y": "C"},
+        "conclusion": "Use to present the median fuel-temperature response and uncertainty spread.",
+    },
+    "validation_summary": {
+        "title": "Validation summary",
+        "caption": "Counts validation checks by pass, fail, and pending status.",
+        "quality_status": "publication_ready",
+        "report_section": "primary",
+        "axes": {"x": "Validation status", "y": "Check count"},
+        "units": {"y": "checks"},
+        "conclusion": "Use to summarize readiness; failures and pending checks require reviewer attention.",
+    },
+}
+
 
 def generate_summary_plots(bundle, summary: dict[str, Any]) -> dict[str, str]:
     bundle.plots_dir.mkdir(parents=True, exist_ok=True)
@@ -283,20 +451,102 @@ def generate_validation_plot(bundle, validation: dict[str, Any]) -> dict[str, st
 
 
 def load_plot_manifest(path: Path) -> dict[str, str]:
+    return {
+        plot_id: str(entry["path"])
+        for plot_id, entry in load_figure_catalog(path).items()
+        if isinstance(entry.get("path"), str)
+    }
+
+
+def load_figure_catalog(path: Path) -> dict[str, dict[str, Any]]:
+    payload = _read_plot_manifest_payload(path)
+    if not payload:
+        return {}
+
+    figures = payload.get("figures")
+    if isinstance(figures, dict):
+        return {
+            str(plot_id): _normalize_figure_entry(str(plot_id), entry)
+            for plot_id, entry in figures.items()
+            if isinstance(entry, dict) and entry.get("path")
+        }
+    if isinstance(figures, list):
+        catalog: dict[str, dict[str, Any]] = {}
+        for entry in figures:
+            if not isinstance(entry, dict) or not entry.get("path"):
+                continue
+            plot_id = str(entry.get("plot_id") or Path(str(entry["path"])).stem)
+            catalog[plot_id] = _normalize_figure_entry(plot_id, entry)
+        return catalog
+
+    return {
+        plot_id: _build_figure_entry(plot_id, asset_path)
+        for plot_id, asset_path in _legacy_plot_paths(payload).items()
+    }
+
+
+def _update_plot_manifest(path: Path, assets: dict[str, str]) -> dict[str, str]:
+    catalog = load_figure_catalog(path)
+    for plot_id, asset_path in assets.items():
+        catalog[plot_id] = _build_figure_entry(plot_id, asset_path)
+    manifest = {
+        "schema_version": FIGURE_CATALOG_SCHEMA_VERSION,
+        "figures": {plot_id: catalog[plot_id] for plot_id in sorted(catalog)},
+    }
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    return load_plot_manifest(path)
+
+
+def _read_plot_manifest_payload(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
-    return {str(key): str(value) for key, value in payload.items()}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
 
 
-def _update_plot_manifest(path: Path, assets: dict[str, str]) -> dict[str, str]:
-    manifest = load_plot_manifest(path)
-    manifest.update(assets)
-    path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
-    return manifest
+def _legacy_plot_paths(payload: dict[str, Any]) -> dict[str, str]:
+    reserved_keys = {"figures", "schema_version"}
+    return {
+        str(plot_id): str(asset_path)
+        for plot_id, asset_path in payload.items()
+        if plot_id not in reserved_keys and not isinstance(asset_path, (dict, list))
+    }
+
+
+def _build_figure_entry(plot_id: str, asset_path: str) -> dict[str, Any]:
+    metadata = _figure_metadata(plot_id)
+    return {
+        "plot_id": plot_id,
+        "path": str(asset_path),
+        "title": str(metadata["title"]),
+        "caption": str(metadata["caption"]),
+        "quality_status": str(metadata["quality_status"]),
+        "report_section": str(metadata["report_section"]),
+        "axes": dict(metadata["axes"]),
+        "units": dict(metadata["units"]),
+        "conclusion": str(metadata["conclusion"]),
+    }
+
+
+def _normalize_figure_entry(plot_id: str, entry: dict[str, Any]) -> dict[str, Any]:
+    normalized = _build_figure_entry(plot_id, str(entry["path"]))
+    for key, value in entry.items():
+        if key not in {"plot_id", "path"}:
+            normalized[str(key)] = value
+    normalized["plot_id"] = plot_id
+    normalized["path"] = str(entry["path"])
+    return normalized
+
+
+def _figure_metadata(plot_id: str) -> dict[str, Any]:
+    metadata = dict(_DEFAULT_FIGURE_METADATA)
+    metadata.update(_FIGURE_METADATA.get(plot_id, {}))
+    return metadata
 
 
 def _coerce_numeric_mapping(values: dict[str, Any]) -> dict[str, float]:

@@ -8,6 +8,14 @@ from thorium_reactor.reporting.plots import generate_summary_plots, generate_val
 from thorium_reactor.reporting.reports import generate_report
 
 
+def _section(report: str, heading: str) -> str:
+    start = report.index(heading)
+    next_heading = report.find("\n## ", start + len(heading))
+    if next_heading == -1:
+        return report[start:]
+    return report[start:next_heading]
+
+
 def test_generate_report_includes_benchmark_evidence_and_novelty_tracks() -> None:
     scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
@@ -244,6 +252,150 @@ def test_report_can_include_plot_outputs() -> None:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
 
+def test_report_adds_front_artifact_index_for_result_bundles() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-artifact-index" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "dry-run"},
+                    "metrics": {"keff": 1.01},
+                    "transient": {"history_path": "transient_history.json"},
+                    "benchmark_traceability": {
+                        "traceability_score": 100.0,
+                        "maturity_stage": "traceable_surrogate",
+                        "coverage": {
+                            "evidence_records_complete": {"linked": 1, "total": 1},
+                            "assumptions_with_evidence": {"linked": 1, "total": 1},
+                            "targets_with_evidence": {"linked": 1, "total": 1},
+                            "reactor_parameters_linked": {"linked": 1, "total": 1},
+                            "physics_validation_targets_linked": {"linked": 1, "total": 1},
+                        },
+                        "confidence_summary": {"high": 0, "medium": 1, "low": 0, "unspecified": 0},
+                        "status_summary": {"surrogate_targets": 1, "literature_backed_targets": 0},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        validation_path = scratch_root / "validation.json"
+        validation_path.write_text(json.dumps({"checks": [], "passed": True}), encoding="utf-8")
+
+        report = generate_report(
+            "tmsr_lf1_core",
+            {
+                "reactor": {
+                    "name": "TMSR-LF1-Inspired Core",
+                    "family": "TMSR-LF1-inspired MSR",
+                    "stage": "full-core",
+                    "design_power_mwth": 250.0,
+                    "benchmark": "benchmarks/tmsr_lf1/benchmark.yaml",
+                }
+            },
+            summary_path,
+            validation_path,
+            {"render_png": "geometry/exports/core.png"},
+            {
+                "title": "TMSR-LF1-inspired surrogate benchmark",
+                "references": ["Surrogate acceptance bands."],
+                "targets": {"expected_keff_band": {"min": 0.98, "max": 1.08}},
+            },
+            {"metrics_overview": "plots/metrics_overview.png"},
+            {
+                "case": {"source": "repo", "origin_path": "configs/cases/tmsr_lf1_core/case.yaml"},
+                "benchmark": {"source": "repo", "origin_path": "benchmarks/tmsr_lf1/benchmark.yaml"},
+            },
+        )
+
+        assert "## Start Here" in report
+        assert "Open first: this report" in report
+        assert "### Primary Evidence" in report
+        assert "Run summary JSON" in report
+        assert "Validation checks" in report
+        assert "Metrics overview plot" in report
+        assert "Render PNG geometry" in report
+        assert "Benchmark context" in report
+        assert "### Appendix / Raw Artifacts" in report
+        assert "Case input provenance" in report
+        assert "Benchmark metadata" in report
+        assert "transient_history.json" in report
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_key_metrics_are_curated_readable_and_reader_formatted() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-key-metrics" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary = {
+            "result_dir": str(scratch_root),
+            "neutronics": {"status": "dry-run"},
+            "metrics": {
+                "keff": 1.000123456789,
+                "active_flow_channel_count": 37,
+                "finance_lcoe_usd_per_mwh": 190.123456,
+                "raw_missing_metric": None,
+            },
+            "runtime_context": {
+                "service": "app",
+                "image": "thorium-reactor-app:latest",
+                "tool_runtime": None,
+                "git_branch": "codex/reporting",
+                "git_commit": "deadbeef",
+            },
+            "bop": {"primary_mass_flow_kg_s": 1116.071429},
+            "flow": {
+                "reduced_order": {
+                    "active_flow": {
+                        "channel_count": 37,
+                        "representative_velocity_m_s": 355.397391,
+                        "representative_residence_time_s": 0.005402,
+                    }
+                }
+            },
+            "fuel_cycle": {
+                "xenon_generation_rate_atoms_s": 6.99e14,
+            },
+        }
+        summary_path.write_text(json.dumps(summary), encoding="utf-8")
+
+        report = generate_report(
+            "tmsr_lf1_core",
+            {
+                "reactor": {
+                    "name": "TMSR-LF1-Inspired Core",
+                    "family": "TMSR-LF1-inspired MSR",
+                    "stage": "full-core",
+                    "design_power_mwth": 250.0000001,
+                    "benchmark": "n/a",
+                }
+            },
+            summary_path,
+            None,
+            None,
+        )
+
+        key_metrics = _section(report, "## Key Metrics")
+        assert "- Effective multiplication factor: `1.00012`" in key_metrics
+        assert "- Active flow channels: `37`" in key_metrics
+        assert "- Representative salt velocity: `355.4 m/s`" in key_metrics
+        assert "- LCOE: `190.12 USD/MWh`" in key_metrics
+        assert "active_flow_channel_count" not in key_metrics
+        assert "raw_missing_metric" not in report
+        assert "`None`" not in report
+        assert "`n/a`" not in report
+        assert "355.397391" not in report
+        assert "1.000123456789" not in report
+        assert "699e+12" in report
+        assert json.loads(summary_path.read_text(encoding="utf-8"))["metrics"]["keff"] == 1.000123456789
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
 def test_report_includes_reduced_order_flow_section() -> None:
     scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-flow" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
@@ -387,7 +539,7 @@ def test_report_includes_reduced_order_flow_section() -> None:
         assert "## Fuel Cycle Assumptions" in report
         assert "salt_area_weighted" in report
         assert "37" in report
-        assert "355.397391" in report
+        assert "355.4" in report
         assert "0.005402" in report
         assert "## MSRE Pump Transient Validation" in report
         assert "11.0 to 21.0" in report

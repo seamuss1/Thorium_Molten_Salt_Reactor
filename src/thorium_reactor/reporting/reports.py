@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
@@ -42,12 +44,27 @@ def generate_report(
         f"- Result bundle: `{summary.get('result_dir', '')}`",
         f"- Neutronics status: `{summary.get('neutronics', {}).get('status', 'unknown')}`",
         "",
+    ]
+    lines.extend(
+        _build_artifact_index_lines(
+            summary_path=summary_path,
+            validation_path=validation_path,
+            geometry_assets=geometry_assets,
+            benchmark=benchmark,
+            plot_assets=plot_assets,
+            provenance=provenance,
+            summary=summary,
+        )
+    )
+    lines.extend(
+        [
         "## Reactor Summary",
         "",
-        f"- Design thermal power (MWth): `{config['reactor'].get('design_power_mwth', 'n/a')}`",
-        f"- Benchmark source: `{config['reactor'].get('benchmark', 'n/a')}`",
-        "",
-    ]
+        ]
+    )
+    _append_value_line(lines, "Design thermal power", config["reactor"].get("design_power_mwth"), "MWth")
+    _append_value_line(lines, "Benchmark source", config["reactor"].get("benchmark"))
+    lines.append("")
 
     classification = _classify_reactor_case(case_name, config)
     lines.extend(
@@ -77,7 +94,7 @@ def generate_report(
             "cleanup_strategy",
         ):
             if key in characteristics:
-                lines.append(f"- {key}: `{characteristics[key]}`")
+                _append_value_line(lines, _humanize_label(key), characteristics[key])
         if characteristics.get("end_goal"):
             lines.append(f"- End goal: {characteristics['end_goal']}")
         lines.append("")
@@ -112,14 +129,14 @@ def generate_report(
             [
                 "## Runtime Context",
                 "",
-                f"- Service: `{runtime_context.get('service', 'host')}`",
-                f"- Image: `{runtime_context.get('image', 'n/a')}`",
-                f"- Tool runtime: `{runtime_context.get('tool_runtime', 'n/a')}`",
-                f"- Git branch: `{runtime_context.get('git_branch', 'n/a')}`",
-                f"- Git commit: `{runtime_context.get('git_commit', 'n/a')}`",
-                "",
             ]
         )
+        _append_value_line(lines, "Service", runtime_context.get("service", "host"))
+        _append_value_line(lines, "Image", runtime_context.get("image"))
+        _append_value_line(lines, "Tool runtime", runtime_context.get("tool_runtime"))
+        _append_value_line(lines, "Git branch", runtime_context.get("git_branch"))
+        _append_value_line(lines, "Git commit", runtime_context.get("git_commit"))
+        lines.append("")
 
     if model_representation:
         lines.extend(
@@ -210,12 +227,7 @@ def generate_report(
                     + (f" ({gate.get('message')})" if gate.get("message") else "")
                 )
 
-    lines.extend(
-        [
-            "## Key Metrics",
-            "",
-        ]
-    )
+    lines.extend(_build_key_metrics_lines(config, summary, benchmark_traceability, validation_maturity))
 
     neutronics = summary.get("neutronics", {})
     simulation = neutronics.get("simulation", {})
@@ -243,9 +255,6 @@ def generate_report(
                 f"scores=`{', '.join(tally.get('scores', [])) or 'n/a'}`, "
                 f"nuclides=`{', '.join(tally.get('nuclides', [])) or 'all'}`"
             )
-
-    for key, value in summary.get("metrics", {}).items():
-        lines.append(f"- {key}: `{value}`")
 
     finance = summary.get("finance", {})
     if finance:
@@ -724,7 +733,391 @@ def generate_report(
         ]
     )
 
-    return "\n".join(lines) + "\n"
+    return _render_report_lines(lines)
+
+
+_NUMERIC_CODE_RE = re.compile(r"`([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)`")
+_MISSING_CODE_VALUES = {"", "none", "n/a", "na", "null", "unknown"}
+_LABEL_ACRONYMS = {
+    "bop": "BOP",
+    "csv": "CSV",
+    "foak": "FOAK",
+    "json": "JSON",
+    "lcoe": "LCOE",
+    "msre": "MSRE",
+    "mw": "MW",
+    "mwe": "MWe",
+    "mwth": "MWth",
+    "occ": "OCC",
+    "pcm": "pcm",
+    "png": "PNG",
+    "rkdg": "RKDG",
+    "tmsr": "TMSR",
+    "uq": "UQ",
+    "usd": "USD",
+    "wacc": "WACC",
+}
+
+
+def _build_artifact_index_lines(
+    *,
+    summary_path: Path,
+    validation_path: Path | None,
+    geometry_assets: dict[str, str] | None,
+    benchmark: dict[str, Any],
+    plot_assets: dict[str, str] | None,
+    provenance: dict[str, Any] | None,
+    summary: dict[str, Any],
+) -> list[str]:
+    primary: list[str] = []
+    appendix: list[str] = []
+
+    _append_artifact(
+        primary,
+        "Run summary JSON",
+        summary_path,
+        "curated run status, metrics, and generated artifact paths.",
+    )
+    if validation_path:
+        _append_artifact(
+            primary,
+            "Validation checks",
+            validation_path,
+            "pass/fail evidence for configured validation targets.",
+        )
+    if plot_assets:
+        for name, path in sorted(plot_assets.items()):
+            _append_artifact(primary, f"{_humanize_label(name)} plot", path, "visual evidence generated from the run summary.")
+    if geometry_assets:
+        for name, path in sorted(geometry_assets.items()):
+            _append_artifact(primary, f"{_humanize_label(name)} geometry", path, "rendered geometry evidence for reader inspection.")
+    if benchmark:
+        primary.append(
+            "- Benchmark context: this report - source assumptions, references, traceability, and evidence trail."
+        )
+        reference_count = len(benchmark.get("references", []))
+        target_count = len(benchmark.get("targets", {}))
+        if reference_count or target_count:
+            appendix.append(
+                "- Benchmark metadata: embedded benchmark input - "
+                f"{reference_count} reference note(s), {target_count} target definition(s)."
+            )
+
+    if provenance:
+        for label, payload in (
+            ("Case input provenance", provenance.get("case", {})),
+            ("Benchmark input provenance", provenance.get("benchmark", {})),
+        ):
+            if isinstance(payload, dict):
+                origin = _first_available(payload.get("origin_path"), payload.get("source"))
+                _append_artifact(appendix, label, origin, "source input used to assemble this result bundle.")
+
+    seen_paths = {str(summary_path)}
+    if validation_path:
+        seen_paths.add(str(validation_path))
+    for _, path in _iter_summary_artifact_paths(summary):
+        path_text = str(path)
+        if path_text in seen_paths:
+            continue
+        seen_paths.add(path_text)
+        _append_artifact(
+            appendix,
+            _humanize_label(path_text.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]),
+            path,
+            "raw generated artifact referenced by the run summary.",
+        )
+        if len(appendix) >= 10:
+            appendix.append("- Additional raw artifacts: see the run summary JSON for the complete path list.")
+            break
+
+    lines = [
+        "## Start Here",
+        "",
+        "- Open first: this report, then the run summary JSON; use the primary evidence below before digging into raw appendices.",
+        "",
+        "### Primary Evidence",
+        "",
+        *primary,
+    ]
+    if appendix:
+        lines.extend(["", "### Appendix / Raw Artifacts", "", *appendix])
+    lines.append("")
+    return lines
+
+
+def _build_key_metrics_lines(
+    config: dict[str, Any],
+    summary: dict[str, Any],
+    benchmark_traceability: dict[str, Any],
+    validation_maturity: dict[str, Any],
+) -> list[str]:
+    reactor = config.get("reactor", {})
+    metrics = summary.get("metrics", {})
+    if not isinstance(metrics, dict):
+        metrics = {}
+    neutronics = summary.get("neutronics", {})
+    bop = summary.get("bop", {})
+    flow = summary.get("flow", {}).get("reduced_order", {})
+    active_flow = flow.get("active_flow", {}) if isinstance(flow, dict) else {}
+    primary_system = summary.get("primary_system", {})
+    heat_exchanger = primary_system.get("heat_exchanger", {}) if isinstance(primary_system, dict) else {}
+    fuel_cycle = summary.get("fuel_cycle", {})
+    uncertainty_sweep = summary.get("uncertainty_sweep", {})
+    transient = summary.get("transient", {})
+    transient_sweep = summary.get("transient_sweep", {})
+    finance = summary.get("finance", {})
+    finance_outputs = finance.get("outputs", {}) if isinstance(finance, dict) else {}
+    schedule = summary.get("schedule", {})
+
+    metric_lines: list[str] = []
+    _append_value_line(metric_lines, "Design thermal power", reactor.get("design_power_mwth"), "MWth")
+    _append_value_line(metric_lines, "Neutronics status", neutronics.get("status") if isinstance(neutronics, dict) else None)
+    _append_value_line(
+        metric_lines,
+        "Effective multiplication factor",
+        _first_available(metrics.get("keff"), uncertainty_sweep.get("nominal_keff") if isinstance(uncertainty_sweep, dict) else None),
+        sig_digits=6,
+    )
+    _append_value_line(
+        metric_lines,
+        "Benchmark residual",
+        uncertainty_sweep.get("nominal_residual_pcm") if isinstance(uncertainty_sweep, dict) else None,
+        "pcm",
+    )
+    _append_value_line(
+        metric_lines,
+        "Combined benchmark uncertainty",
+        uncertainty_sweep.get("combined_uncertainty_pcm") if isinstance(uncertainty_sweep, dict) else None,
+        "pcm",
+    )
+    _append_value_line(
+        metric_lines,
+        "Traceability score",
+        _first_available(metrics.get("benchmark_traceability_score"), benchmark_traceability.get("traceability_score")),
+    )
+    _append_value_line(
+        metric_lines,
+        "Validation maturity score",
+        _first_available(metrics.get("validation_maturity_score"), validation_maturity.get("validation_maturity_score")),
+    )
+    _append_value_line(metric_lines, "Channel count", metrics.get("channel_count"))
+    _append_value_line(
+        metric_lines,
+        "Active flow channels",
+        _first_available(metrics.get("active_flow_channel_count"), active_flow.get("channel_count") if isinstance(active_flow, dict) else None),
+    )
+    _append_value_line(metric_lines, "Thermal power", bop.get("thermal_power_mw") if isinstance(bop, dict) else None, "MW")
+    _append_value_line(metric_lines, "Electric power", bop.get("electric_power_mw") if isinstance(bop, dict) else None, "MW")
+    _append_value_line(
+        metric_lines,
+        "Primary mass flow",
+        bop.get("primary_mass_flow_kg_s") if isinstance(bop, dict) else None,
+        "kg/s",
+    )
+    _append_value_line(
+        metric_lines,
+        "Representative salt velocity",
+        active_flow.get("representative_velocity_m_s") if isinstance(active_flow, dict) else None,
+        "m/s",
+    )
+    _append_value_line(
+        metric_lines,
+        "Representative residence time",
+        active_flow.get("representative_residence_time_s") if isinstance(active_flow, dict) else None,
+        "s",
+    )
+    _append_value_line(
+        metric_lines,
+        "Heat exchanger duty",
+        heat_exchanger.get("duty_mw") if isinstance(heat_exchanger, dict) else None,
+        "MW",
+    )
+    _append_value_line(
+        metric_lines,
+        "Heat exchanger area",
+        heat_exchanger.get("required_area_m2") if isinstance(heat_exchanger, dict) else None,
+        "m2",
+    )
+    _append_value_line(
+        metric_lines,
+        "Heavy metal inventory",
+        fuel_cycle.get("heavy_metal_inventory_kg") if isinstance(fuel_cycle, dict) else None,
+        "kg",
+    )
+    _append_value_line(
+        metric_lines,
+        "Fissile inventory",
+        fuel_cycle.get("fissile_inventory_kg") if isinstance(fuel_cycle, dict) else None,
+        "kg",
+    )
+    _append_value_line(
+        metric_lines,
+        "Specific power",
+        fuel_cycle.get("specific_power_mw_per_t_hm") if isinstance(fuel_cycle, dict) else None,
+        "MW/tHM",
+    )
+    _append_value_line(
+        metric_lines,
+        "Peak power fraction",
+        transient.get("peak_power_fraction") if isinstance(transient, dict) else None,
+    )
+    _append_value_line(
+        metric_lines,
+        "Peak fuel temperature",
+        transient.get("peak_fuel_temperature_c") if isinstance(transient, dict) else None,
+        "degC",
+    )
+    _append_value_line(
+        metric_lines,
+        "Transient peak power p95",
+        _first_available(
+            metrics.get("transient_sweep_peak_power_fraction_p95"),
+            transient_sweep.get("peak_power_fraction_p95") if isinstance(transient_sweep, dict) else None,
+        ),
+    )
+    _append_value_line(
+        metric_lines,
+        "Transient peak fuel temperature p95",
+        transient_sweep.get("peak_fuel_temperature_c_p95") if isinstance(transient_sweep, dict) else None,
+        "degC",
+    )
+    _append_value_line(
+        metric_lines,
+        "LCOE",
+        _first_available(metrics.get("finance_lcoe_usd_per_mwh"), finance_outputs.get("lcoe_usd_per_mwh")),
+        "USD/MWh",
+    )
+    _append_value_line(
+        metric_lines,
+        "Commercial operation date",
+        schedule.get("commercial_operation_date") if isinstance(schedule, dict) else None,
+    )
+
+    lines = ["## Key Metrics", ""]
+    if metric_lines:
+        lines.extend(metric_lines)
+    else:
+        lines.append("- No curated metrics were reported for this run.")
+    lines.append("")
+    return lines
+
+
+def _append_artifact(lines: list[str], label: str, path: Any, description: str) -> None:
+    if _has_reader_value(path):
+        lines.append(f"- {label}: `{path}` - {description}")
+
+
+def _append_value_line(
+    lines: list[str],
+    label: str,
+    value: Any,
+    unit: str | None = None,
+    *,
+    sig_digits: int = 5,
+) -> None:
+    if _has_reader_value(value):
+        lines.append(f"- {label}: `{_format_report_value(value, unit, sig_digits=sig_digits)}`")
+
+
+def _format_report_value(value: Any, unit: str | None = None, *, sig_digits: int = 5) -> str:
+    if isinstance(value, bool):
+        formatted = "true" if value else "false"
+    elif isinstance(value, int):
+        formatted = str(value)
+    elif isinstance(value, float):
+        formatted = _format_float(value, sig_digits=sig_digits)
+    elif isinstance(value, (list, tuple)):
+        formatted = ", ".join(_format_report_value(item, sig_digits=sig_digits) for item in value if _has_reader_value(item))
+    else:
+        formatted = str(value)
+    return f"{formatted} {unit}" if unit else formatted
+
+
+def _format_float(value: float, *, sig_digits: int = 5) -> str:
+    if not math.isfinite(value):
+        return str(value)
+    if value == 0:
+        return "0"
+    abs_value = abs(value)
+    if abs_value >= 1_000_000 or abs_value < 1e-6:
+        exponent = int(math.floor(math.log10(abs_value) / 3) * 3)
+        mantissa = value / (10**exponent)
+        return f"{mantissa:.{sig_digits}g}e{exponent:+d}"
+    return f"{value:.{sig_digits}g}"
+
+
+def _has_reader_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() not in _MISSING_CODE_VALUES
+    return True
+
+
+def _first_available(*values: Any) -> Any:
+    for value in values:
+        if _has_reader_value(value):
+            return value
+    return None
+
+
+def _humanize_label(name: str) -> str:
+    words = re.sub(r"[_\-]+", " ", str(name)).strip().split()
+    if not words:
+        return "Artifact"
+    rendered = [_LABEL_ACRONYMS.get(word.lower(), word) for word in words]
+    label = " ".join(rendered)
+    return label[:1].upper() + label[1:]
+
+
+def _iter_summary_artifact_paths(summary: dict[str, Any], prefix: tuple[str, ...] = ()) -> list[tuple[str, Any]]:
+    artifacts: list[tuple[str, Any]] = []
+    for key, value in summary.items():
+        path = (*prefix, str(key))
+        if key.endswith("_path") and _has_reader_value(value):
+            artifacts.append((" ".join(path), value))
+        elif isinstance(value, dict):
+            artifacts.extend(_iter_summary_artifact_paths(value, path))
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                if isinstance(item, dict):
+                    artifacts.extend(_iter_summary_artifact_paths(item, (*path, str(index))))
+    return artifacts
+
+
+def _render_report_lines(lines: list[str]) -> str:
+    rendered: list[str] = []
+    previous_blank = False
+    for line in lines:
+        if _should_omit_missing_line(line):
+            continue
+        formatted = _format_numeric_code_literals(line)
+        is_blank = formatted == ""
+        if is_blank and previous_blank:
+            continue
+        rendered.append(formatted)
+        previous_blank = is_blank
+    return "\n".join(rendered).rstrip() + "\n"
+
+
+def _should_omit_missing_line(line: str) -> bool:
+    if not line.lstrip().startswith("- "):
+        return False
+    lowered = line.lower()
+    return any(f"`{token}`" in lowered for token in _MISSING_CODE_VALUES)
+
+
+def _format_numeric_code_literals(line: str) -> str:
+    lower_line = line.lower()
+    sig_digits = 6 if "keff" in lower_line or "multiplication factor" in lower_line else 5
+
+    def replace(match: re.Match[str]) -> str:
+        token = match.group(1)
+        if "." not in token and "e" not in token.lower():
+            return f"`{int(token)}`"
+        return f"`{_format_float(float(token), sig_digits=sig_digits)}`"
+
+    return _NUMERIC_CODE_RE.sub(replace, line)
 
 
 def _classify_reactor_case(case_name: str, config: dict[str, Any]) -> dict[str, str]:

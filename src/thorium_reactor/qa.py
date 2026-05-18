@@ -8,9 +8,12 @@ import yaml
 
 
 QA_DIR = "qa"
+DOCS_DIR = "docs"
 REQUIREMENTS_FILE = "requirements.yaml"
 TRACEABILITY_MATRIX_FILE = "requirements_traceability_matrix.csv"
+NONCONFORMANCE_LOG_FILE = "nonconformance-corrective-action-log.md"
 REQUIREMENT_ID_PREFIX = "REQ-"
+NONCONFORMANCE_ID_PREFIX = "NCA-"
 SUPPORTED_REQUIREMENT_STATUSES = {"implemented", "active", "blocked", "planned"}
 
 REQUIRED_REQUIREMENT_FIELDS = (
@@ -36,6 +39,18 @@ REQUIRED_MATRIX_COLUMNS = (
     "status",
 )
 
+REQUIRED_NONCONFORMANCE_FIELDS = (
+    "Nonconformance ID",
+    "Description",
+    "Affected artifact",
+    "Severity",
+    "Disposition",
+    "Corrective action",
+    "Owner",
+    "Closure evidence",
+    "Status",
+)
+
 
 class QAArtifactError(ValueError):
     """Raised when a QA artifact cannot be loaded as structured data."""
@@ -47,6 +62,10 @@ def requirements_path(repo_root: Path) -> Path:
 
 def traceability_matrix_path(repo_root: Path) -> Path:
     return repo_root / QA_DIR / TRACEABILITY_MATRIX_FILE
+
+
+def nonconformance_log_path(repo_root: Path) -> Path:
+    return repo_root / DOCS_DIR / NONCONFORMANCE_LOG_FILE
 
 
 def load_requirements(repo_root: Path) -> dict[str, Any]:
@@ -119,6 +138,9 @@ def validate_requirements_traceability(repo_root: Path) -> dict[str, Any]:
         matrix_rows = []
         errors.append(str(exc))
 
+    nonconformance_validation = validate_nonconformance_log(repo_root)
+    errors.extend(nonconformance_validation["errors"])
+
     status_definitions = raw_requirements.get("status_definitions", {})
     if raw_requirements and not isinstance(raw_requirements.get("schema_version"), int):
         errors.append("Requirements artifact schema_version must be an integer.")
@@ -184,6 +206,11 @@ def validate_requirements_traceability(repo_root: Path) -> dict[str, Any]:
             "status": "pass" if not any("does not match requirement" in error for error in errors) else "fail",
             "message": "Matrix title, category, status, and declared trace links were cross-checked.",
         },
+        {
+            "name": "qa::nonconformance_log_required_fields",
+            "status": "pass" if nonconformance_validation["passed"] else "fail",
+            "message": f"{nonconformance_validation['record_count']} nonconformance record(s) inspected.",
+        },
     ]
 
     return {
@@ -192,7 +219,84 @@ def validate_requirements_traceability(repo_root: Path) -> dict[str, Any]:
         "checks": checks,
         "requirement_count": len(requirements),
         "matrix_row_count": len(matrix_rows),
+        "nonconformance_record_count": nonconformance_validation["record_count"],
         "requirement_ids": sorted(requirement_ids),
+    }
+
+
+def validate_nonconformance_log(repo_root: Path) -> dict[str, Any]:
+    errors: list[str] = []
+    path = nonconformance_log_path(repo_root)
+    record_format_columns: list[str] = []
+    open_log_columns: list[str] = []
+    records: list[dict[str, str]] = []
+
+    try:
+        markdown = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        errors.append(f"Missing nonconformance log artifact: {path}")
+        return {
+            "passed": False,
+            "errors": errors,
+            "checks": [
+                {
+                    "name": "qa::nonconformance_log_required_fields",
+                    "status": "fail",
+                    "message": "0 nonconformance record(s) inspected.",
+                }
+            ],
+            "columns": open_log_columns,
+            "record_format_columns": record_format_columns,
+            "record_count": 0,
+            "required_fields": list(REQUIRED_NONCONFORMANCE_FIELDS),
+        }
+
+    try:
+        record_format_rows, record_format_columns = _extract_markdown_table(markdown, "Record Format")
+    except QAArtifactError as exc:
+        errors.append(str(exc))
+    else:
+        missing_columns = [column for column in ("Field", "Required content") if column not in record_format_columns]
+        if missing_columns:
+            errors.append(
+                f"Nonconformance log record format table is missing required columns: {', '.join(missing_columns)}."
+            )
+        else:
+            declared_fields = [row.get("Field", "").strip() for row in record_format_rows]
+            missing_fields = [field for field in REQUIRED_NONCONFORMANCE_FIELDS if field not in declared_fields]
+            if missing_fields:
+                errors.append(
+                    "Nonconformance log record format is missing required field(s): "
+                    + ", ".join(missing_fields)
+                    + "."
+                )
+
+    try:
+        records, open_log_columns = _extract_markdown_table(markdown, "Open Log")
+    except QAArtifactError as exc:
+        errors.append(str(exc))
+    else:
+        missing_columns = [field for field in REQUIRED_NONCONFORMANCE_FIELDS if field not in open_log_columns]
+        if missing_columns:
+            errors.append(
+                f"Nonconformance open log table is missing required columns: {', '.join(missing_columns)}."
+            )
+        _validate_nonconformance_records(records, errors)
+
+    return {
+        "passed": not errors,
+        "errors": errors,
+        "checks": [
+            {
+                "name": "qa::nonconformance_log_required_fields",
+                "status": "pass" if not errors else "fail",
+                "message": f"{len(records)} nonconformance record(s) inspected.",
+            }
+        ],
+        "columns": open_log_columns,
+        "record_format_columns": record_format_columns,
+        "record_count": len(records),
+        "required_fields": list(REQUIRED_NONCONFORMANCE_FIELDS),
     }
 
 
@@ -217,6 +321,7 @@ def build_requirements_summary(repo_root: Path) -> dict[str, Any]:
         "artifacts": {
             "requirements": str(requirements_path(repo_root)),
             "traceability_matrix": str(traceability_matrix_path(repo_root)),
+            "nonconformance_log": str(nonconformance_log_path(repo_root)),
         },
         "requirements": {
             "total": len(records),
@@ -228,6 +333,10 @@ def build_requirements_summary(repo_root: Path) -> dict[str, Any]:
             "rows": len(matrix_rows),
             "columns": list(REQUIRED_MATRIX_COLUMNS),
             "requirement_ids": validation["requirement_ids"],
+        },
+        "nonconformance_log": {
+            "rows": validation["nonconformance_record_count"],
+            "columns": list(REQUIRED_NONCONFORMANCE_FIELDS),
         },
     }
 
@@ -284,6 +393,28 @@ def _validate_matrix_row_against_requirement(
     _require_declared_matrix_value(row_number, row, requirement, "verification_test", "verification_tests", errors)
     _require_declared_matrix_value(row_number, row, requirement, "validation_evidence", "validation_evidence", errors)
     _require_declared_matrix_value(row_number, row, requirement, "acceptance_criterion", "acceptance_criteria", errors)
+
+
+def _validate_nonconformance_records(records: list[dict[str, str]], errors: list[str]) -> None:
+    record_ids: set[str] = set()
+    duplicate_ids: set[str] = set()
+    for row_number, record in enumerate(records, start=1):
+        record_id = record.get("Nonconformance ID", "").strip()
+        display_id = record_id or f"row {row_number}"
+        missing_values = [field for field in REQUIRED_NONCONFORMANCE_FIELDS if not record.get(field, "").strip()]
+        if missing_values:
+            errors.append(
+                f"Nonconformance record {display_id} has empty required field(s): {', '.join(missing_values)}."
+            )
+        if record_id:
+            if not record_id.startswith(NONCONFORMANCE_ID_PREFIX):
+                errors.append(f"Nonconformance record {record_id} must start with {NONCONFORMANCE_ID_PREFIX}.")
+            if record_id in record_ids:
+                duplicate_ids.add(record_id)
+            record_ids.add(record_id)
+
+    if duplicate_ids:
+        errors.append("Duplicate nonconformance id(s): " + ", ".join(sorted(duplicate_ids)) + ".")
 
 
 def _require_declared_matrix_value(
@@ -345,6 +476,47 @@ def _count_by(records: list[dict[str, Any]], field_name: str) -> dict[str, int]:
 
 def _is_external_or_issue_reference(reference: str) -> bool:
     return "://" in reference or reference.startswith("#")
+
+
+def _extract_markdown_table(markdown: str, heading: str) -> tuple[list[dict[str, str]], list[str]]:
+    lines = markdown.splitlines()
+    heading_marker = f"## {heading}"
+    try:
+        heading_index = next(index for index, line in enumerate(lines) if line.strip() == heading_marker)
+    except StopIteration as exc:
+        raise QAArtifactError(f"Markdown artifact is missing {heading_marker} section.") from exc
+
+    table_lines: list[str] = []
+    for line in lines[heading_index + 1 :]:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            break
+        if stripped.startswith("|") and stripped.endswith("|"):
+            table_lines.append(stripped)
+        elif table_lines:
+            break
+
+    if len(table_lines) < 2:
+        raise QAArtifactError(f"Markdown section {heading_marker} must include a table.")
+
+    columns = _split_markdown_table_row(table_lines[0])
+    if not _is_markdown_separator_row(_split_markdown_table_row(table_lines[1])):
+        raise QAArtifactError(f"Markdown section {heading_marker} table must include a separator row.")
+
+    rows: list[dict[str, str]] = []
+    for table_line in table_lines[2:]:
+        cells = _split_markdown_table_row(table_line)
+        rows.append({column: cells[index] if index < len(cells) else "" for index, column in enumerate(columns)})
+
+    return rows, columns
+
+
+def _split_markdown_table_row(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _is_markdown_separator_row(cells: list[str]) -> bool:
+    return bool(cells) and all(cell.replace("-", "").replace(":", "").strip() == "" and "-" in cell for cell in cells)
 
 
 def _is_empty(value: Any) -> bool:
