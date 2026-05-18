@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import json
 from pathlib import Path
 
 import numpy as np
@@ -97,4 +98,14 @@ def test_transport_case_writes_native_artifacts(tmp_path) -> None:
     assert (bundle.root / "transport_mesh.json").exists()
     assert (bundle.root / "transport_summary.json").exists()
     assert (bundle.root / "transport_solution.npz").exists()
+    assert (bundle.root / "transport_solution.schema.json").exists()
+    assert (bundle.root / "transport_solution.summary.md").exists()
     assert summary["metrics"]["transport_rkdg_conservation_residual"] >= 0.0
+
+    schema = json.loads((bundle.root / "transport_solution.schema.json").read_text(encoding="utf-8"))
+    with np.load(bundle.root / "transport_solution.npz") as artifact:
+        assert set(artifact.files) == set(schema["arrays"])
+        assert schema["arrays"]["field_values"]["shape"] == list(artifact["field_values"].shape)
+    human = (bundle.root / "transport_solution.summary.md").read_text(encoding="utf-8")
+    assert "field_values[field, axial_cell, radial_cell]" in human
+    assert "Maximum conservation residual" in human

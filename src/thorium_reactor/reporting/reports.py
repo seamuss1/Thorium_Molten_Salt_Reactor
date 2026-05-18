@@ -21,8 +21,17 @@ def generate_report(
     provenance: dict[str, Any] | None = None,
 ) -> str:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    artifact_status_path = summary_path.parent / "artifact_status.json"
+    if "artifact_status" not in summary and artifact_status_path.exists():
+        try:
+            summary["artifact_status"] = json.loads(artifact_status_path.read_text(encoding="utf-8"))
+        except JSONDecodeError:
+            pass
     validation = {}
     benchmark = benchmark or {}
+    effective_provenance = provenance if provenance is not None else summary.get("input_provenance")
+    if not isinstance(effective_provenance, dict):
+        effective_provenance = None
     benchmark_traceability = summary.get("benchmark_traceability") or (assess_benchmark_traceability(config, benchmark) if benchmark else {})
     if validation_path and validation_path.exists():
         try:
@@ -53,10 +62,11 @@ def generate_report(
             geometry_assets=geometry_assets,
             benchmark=benchmark,
             plot_assets=plot_assets,
-            provenance=provenance,
+            provenance=effective_provenance,
             summary=summary,
         )
     )
+    lines.extend(_build_stage_manifest_lines(summary_path.parent / "stage_manifest.json"))
     lines.extend(["## Reactor Summary", ""])
     _append_value_line(lines, "Design thermal power", config["reactor"].get("design_power_mwth"), "MWth")
     _append_value_line(lines, "Benchmark source", config["reactor"].get("benchmark"))
@@ -104,9 +114,14 @@ def generate_report(
             ]
         )
 
-    if provenance:
-        case_provenance = provenance.get("case", {})
-        benchmark_provenance = provenance.get("benchmark", {})
+    if effective_provenance:
+        case_provenance = effective_provenance.get("case", {})
+        benchmark_provenance = effective_provenance.get("benchmark", {})
+        if not isinstance(case_provenance, dict):
+            case_provenance = {}
+        if not isinstance(benchmark_provenance, dict):
+            benchmark_provenance = {}
+        git = effective_provenance.get("git", {})
         lines.extend(
             [
                 "## Input Provenance",
@@ -115,9 +130,22 @@ def generate_report(
                 f"- Case origin path: `{case_provenance.get('origin_path', 'n/a')}`",
                 f"- Benchmark metadata: `{benchmark_provenance.get('source', 'unknown')}`",
                 f"- Benchmark origin path: `{benchmark_provenance.get('origin_path', 'n/a')}`",
-                "",
             ]
         )
+        if isinstance(git, dict) and git.get("dirty") is True:
+            dirty_count = len(git.get("modified", []) or []) + len(git.get("untracked", []) or [])
+            lines.append(
+                f"- Reproducibility warning: git worktree was dirty when this bundle was created "
+                f"(`{dirty_count}` changed/untracked path(s), diff hash `{git.get('diff_hash', 'n/a')}`)."
+            )
+        if effective_provenance.get("dependency_hash"):
+            lines.append(f"- Runtime/dependency hash: `{effective_provenance.get('dependency_hash')}`")
+        if effective_provenance.get("generator"):
+            lines.append(
+                f"- Provenance generator: `{effective_provenance.get('generator')} "
+                f"v{effective_provenance.get('generator_version', 'n/a')}`"
+            )
+        lines.append("")
 
     runtime_context = summary.get("runtime_context", {})
     if runtime_context:
@@ -927,6 +955,32 @@ def _build_artifact_index_lines(
     return lines
 
 
+def _build_stage_manifest_lines(manifest_path: Path) -> list[str]:
+    if not manifest_path.exists():
+        return []
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except JSONDecodeError:
+        return []
+    stages = manifest.get("stages", [])
+    if not isinstance(stages, list) or not stages:
+        return []
+    lines = ["## Stage Manifest", ""]
+    lines.append("- Bundle provenance: ordered suite-level stage manifest; artifacts may come from multiple commands.")
+    for stage in stages:
+        if not isinstance(stage, dict):
+            continue
+        command = " ".join([*(stage.get("command") or []), *(stage.get("args") or [])]).strip()
+        output_count = len(stage.get("output_artifacts", []) or [])
+        lines.append(
+            f"- Stage `{stage.get('sequence', '?')}` `{stage.get('stage', 'stage')}`: "
+            f"status=`{stage.get('status', 'unknown')}`, method=`{stage.get('method_tier', 'unspecified')}`, "
+            f"artifacts=`{output_count}`, command=`{command}`"
+        )
+    lines.append("")
+    return lines
+
+
 def _build_evidence_status_lines(
     config: dict[str, Any],
     summary: dict[str, Any],
@@ -951,6 +1005,17 @@ def _build_evidence_status_lines(
             f"- Neutronics evidence: `{neutronics_status}` dry-run/proxy; "
             "not a solver-backed OpenMC physics result."
         )
+    artifact_status = summary.get("artifact_status", {})
+    artifact_blocker_count = 0
+    if isinstance(artifact_status, dict):
+        groups = artifact_status.get("groups", {})
+        openmc_status = groups.get("openmc", {}) if isinstance(groups, dict) else {}
+        if isinstance(openmc_status, dict):
+            for blocker in openmc_status.get("blockers", [])[:3]:
+                lines.append(f"- OpenMC artifact blocker: {blocker}")
+                artifact_blocker_count += 1
+    if not solver_backed and artifact_blocker_count == 0:
+        lines.append("- OpenMC artifact blocker: no solver-backed OpenMC statepoint artifact is recorded.")
     if proxy_modes:
         lines.append(f"- Proxy model modes: `{', '.join(proxy_modes)}`")
     if isinstance(benchmark_residuals, dict) and benchmark_residuals:

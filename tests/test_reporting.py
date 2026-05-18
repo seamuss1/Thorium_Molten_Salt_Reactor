@@ -288,6 +288,47 @@ def test_report_adds_front_artifact_index_for_result_bundles() -> None:
         )
         validation_path = scratch_root / "validation.json"
         validation_path.write_text(json.dumps({"checks": [], "passed": True}), encoding="utf-8")
+        (scratch_root / "stage_manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "stages": [
+                        {
+                            "sequence": 1,
+                            "stage": "run",
+                            "command": ["run"],
+                            "args": ["tmsr_lf1_core", "--no-solver"],
+                            "status": "completed",
+                            "method_tier": "dry_run_proxy",
+                            "output_artifacts": ["summary.json", "validation.json"],
+                        },
+                        {
+                            "sequence": 2,
+                            "stage": "transport",
+                            "command": ["transport"],
+                            "args": ["tmsr_lf1_core"],
+                            "status": "completed",
+                            "method_tier": "native_rz_rkdg_scalar_transport_v1",
+                            "output_artifacts": ["transport_solution.npz"],
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (scratch_root / "artifact_status.json").write_text(
+            json.dumps(
+                {
+                    "groups": {
+                        "openmc": {
+                            "state": "dry_run",
+                            "blockers": ["No solver-backed OpenMC statepoint artifact is present for this bundle."],
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
 
         report = generate_report(
             "tmsr_lf1_core",
@@ -312,6 +353,15 @@ def test_report_adds_front_artifact_index_for_result_bundles() -> None:
             {
                 "case": {"source": "repo", "origin_path": "configs/cases/tmsr_lf1_core/case.yaml"},
                 "benchmark": {"source": "repo", "origin_path": "benchmarks/tmsr_lf1/benchmark.yaml"},
+                "git": {
+                    "dirty": True,
+                    "modified": ["src/thorium_reactor/cli.py"],
+                    "untracked": ["notes.txt"],
+                    "diff_hash": "abc123",
+                },
+                "dependency_hash": "dep123",
+                "generator": "test.generator",
+                "generator_version": 2,
             },
         )
 
@@ -327,6 +377,48 @@ def test_report_adds_front_artifact_index_for_result_bundles() -> None:
         assert "Case input provenance" in report
         assert "Benchmark metadata" in report
         assert "transient_history.json" in report
+        assert "## Stage Manifest" in report
+        assert "ordered suite-level stage manifest" in report
+        assert "native_rz_rkdg_scalar_transport_v1" in report
+        assert "Reproducibility warning: git worktree was dirty" in report
+        assert "Runtime/dependency hash" in report
+        assert "OpenMC artifact blocker" in report
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_report_surfaces_openmc_blocker_without_artifact_status_file() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-openmc-blocker" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "dry-run"},
+                    "metrics": {"expected_cells": 4},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "example_pin",
+            {
+                "reactor": {
+                    "name": "Example Pin Smoke Test",
+                    "family": "pin-cell",
+                    "stage": "smoke",
+                }
+            },
+            summary_path,
+            None,
+            None,
+        )
+
+        assert not (scratch_root / "artifact_status.json").exists()
+        assert "OpenMC artifact blocker: no solver-backed OpenMC statepoint artifact is recorded." in report
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 

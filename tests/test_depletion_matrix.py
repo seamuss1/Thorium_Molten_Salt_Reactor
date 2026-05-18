@@ -174,7 +174,17 @@ def test_depletion_case_writes_native_artifacts(tmp_path) -> None:
     assert (bundle.root / "depletion_summary.json").exists()
     assert (bundle.root / "depletion_history.json").exists()
     assert (bundle.root / "depletion_matrix.npz").exists()
+    assert (bundle.root / "depletion_matrix.schema.json").exists()
+    assert (bundle.root / "depletion_matrix.summary.md").exists()
     assert depletion["atom_balance_basis"] in {"closed_chain_total_atoms_conserved", "not_applicable_open_system"}
+
+    schema = json.loads((bundle.root / "depletion_matrix.schema.json").read_text(encoding="utf-8"))
+    with np.load(bundle.root / "depletion_matrix.npz") as artifact:
+        assert set(artifact.files) == set(schema["arrays"])
+        assert schema["arrays"]["shape"]["shape"] == list(artifact["shape"].shape)
+    human = (bundle.root / "depletion_matrix.summary.md").read_text(encoding="utf-8")
+    assert "Flat inventory order is zone-major" in human
+    assert "Closed-chain conservation" in human
 
 
 def test_depletion_case_uses_chain_initial_atoms_when_material_is_absent(tmp_path) -> None:

@@ -46,6 +46,7 @@ from thorium_reactor.literature_models import (
     build_tritium_transport_summary,
 )
 from thorium_reactor.neutronics.openmc_compat import missing_openmc_runtime_message, openmc
+from thorium_reactor.paths import refresh_bundle_artifact_statuses
 from thorium_reactor.physics_core import build_physics_core_summary
 from thorium_reactor.property_audit import build_property_audit
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot
@@ -301,9 +302,10 @@ def run_case(
     benchmark: dict[str, Any] | None = None,
     solver_enabled: bool = True,
     provenance: dict[str, Any] | None = None,
+    repo_root: Path | str | None = None,
 ) -> dict[str, Any]:
     built = build_case(config, bundle.openmc_dir, benchmark=benchmark)
-    runtime_context = build_runtime_context(command=["run", config.name])
+    runtime_context = build_runtime_context(command=["run", config.name], cwd=repo_root)
     property_audit = build_property_audit(config)
     capabilities = get_case_capabilities(config)
     bundle.write_json("geometry_description.json", built.geometry_description)
@@ -548,7 +550,9 @@ def run_case(
     bundle.write_json("state_store.json", state_store)
     bundle.write_json("summary.json", summary)
     summary["visualization_state"] = _build_visualization_state(bundle)
+    summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
     build_manifest["visualization_state"] = _build_visualization_state(bundle)
+    build_manifest["artifact_status"] = _json_copy(summary["artifact_status"])
     bundle.write_json("summary.json", summary)
     bundle.write_json("build_manifest.json", build_manifest)
     if "flow" in summary:

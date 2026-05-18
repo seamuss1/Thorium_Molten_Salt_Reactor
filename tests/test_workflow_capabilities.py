@@ -3,6 +3,7 @@ import shutil
 import uuid
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -19,6 +20,7 @@ from thorium_reactor.capabilities import (
 from thorium_reactor.cli import main
 from thorium_reactor.config import load_case_config
 from thorium_reactor.neutronics.workflows import run_case
+from thorium_reactor.neutronics import workflows
 from thorium_reactor.paths import create_result_bundle
 
 
@@ -83,6 +85,39 @@ def test_solver_enabled_without_openmc_reports_missing_solver_status() -> None:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
 
+def test_run_case_routes_explicit_repo_root_to_runtime_context(tmp_path: Path, monkeypatch) -> None:
+    config = _load_case("example_pin")
+    bundle = create_result_bundle(tmp_path, config.name, "repo-root-context")
+    explicit_repo_root = tmp_path / "source-root"
+    explicit_repo_root.mkdir()
+    seen: dict[str, Any] = {}
+
+    def fake_runtime_context(*, command: list[str] | None = None, cwd: Path | str | None = None) -> dict[str, Any]:
+        seen["command"] = list(command or [])
+        seen["cwd"] = Path(cwd) if cwd is not None else None
+        return {
+            "service": "host",
+            "containerized": False,
+            "command": list(command or []),
+            "container_command": list(command or []),
+            "backend": {"service": "host", "device": "host-cpu"},
+            "git_branch": "test-branch",
+            "git_commit": "abc123",
+            "git": {"available": True, "dirty": False, "modified": [], "untracked": [], "diff_hash": None},
+        }
+
+    monkeypatch.setattr(workflows, "build_runtime_context", fake_runtime_context)
+
+    summary = run_case(config, bundle, solver_enabled=False, repo_root=explicit_repo_root)
+    runtime_context = json.loads((bundle.root / "runtime_context.json").read_text(encoding="utf-8"))
+    build_manifest = json.loads((bundle.root / "build_manifest.json").read_text(encoding="utf-8"))
+
+    assert seen == {"command": ["run", "example_pin"], "cwd": explicit_repo_root}
+    assert summary["runtime_context"]["git_branch"] == "test-branch"
+    assert runtime_context["git_branch"] == "test-branch"
+    assert build_manifest["runtime_context"]["git_branch"] == "test-branch"
+
+
 def test_msr_run_still_produces_primary_system_summary() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-msr-run" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
@@ -102,7 +137,9 @@ def test_msr_run_still_produces_primary_system_summary() -> None:
         assert summary["primary_system"]["model"] == "reduced_order_primary_system"
         assert (bundle.root / "validation.json").exists()
         assert not (bundle.root / "render_assets.json").exists()
-        assert not any(bundle.geometry_exports_dir.iterdir())
+        assert [path.name for path in bundle.geometry_exports_dir.iterdir()] == ["status.json"]
+        export_status = json.loads((bundle.geometry_exports_dir / "status.json").read_text(encoding="utf-8"))
+        assert export_status["state"] == "not_generated"
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
