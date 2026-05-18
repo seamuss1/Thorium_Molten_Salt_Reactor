@@ -223,6 +223,7 @@ def generate_report(
                 )
 
     lines.extend(_build_key_metrics_lines(config, summary, benchmark_traceability, validation_maturity))
+    lines.extend(_build_additional_metrics_lines(summary))
 
     neutronics = summary.get("neutronics", {})
     simulation = neutronics.get("simulation", {})
@@ -731,8 +732,27 @@ def generate_report(
     return _render_report_lines(lines)
 
 
-_NUMERIC_CODE_RE = re.compile(r"`([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)`")
+_NUMERIC_LITERAL_PATTERN = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+_CODE_LITERAL_RE = re.compile(r"`([^`]*)`")
+_NUMERIC_CODE_RE = re.compile(rf"`({_NUMERIC_LITERAL_PATTERN})`")
+_NUMERIC_TOKEN_RE = re.compile(_NUMERIC_LITERAL_PATTERN)
+_NUMERIC_COMPOSITE_RE = re.compile(
+    rf"^\s*{_NUMERIC_LITERAL_PATTERN}"
+    rf"(?:(?:\s+to\s+|\s+through\s+|\s+-\s+|\s+/\s+|\s+x\s+){_NUMERIC_LITERAL_PATTERN})+"
+    rf"(?:\s+[A-Za-z][A-Za-z0-9/%.\-]*)?\s*$",
+    re.IGNORECASE,
+)
+_MISSING_CODE_LITERAL_RE = re.compile(r"`\s*(?:none|n/a|na|null|unknown)?\s*`", re.IGNORECASE)
 _MISSING_CODE_VALUES = {"", "none", "n/a", "na", "null", "unknown"}
+_CURATED_SUMMARY_METRIC_KEYS = {
+    "keff",
+    "benchmark_traceability_score",
+    "validation_maturity_score",
+    "channel_count",
+    "active_flow_channel_count",
+    "transient_sweep_peak_power_fraction_p95",
+    "finance_lcoe_usd_per_mwh",
+}
 _LABEL_ACRONYMS = {
     "bop": "BOP",
     "csv": "CSV",
@@ -752,6 +772,34 @@ _LABEL_ACRONYMS = {
     "usd": "USD",
     "wacc": "WACC",
 }
+_METRIC_UNIT_SUFFIXES = (
+    ("_usd_per_mwh", "USD/MWh"),
+    ("_cents_per_kwh", "cents/kWh"),
+    ("_mw_per_t_hm", "MW/tHM"),
+    ("_usd_per_year", "USD/yr"),
+    ("_n_cm2_s", "n/cm2-s"),
+    ("_w_m2k", "W/m2-K"),
+    ("_kg_s", "kg/s"),
+    ("_m_s", "m/s"),
+    ("_atoms_s", "atoms/s"),
+    ("_pa_s", "Pa-s"),
+    ("_mwth", "MWth"),
+    ("_mwe", "MWe"),
+    ("_mwh", "MWh"),
+    ("_kpa", "kPa"),
+    ("_pcm", "pcm"),
+    ("_cm2", "cm2"),
+    ("_m2", "m2"),
+    ("_m3", "m3"),
+    ("_ev", "eV"),
+    ("_kw", "kW"),
+    ("_mw", "MW"),
+    ("_kg", "kg"),
+    ("_days", "days"),
+    ("_years", "years"),
+    ("_s", "s"),
+    ("_c", "C"),
+)
 
 
 def _build_artifact_index_lines(
@@ -997,6 +1045,46 @@ def _build_key_metrics_lines(
     return lines
 
 
+def _build_additional_metrics_lines(summary: dict[str, Any]) -> list[str]:
+    metrics = summary.get("metrics", {})
+    if not isinstance(metrics, dict):
+        return []
+
+    metric_lines: list[str] = []
+    for key in sorted(metrics):
+        if key in _CURATED_SUMMARY_METRIC_KEYS:
+            continue
+        value = metrics[key]
+        if not _has_reader_value(value):
+            continue
+        label, unit = _metric_label_and_unit(key)
+        formatted = _format_metric_value(value, unit)
+        if formatted:
+            metric_lines.append(f"- {label}: `{formatted}`")
+
+    if not metric_lines:
+        return []
+    return ["## Additional Metrics", "", *metric_lines, ""]
+
+
+def _metric_label_and_unit(key: str) -> tuple[str, str | None]:
+    label_key = key
+    unit = None
+    for suffix, candidate_unit in _METRIC_UNIT_SUFFIXES:
+        if key.endswith(suffix):
+            label_key = key.removesuffix(suffix)
+            unit = candidate_unit
+            break
+    return _humanize_label(label_key), unit
+
+
+def _format_metric_value(value: Any, unit: str | None) -> str:
+    if isinstance(value, (list, tuple)) and len(value) == 2 and all(_has_reader_value(item) for item in value):
+        formatted = f"{_format_report_value(value[0])} to {_format_report_value(value[1])}"
+        return f"{formatted} {unit}" if unit else formatted
+    return _format_report_value(value, unit)
+
+
 def _append_artifact(lines: list[str], label: str, path: Any, description: str) -> None:
     if _has_reader_value(path):
         lines.append(f"- {label}: `{path}` - {description}")
@@ -1023,6 +1111,12 @@ def _format_report_value(value: Any, unit: str | None = None, *, sig_digits: int
         formatted = _format_float(value, sig_digits=sig_digits)
     elif isinstance(value, (list, tuple)):
         formatted = ", ".join(_format_report_value(item, sig_digits=sig_digits) for item in value if _has_reader_value(item))
+    elif isinstance(value, dict):
+        formatted = ", ".join(
+            f"{_humanize_label(str(key))}={_format_report_value(item, sig_digits=sig_digits)}"
+            for key, item in value.items()
+            if _has_reader_value(item)
+        )
     else:
         formatted = str(value)
     return f"{formatted} {unit}" if unit else formatted
@@ -1046,6 +1140,10 @@ def _has_reader_value(value: Any) -> bool:
         return False
     if isinstance(value, str):
         return value.strip().lower() not in _MISSING_CODE_VALUES
+    if isinstance(value, (list, tuple, set)):
+        return any(_has_reader_value(item) for item in value)
+    if isinstance(value, dict):
+        return any(_has_reader_value(item) for item in value.values())
     return True
 
 
@@ -1084,9 +1182,12 @@ def _render_report_lines(lines: list[str]) -> str:
     rendered: list[str] = []
     previous_blank = False
     for line in lines:
-        if _should_omit_missing_line(line):
+        cleaned = _clean_missing_line(line)
+        if cleaned is None:
             continue
-        formatted = _format_numeric_code_literals(line)
+        if _should_omit_missing_line(cleaned):
+            continue
+        formatted = _format_numeric_code_literals(cleaned)
         is_blank = formatted == ""
         if is_blank and previous_blank:
             continue
@@ -1098,8 +1199,73 @@ def _render_report_lines(lines: list[str]) -> str:
 def _should_omit_missing_line(line: str) -> bool:
     if not line.lstrip().startswith("- "):
         return False
-    lowered = line.lower()
-    return any(f"`{token}`" in lowered for token in _MISSING_CODE_VALUES)
+    code_literals = _CODE_LITERAL_RE.findall(line)
+    return bool(code_literals) and all(_is_missing_code_value(token) for token in code_literals)
+
+
+def _clean_missing_line(line: str) -> str | None:
+    if not line.lstrip().startswith("- ") or not _MISSING_CODE_LITERAL_RE.search(line):
+        return line
+
+    cleaned = _remove_missing_assignments(line)
+    cleaned = _remove_missing_code_context(cleaned)
+    cleaned = _tidy_missing_cleanup(cleaned)
+    if (
+        not cleaned
+        or _should_omit_missing_line(cleaned)
+        or _MISSING_CODE_LITERAL_RE.search(cleaned)
+        or _is_label_only_bullet(cleaned)
+    ):
+        return None
+    return cleaned
+
+
+def _is_missing_code_value(value: str) -> bool:
+    return value.strip().lower() in _MISSING_CODE_VALUES
+
+
+def _remove_missing_assignments(line: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        prefix = match.group("prefix")
+        return "" if "," in prefix else prefix
+
+    return re.sub(
+        rf"(?P<prefix>,\s*|\s+)[A-Za-z][A-Za-z0-9_\- /]*=\s*{_MISSING_CODE_LITERAL_RE.pattern}",
+        replace,
+        line,
+        flags=re.IGNORECASE,
+    )
+
+
+def _remove_missing_code_context(line: str) -> str:
+    missing = _MISSING_CODE_LITERAL_RE.pattern
+    cleaned = re.sub(rf"\s+from\s+{missing}", "", line, flags=re.IGNORECASE)
+    cleaned = re.sub(rf"\s*/\s*{missing}(?:\s+[A-Za-z][A-Za-z0-9/%.\-]*)?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(rf"{missing}(?:\s+[A-Za-z][A-Za-z0-9/%.\-]*)?\s*/\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(rf"\s*\(\s*{missing}(?:\s+[A-Za-z][A-Za-z0-9/%.\-]*)?\s*\)", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(rf"{missing}(?:\s+[A-Za-z][A-Za-z0-9/%.\-]*)?", "", cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
+def _tidy_missing_cleanup(line: str) -> str:
+    cleaned = re.sub(r"\(\s*\)", "", line)
+    cleaned = re.sub(r"\s+,", ",", cleaned)
+    cleaned = re.sub(r",\s*,+", ",", cleaned)
+    cleaned = re.sub(r":\s*,\s*", ": ", cleaned)
+    cleaned = re.sub(r",\s*\)", ")", cleaned)
+    cleaned = re.sub(r"\(\s*,\s*", "(", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    cleaned = cleaned.rstrip(" ,:/")
+    return cleaned.strip()
+
+
+def _is_label_only_bullet(line: str) -> bool:
+    if not line.lstrip().startswith("- "):
+        return False
+    body = line.lstrip()[2:].strip()
+    if ":" in body:
+        return not body.split(":", 1)[1].strip()
+    return "`" not in body and not re.search(r"[\d([]", body)
 
 
 def _format_numeric_code_literals(line: str) -> str:
@@ -1112,7 +1278,15 @@ def _format_numeric_code_literals(line: str) -> str:
             return f"`{int(token)}`"
         return f"`{_format_float(float(token), sig_digits=sig_digits)}`"
 
-    return _NUMERIC_CODE_RE.sub(replace, line)
+    formatted = _NUMERIC_CODE_RE.sub(replace, line)
+
+    def replace_composite(match: re.Match[str]) -> str:
+        token = match.group(1)
+        if not _NUMERIC_COMPOSITE_RE.fullmatch(token):
+            return match.group(0)
+        return "`" + _NUMERIC_TOKEN_RE.sub(lambda item: _format_float(float(item.group(0)), sig_digits=sig_digits), token) + "`"
+
+    return _CODE_LITERAL_RE.sub(replace_composite, formatted)
 
 
 def _classify_reactor_case(case_name: str, config: dict[str, Any]) -> dict[str, str]:

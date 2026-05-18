@@ -463,26 +463,26 @@ def load_figure_catalog(path: Path) -> dict[str, dict[str, Any]]:
     if not payload:
         return {}
 
+    catalog: dict[str, dict[str, Any]] = {}
     figures = payload.get("figures")
     if isinstance(figures, dict):
-        return {
-            str(plot_id): _normalize_figure_entry(str(plot_id), entry)
-            for plot_id, entry in figures.items()
-            if isinstance(entry, dict) and entry.get("path")
-        }
-    if isinstance(figures, list):
-        catalog: dict[str, dict[str, Any]] = {}
+        catalog.update(
+            {
+                str(plot_id): _normalize_figure_entry(str(plot_id), entry)
+                for plot_id, entry in figures.items()
+                if isinstance(entry, dict) and entry.get("path")
+            }
+        )
+    elif isinstance(figures, list):
         for entry in figures:
             if not isinstance(entry, dict) or not entry.get("path"):
                 continue
             plot_id = str(entry.get("plot_id") or Path(str(entry["path"])).stem)
             catalog[plot_id] = _normalize_figure_entry(plot_id, entry)
-        return catalog
 
-    return {
-        plot_id: _build_figure_entry(plot_id, asset_path)
-        for plot_id, asset_path in _legacy_plot_paths(payload).items()
-    }
+    for plot_id, asset_path in _legacy_plot_paths(payload).items():
+        catalog.setdefault(plot_id, _build_figure_entry(plot_id, asset_path))
+    return catalog
 
 
 def _update_plot_manifest(path: Path, assets: dict[str, str]) -> dict[str, str]:

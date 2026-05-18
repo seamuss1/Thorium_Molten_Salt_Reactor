@@ -338,6 +338,9 @@ def test_key_metrics_are_curated_readable_and_reader_formatted() -> None:
                 "keff": 1.000123456789,
                 "active_flow_channel_count": 37,
                 "finance_lcoe_usd_per_mwh": 190.123456,
+                "reactivity_margin_pcm": 125.4321,
+                "xenon_generation_rate_atoms_s": 6.99e14,
+                "startup_temperature_range_c": [565.123456, 590.987654],
                 "raw_missing_metric": None,
             },
             "runtime_context": {
@@ -380,11 +383,16 @@ def test_key_metrics_are_curated_readable_and_reader_formatted() -> None:
         )
 
         key_metrics = _section(report, "## Key Metrics")
+        additional_metrics = _section(report, "## Additional Metrics")
         assert "- Effective multiplication factor: `1.00012`" in key_metrics
         assert "- Active flow channels: `37`" in key_metrics
         assert "- Representative salt velocity: `355.4 m/s`" in key_metrics
         assert "- LCOE: `190.12 USD/MWh`" in key_metrics
+        assert "- Reactivity margin: `125.43 pcm`" in additional_metrics
+        assert "- Startup temperature range: `565.12 to 590.99 C`" in additional_metrics
+        assert "- Xenon generation rate: `699e+12 atoms/s`" in additional_metrics
         assert "active_flow_channel_count" not in key_metrics
+        assert "reactivity_margin_pcm" not in additional_metrics
         assert "raw_missing_metric" not in report
         assert "`None`" not in report
         assert "`n/a`" not in report
@@ -392,6 +400,100 @@ def test_key_metrics_are_curated_readable_and_reader_formatted() -> None:
         assert "1.000123456789" not in report
         assert "699e+12" in report
         assert json.loads(summary_path.read_text(encoding="utf-8"))["metrics"]["keff"] == 1.000123456789
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_report_missing_cleanup_preserves_valid_compound_fields() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-missing-cleanup" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "dry-run"},
+                    "transport_solver": {
+                        "model": "native_rkdg",
+                        "mesh": {"radial_cells": 12, "axial_cells": 24},
+                        "polynomial_order": 3,
+                        "time_step_s": 0.0025,
+                        "cfl": None,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "tmsr_lf1_core",
+            {
+                "reactor": {
+                    "name": "TMSR-LF1-Inspired Core",
+                    "family": "TMSR-LF1-inspired MSR",
+                    "stage": "full-core",
+                    "design_power_mwth": 250.0,
+                    "benchmark": "n/a",
+                }
+            },
+            summary_path,
+            None,
+            None,
+        )
+
+        transport = _section(report, "## Native RKDG Transport")
+        assert "- Mesh/order: (12 x 24), p=`3`" in transport
+        assert "- Time step/CFL: `0.0025` s" in transport
+        assert "`None`" not in transport
+        assert "`n/a`" not in transport
+        assert "`unknown`" not in transport
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_report_formats_numeric_ranges_inside_code_literals() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-range-format" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "dry-run"},
+                    "msre_pump_transient_benchmark": {
+                        "model": "msre_pump_transient_benchmark_screen",
+                        "screening_status": "watch",
+                        "benchmark_mean_error_startup_pcm": {"min": 11.000000, "max": 21.000000},
+                        "benchmark_mean_error_coastdown_pcm": {"min": 5.123456, "max": 13.987654},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "tmsr_lf1_core",
+            {
+                "reactor": {
+                    "name": "TMSR-LF1-Inspired Core",
+                    "family": "TMSR-LF1-inspired MSR",
+                    "stage": "full-core",
+                    "design_power_mwth": 250.0,
+                    "benchmark": "n/a",
+                }
+            },
+            summary_path,
+            None,
+            None,
+        )
+
+        transient = _section(report, "## MSRE Pump Transient Validation")
+        assert "- Benchmark startup mean error range (pcm): `11 to 21`" in transient
+        assert "- Benchmark coastdown mean error range (pcm): `5.1235 to 13.988`" in transient
+        assert "11.000000" not in transient
+        assert "13.987654" not in transient
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
@@ -542,7 +644,7 @@ def test_report_includes_reduced_order_flow_section() -> None:
         assert "355.4" in report
         assert "0.005402" in report
         assert "## MSRE Pump Transient Validation" in report
-        assert "11.0 to 21.0" in report
+        assert "11 to 21" in report
         assert "0.12" in report
         assert "## Physics Core Transport" in report
         assert "finite_volume_decay_heat_precursor_transport" in report

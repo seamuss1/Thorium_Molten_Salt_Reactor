@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,17 @@ TRACEABILITY_MATRIX_FILE = "requirements_traceability_matrix.csv"
 NONCONFORMANCE_LOG_FILE = "nonconformance-corrective-action-log.md"
 REQUIREMENT_ID_PREFIX = "REQ-"
 NONCONFORMANCE_ID_PREFIX = "NCA-"
+NONCONFORMANCE_ID_PATTERN = re.compile(rf"^{NONCONFORMANCE_ID_PREFIX}\d{{4}}-\d{{3}}$")
 SUPPORTED_REQUIREMENT_STATUSES = {"implemented", "active", "blocked", "planned"}
+SUPPORTED_NONCONFORMANCE_SEVERITIES = ("critical", "major", "minor", "observation")
+SUPPORTED_NONCONFORMANCE_DISPOSITIONS = (
+    "block_release",
+    "block_promotion",
+    "correct_before_use",
+    "accepted_limitation",
+    "monitor",
+)
+SUPPORTED_NONCONFORMANCE_STATUSES = ("open", "in_progress", "review", "closed", "deferred")
 
 REQUIRED_REQUIREMENT_FIELDS = (
     "id",
@@ -407,14 +418,54 @@ def _validate_nonconformance_records(records: list[dict[str, str]], errors: list
                 f"Nonconformance record {display_id} has empty required field(s): {', '.join(missing_values)}."
             )
         if record_id:
-            if not record_id.startswith(NONCONFORMANCE_ID_PREFIX):
-                errors.append(f"Nonconformance record {record_id} must start with {NONCONFORMANCE_ID_PREFIX}.")
+            if not NONCONFORMANCE_ID_PATTERN.fullmatch(record_id):
+                errors.append(
+                    f"Nonconformance record {record_id} must use documented NCA-YYYY-NNN format."
+                )
             if record_id in record_ids:
                 duplicate_ids.add(record_id)
             record_ids.add(record_id)
+        _validate_nonconformance_enum(
+            display_id,
+            "Severity",
+            record.get("Severity", ""),
+            SUPPORTED_NONCONFORMANCE_SEVERITIES,
+            errors,
+        )
+        _validate_nonconformance_enum(
+            display_id,
+            "Disposition",
+            record.get("Disposition", ""),
+            SUPPORTED_NONCONFORMANCE_DISPOSITIONS,
+            errors,
+        )
+        _validate_nonconformance_enum(
+            display_id,
+            "Status",
+            record.get("Status", ""),
+            SUPPORTED_NONCONFORMANCE_STATUSES,
+            errors,
+        )
 
     if duplicate_ids:
         errors.append("Duplicate nonconformance id(s): " + ", ".join(sorted(duplicate_ids)) + ".")
+
+
+def _validate_nonconformance_enum(
+    display_id: str,
+    field_name: str,
+    value: str,
+    supported_values: tuple[str, ...],
+    errors: list[str],
+) -> None:
+    stripped_value = value.strip()
+    if not stripped_value:
+        return
+    if stripped_value not in supported_values:
+        errors.append(
+            f"Nonconformance record {display_id} {field_name} '{stripped_value}' is unsupported. "
+            f"Supported values: {', '.join(supported_values)}."
+        )
 
 
 def _require_declared_matrix_value(
@@ -486,33 +537,87 @@ def _extract_markdown_table(markdown: str, heading: str) -> tuple[list[dict[str,
     except StopIteration as exc:
         raise QAArtifactError(f"Markdown artifact is missing {heading_marker} section.") from exc
 
-    table_lines: list[str] = []
-    for line in lines[heading_index + 1 :]:
+    table_lines: list[tuple[int, str]] = []
+    for line_number, line in enumerate(lines[heading_index + 1 :], start=heading_index + 2):
         stripped = line.strip()
         if stripped.startswith("## "):
             break
         if stripped.startswith("|") and stripped.endswith("|"):
-            table_lines.append(stripped)
+            table_lines.append((line_number, stripped))
         elif table_lines:
             break
 
     if len(table_lines) < 2:
         raise QAArtifactError(f"Markdown section {heading_marker} must include a table.")
 
-    columns = _split_markdown_table_row(table_lines[0])
-    if not _is_markdown_separator_row(_split_markdown_table_row(table_lines[1])):
+    header_line_number, header_line = table_lines[0]
+    separator_line_number, separator_line = table_lines[1]
+    columns = _split_markdown_table_row(header_line)
+    if not columns:
+        raise QAArtifactError(f"Markdown section {heading_marker} table header row {header_line_number} is empty.")
+
+    separator_cells = _split_markdown_table_row(separator_line)
+    _validate_markdown_table_cell_count(
+        heading_marker,
+        separator_line_number,
+        len(separator_cells),
+        len(columns),
+    )
+    if not _is_markdown_separator_row(separator_cells):
         raise QAArtifactError(f"Markdown section {heading_marker} table must include a separator row.")
 
     rows: list[dict[str, str]] = []
-    for table_line in table_lines[2:]:
+    for line_number, table_line in table_lines[2:]:
         cells = _split_markdown_table_row(table_line)
+        _validate_markdown_table_cell_count(heading_marker, line_number, len(cells), len(columns))
         rows.append({column: cells[index] if index < len(cells) else "" for index, column in enumerate(columns)})
 
     return rows, columns
 
 
+def _validate_markdown_table_cell_count(
+    heading_marker: str,
+    line_number: int,
+    actual_count: int,
+    expected_count: int,
+) -> None:
+    if actual_count != expected_count:
+        raise QAArtifactError(
+            f"Markdown section {heading_marker} table row {line_number} has {actual_count} cell(s), "
+            f"expected {expected_count}. Escape literal pipe characters as \\|."
+        )
+
+
 def _split_markdown_table_row(line: str) -> list[str]:
-    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+    row = line.strip()
+    if row.startswith("|"):
+        row = row[1:]
+    if row.endswith("|"):
+        row = row[:-1]
+
+    cells: list[str] = []
+    current_cell: list[str] = []
+    escaped = False
+    for character in row:
+        if escaped:
+            if character == "|":
+                current_cell.append("|")
+            else:
+                current_cell.extend(("\\", character))
+            escaped = False
+            continue
+        if character == "\\":
+            escaped = True
+            continue
+        if character == "|":
+            cells.append("".join(current_cell).strip())
+            current_cell = []
+        else:
+            current_cell.append(character)
+    if escaped:
+        current_cell.append("\\")
+    cells.append("".join(current_cell).strip())
+    return cells
 
 
 def _is_markdown_separator_row(cells: list[str]) -> bool:

@@ -171,6 +171,48 @@ def test_load_plot_manifest_reads_legacy_flat_manifest(tmp_path: Path) -> None:
     assert catalog["legacy_plot"]["caption"]
 
 
+def test_mixed_v2_manifest_preserves_legacy_top_level_entries(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
+    manifest_path = bundle.root / "plots_manifest.json"
+    v2_path = bundle.plots_dir / "metrics_overview.svg"
+    legacy_path = bundle.plots_dir / "uncertainty_tornado.svg"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "figures": {
+                    "metrics_overview": {
+                        "plot_id": "metrics_overview",
+                        "path": str(v2_path),
+                        "title": "Custom metrics title",
+                    }
+                },
+                "uncertainty_tornado": str(legacy_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = load_plot_manifest(manifest_path)
+    catalog = load_figure_catalog(manifest_path)
+
+    assert manifest == {
+        "metrics_overview": str(v2_path),
+        "uncertainty_tornado": str(legacy_path),
+    }
+    assert catalog["metrics_overview"]["title"] == "Custom metrics title"
+    assert catalog["uncertainty_tornado"]["plot_id"] == "uncertainty_tornado"
+    assert catalog["uncertainty_tornado"]["path"] == str(legacy_path)
+
+    generate_validation_plot(bundle, {"case": "plot_case", "checks": [{"status": "pass"}]})
+    updated_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    updated_manifest = load_plot_manifest(manifest_path)
+
+    assert "uncertainty_tornado" in updated_payload["figures"]
+    assert updated_manifest["uncertainty_tornado"] == str(legacy_path)
+    assert updated_manifest["validation_summary"].endswith("validation_summary.svg")
+
+
 def test_generate_summary_plots_emits_transient_plots_when_history_exists(tmp_path: Path) -> None:
     bundle = create_result_bundle(tmp_path, "plot_case", "run")
     transient_path = bundle.write_json(
