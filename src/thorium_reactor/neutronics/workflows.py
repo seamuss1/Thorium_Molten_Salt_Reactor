@@ -174,7 +174,7 @@ def _build_validation_result(
     checks: list[dict[str, Any]] = []
     metrics = summary.get("metrics", {})
     for name, target in config.validation_targets.items():
-        checks.append(evaluate_validation_target(name, target, metrics, manifest, benchmark=benchmark))
+        checks.append(evaluate_validation_target(name, target, metrics, manifest, benchmark=benchmark, summary=summary))
     checks = _merge_checks(
         checks,
         manifest.get("model_validity", {}).get("checks", []),
@@ -510,7 +510,7 @@ def run_case(
         summary["metrics"]["validation_maturity_score"] = built.manifest.get("validation_maturity", {}).get("validation_maturity_score", 0.0)
         if summary["benchmark_quality"]:
             summary["metrics"]["benchmark_quality_score"] = summary["benchmark_quality"].get("quality_score", 0.0)
-    benchmark_residuals = build_benchmark_residuals(config, summary, built.benchmark)
+    benchmark_residuals = build_benchmark_residuals(config, summary, built.benchmark, manifest=build_manifest)
     summary["benchmark_residuals"] = _json_copy(benchmark_residuals)
     summary["model_validity"] = _summarize_model_validity(
         _merge_checks(

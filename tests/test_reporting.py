@@ -3,9 +3,14 @@ import shutil
 import uuid
 from pathlib import Path
 
+from thorium_reactor.benchmarking import assess_benchmark_traceability, build_benchmark_residuals
+from thorium_reactor.config import load_case_config, load_yaml
 from thorium_reactor.paths import create_result_bundle
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot
 from thorium_reactor.reporting.reports import generate_report
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _section(report: str, heading: str) -> str:
@@ -938,6 +943,53 @@ def test_report_includes_runtime_context_and_benchmark_residuals() -> None:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
 
+def test_report_reconciles_construction_checks_with_primary_physics_gap() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-reporting-residual-reconcile" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        config = load_case_config(REPO_ROOT / "configs" / "cases" / "tmsr_lf1_core" / "case.yaml")
+        benchmark = load_yaml(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml")
+        summary = {
+            "case": config.name,
+            "result_dir": str(scratch_root),
+            "neutronics": {"status": "dry-run"},
+            "metrics": {"expected_cells": 456, "channel_count": 91},
+        }
+        summary["benchmark_residuals"] = build_benchmark_residuals(config, summary, benchmark)
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(json.dumps(summary), encoding="utf-8")
+        validation_path = scratch_root / "validation.json"
+        validation_path.write_text(
+            json.dumps(
+                {
+                    "checks": [
+                        {"name": "channel_count", "status": "pass", "message": "91 is within the expected range."}
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            config.name,
+            config.data,
+            summary_path,
+            validation_path,
+            None,
+            benchmark,
+        )
+
+        residuals = _section(report, "## Benchmark Residuals")
+        assert "Status: `blocked_missing_primary_physics`" in residuals
+        assert "Completed physics residuals: `0/1`" in residuals
+        assert "Benchmark blocker: Primary physics benchmark metric 'keff'" in residuals
+        assert "`channel_count`: metric=`channel_count`, category=`construction_check`, status=`pass`" in residuals
+        assert "category=`physics_benchmark`, status=`pending`" in residuals
+        assert "`channel_count`: metric=`channel_count`, category=`construction_check`, status=`pending`" not in residuals
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
 def test_report_includes_transient_sweep_section() -> None:
     scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-transient-sweep" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
@@ -1186,5 +1238,66 @@ def test_report_includes_flagship_finance_schedule_and_taxonomy() -> None:
         assert "conservative_foak" in report
         assert "## Build Schedule" in report
         assert "2040-11-02" in report
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_flagship_report_caveats_commercial_planning_against_dry_run_surrogate_evidence() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-reporting-flagship-evidence" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        config = load_case_config(REPO_ROOT / "configs" / "cases" / "flagship_grid_msr" / "case.yaml")
+        benchmark = load_yaml(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml")
+        traceability = assess_benchmark_traceability(config, benchmark)
+        summary = {
+            "case": config.name,
+            "result_dir": str(scratch_root),
+            "neutronics": {"status": "dry-run"},
+            "model_representation": config.data["model_representation"],
+            "metrics": {"expected_cells": 456, "channel_count": 91},
+            "benchmark_traceability": traceability,
+            "benchmark_quality": traceability["benchmark_quality"],
+            "finance": {
+                "status": "completed",
+                "scenario": "conservative_foak",
+                "planning_basis": "planning_grade_not_vendor_quote",
+                "source_year_usd": 2022,
+            },
+            "schedule": {
+                "status": "completed",
+                "planning_basis": "U.S. NRC Part 52",
+                "commercial_operation_date": "2040-11-02",
+            },
+        }
+        summary["benchmark_residuals"] = build_benchmark_residuals(config, summary, benchmark)
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(json.dumps(summary), encoding="utf-8")
+
+        report = generate_report(
+            config.name,
+            config.data,
+            summary_path,
+            None,
+            None,
+            benchmark,
+        )
+
+        evidence = _section(report, "## Evidence Status")
+        classification = _section(report, "## Reactor Classification")
+        finance = _section(report, "## Commercial Finance")
+        schedule = _section(report, "## Build Schedule")
+
+        assert "dry-run/proxy" in evidence
+        assert "not a solver-backed OpenMC physics result" in evidence
+        assert "Scale/surrogate mismatch" in evidence
+        assert "benchmark nominal thermal power 2 MWth" in evidence
+        assert "not same-scale validation" in evidence
+        assert "Taxonomy role: `commercial flagship grid reactor planning case`" in classification
+        assert "Build candidate: `blocked_by_evidence`" in classification
+        assert "Commercial finance subject: `planning_only`" in classification
+        assert "not build-ready or commercially validated" in classification
+        assert "Build candidate: `true`" not in classification
+        assert "Planning-only finance" in finance
+        assert "not a build-ready commitment" in schedule
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)

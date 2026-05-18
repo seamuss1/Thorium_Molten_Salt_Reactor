@@ -45,6 +45,7 @@ def generate_report(
         f"- Neutronics status: `{summary.get('neutronics', {}).get('status', 'unknown')}`",
         "",
     ]
+    lines.extend(_build_evidence_status_lines(config, summary, benchmark_traceability, benchmark_quality))
     lines.extend(
         _build_artifact_index_lines(
             summary_path=summary_path,
@@ -61,7 +62,7 @@ def generate_report(
     _append_value_line(lines, "Benchmark source", config["reactor"].get("benchmark"))
     lines.append("")
 
-    classification = _classify_reactor_case(case_name, config)
+    classification = _classify_reactor_case(case_name, config, summary=summary, benchmark_quality=benchmark_quality)
     lines.extend(
         [
             "## Reactor Classification",
@@ -184,6 +185,11 @@ def generate_report(
                 f"- Literature-backed targets: `{status_summary['literature_backed_targets']}`",
             ]
         )
+        scale_alignment = benchmark_traceability.get("scale_alignment", {})
+        if scale_alignment:
+            lines.append(f"- Scale alignment: `{scale_alignment.get('status', 'not_assessed')}`")
+            if scale_alignment.get("message"):
+                lines.append(f"- Scale note: {scale_alignment['message']}")
         datasets = benchmark_traceability.get("datasets", [])
         if datasets:
             lines.append(f"- Dataset count: `{len(datasets)}`")
@@ -256,6 +262,10 @@ def generate_report(
     if finance:
         lines.extend(["", "## Commercial Finance", ""])
         lines.append(f"- Status: `{finance.get('status', 'n/a')}`")
+        if classification.get("commercial_finance_subject") == "planning_only":
+            lines.append(
+                "- Evidence caveat: Planning-only finance; core physics remains dry-run/proxy or benchmark gates are not ready."
+            )
         if finance.get("status") == "completed":
             lines.append(f"- Scenario: `{finance.get('scenario', 'n/a')}`")
             lines.append(f"- Planning basis: `{finance.get('planning_basis', 'n/a')}`")
@@ -285,6 +295,10 @@ def generate_report(
     if schedule:
         lines.extend(["", "## Build Schedule", ""])
         lines.append(f"- Status: `{schedule.get('status', 'n/a')}`")
+        if classification.get("build_candidate") == "blocked_by_evidence":
+            lines.append(
+                "- Evidence caveat: Schedule is a planning scenario, not a build-ready commitment while solver-backed physics or benchmark gates are missing."
+            )
         if schedule.get("status") == "completed":
             lines.append(f"- Planning basis: `{schedule.get('planning_basis', 'n/a')}`")
             lines.append(f"- Project start: `{schedule.get('project_start_date', 'n/a')}`")
@@ -644,15 +658,38 @@ def generate_report(
 
     benchmark_residuals = summary.get("benchmark_residuals", {})
     if benchmark_residuals:
+        validation_by_name = {
+            str(check.get("name")): check
+            for check in validation.get("checks", [])
+            if isinstance(check, dict) and check.get("name")
+        }
         lines.extend(["", "## Benchmark Residuals", ""])
+        lines.append(f"- Status: `{benchmark_residuals.get('status', 'unknown')}`")
         lines.append(f"- Residual item count: `{benchmark_residuals.get('item_count', 0)}`")
         lines.append(f"- Dataset count: `{benchmark_residuals.get('dataset_count', 0)}`")
+        lines.append(
+            f"- Completed physics residuals: "
+            f"`{benchmark_residuals.get('completed_physics_item_count', 0)}/"
+            f"{benchmark_residuals.get('physics_item_count', 0)}`"
+        )
+        lines.append(
+            f"- Construction/diagnostic checks: "
+            f"`{benchmark_residuals.get('construction_check_count', 0)}/"
+            f"{benchmark_residuals.get('diagnostic_check_count', 0)}`"
+        )
+        lines.append(f"- Residual plot status: `{benchmark_residuals.get('residual_plot_status', 'unknown')}`")
+        for blocker in benchmark_residuals.get("blockers", []):
+            lines.append(f"- Benchmark blocker: {blocker}")
         for item in benchmark_residuals.get("items", []):
             parts = [
                 f"metric=`{item.get('metric', 'n/a')}`",
+                f"category=`{item.get('evidence_category', 'diagnostic_check')}`",
                 f"status=`{item.get('status', 'pending')}`",
                 f"residual=`{item.get('residual', 'n/a')}`",
             ]
+            validation_check = validation_by_name.get(str(item.get("name")))
+            if validation_check and validation_check.get("status") != item.get("status"):
+                parts.append(f"validation_status=`{validation_check.get('status')}`")
             if item.get("target_value") is not None:
                 parts.append(f"target=`{item.get('target_value')}`")
             if item.get("residual_pcm") is not None:
@@ -661,6 +698,8 @@ def generate_report(
                 parts.append(f"combined_uncertainty_pcm=`{item.get('combined_uncertainty_pcm')}`")
             if item.get("normalized_residual") is not None:
                 parts.append(f"normalized_residual=`{item.get('normalized_residual')}`")
+            if item.get("message"):
+                parts.append(f"note={item.get('message')}")
             lines.append(f"- `{item.get('name', 'target')}`: " + ", ".join(parts))
 
     if validation:
@@ -888,6 +927,48 @@ def _build_artifact_index_lines(
     return lines
 
 
+def _build_evidence_status_lines(
+    config: dict[str, Any],
+    summary: dict[str, Any],
+    benchmark_traceability: dict[str, Any],
+    benchmark_quality: dict[str, Any],
+) -> list[str]:
+    neutronics_status = _neutronics_status(summary)
+    solver_backed = _is_solver_backed_neutronics(summary)
+    benchmark_residuals = summary.get("benchmark_residuals", {})
+    model_representation = summary.get("model_representation", config.get("model_representation", {}))
+    proxy_modes = [
+        f"{key}={value}"
+        for key, value in (model_representation.items() if isinstance(model_representation, dict) else [])
+        if "proxy" in str(value).lower() or "dry" in str(value).lower()
+    ]
+
+    lines = ["## Evidence Status", ""]
+    if solver_backed:
+        lines.append("- Neutronics evidence: `solver-backed OpenMC result`")
+    else:
+        lines.append(
+            f"- Neutronics evidence: `{neutronics_status}` dry-run/proxy; "
+            "not a solver-backed OpenMC physics result."
+        )
+    if proxy_modes:
+        lines.append(f"- Proxy model modes: `{', '.join(proxy_modes)}`")
+    if isinstance(benchmark_residuals, dict) and benchmark_residuals:
+        lines.append(f"- Benchmark residual status: `{benchmark_residuals.get('status', 'unknown')}`")
+        for blocker in benchmark_residuals.get("blockers", [])[:3]:
+            lines.append(f"- Benchmark blocker: {blocker}")
+    if benchmark_quality:
+        readiness = "ready" if benchmark_quality.get("benchmark_ready") is True else "not ready"
+        lines.append(f"- Benchmark readiness: `{readiness}`")
+        if benchmark_quality.get("quality_stage"):
+            lines.append(f"- Benchmark quality stage: `{benchmark_quality.get('quality_stage')}`")
+    scale_alignment = benchmark_traceability.get("scale_alignment", {})
+    if isinstance(scale_alignment, dict) and scale_alignment.get("status") == "scale_mismatch":
+        lines.append(f"- Scale/surrogate mismatch: {scale_alignment.get('message')}")
+    lines.append("")
+    return lines
+
+
 def _build_key_metrics_lines(
     config: dict[str, Any],
     summary: dict[str, Any],
@@ -915,6 +996,10 @@ def _build_key_metrics_lines(
     metric_lines: list[str] = []
     _append_value_line(metric_lines, "Design thermal power", reactor.get("design_power_mwth"), "MWth")
     _append_value_line(metric_lines, "Neutronics status", neutronics.get("status") if isinstance(neutronics, dict) else None)
+    if not _is_solver_backed_neutronics(summary):
+        metric_lines.append(
+            "- Neutronics metric evidence scope: `dry-run/proxy diagnostics; no solver-backed OpenMC result`"
+        )
     _append_value_line(
         metric_lines,
         "Effective multiplication factor",
@@ -1154,6 +1239,17 @@ def _first_available(*values: Any) -> Any:
     return None
 
 
+def _neutronics_status(summary: dict[str, Any]) -> str:
+    neutronics = summary.get("neutronics", {})
+    if isinstance(neutronics, dict) and _has_reader_value(neutronics.get("status")):
+        return str(neutronics["status"])
+    return "unknown"
+
+
+def _is_solver_backed_neutronics(summary: dict[str, Any]) -> bool:
+    return _neutronics_status(summary).lower() == "completed"
+
+
 def _humanize_label(name: str) -> str:
     words = re.sub(r"[_\-]+", " ", str(name)).strip().split()
     if not words:
@@ -1289,11 +1385,22 @@ def _format_numeric_code_literals(line: str) -> str:
     return _CODE_LITERAL_RE.sub(replace_composite, formatted)
 
 
-def _classify_reactor_case(case_name: str, config: dict[str, Any]) -> dict[str, str]:
+def _classify_reactor_case(
+    case_name: str,
+    config: dict[str, Any],
+    *,
+    summary: dict[str, Any] | None = None,
+    benchmark_quality: dict[str, Any] | None = None,
+) -> dict[str, str]:
     reactor = config.get("reactor", {})
     mode = str(reactor.get("mode", "modern_test_reactor"))
     family = str(reactor.get("family", "")).lower()
     stage = str(reactor.get("stage", "")).lower()
+    summary = summary or {}
+    benchmark_quality = benchmark_quality or {}
+    solver_backed = _is_solver_backed_neutronics(summary)
+    benchmark_ready = benchmark_quality.get("benchmark_ready") is True if benchmark_quality else False
+    evidence_limited = not solver_backed or not benchmark_ready
     if case_name == "example_pin":
         return {
             "role": "smoke/regression pin",
@@ -1316,11 +1423,27 @@ def _classify_reactor_case(case_name: str, config: dict[str, Any]) -> dict[str, 
             "description": "Validation anchor for historical molten-salt reactor behavior, not a build candidate.",
         }
     if case_name == "flagship_grid_msr" or mode == "commercial_grid":
+        if evidence_limited:
+            blockers: list[str] = []
+            if not solver_backed:
+                blockers.append("dry-run/proxy neutronics")
+            if not benchmark_ready:
+                blockers.append("benchmark gates not ready")
+            blocker_text = " and ".join(blockers)
+            return {
+                "role": "commercial flagship grid reactor planning case",
+                "build_candidate": "blocked_by_evidence",
+                "commercial_finance_subject": "planning_only",
+                "description": (
+                    "End-goal cost, schedule, grid, and plant-planning case; not build-ready or "
+                    f"commercially validated while {blocker_text} remain."
+                ),
+            }
         return {
             "role": "commercial flagship grid reactor",
             "build_candidate": "true",
             "commercial_finance_subject": "true",
-            "description": "Final end-goal reactor case for cost, schedule, grid, and plant-planning outputs.",
+            "description": "End-goal reactor case with solver-backed neutronics and ready benchmark gates.",
         }
     if "immersed" in family:
         return {
