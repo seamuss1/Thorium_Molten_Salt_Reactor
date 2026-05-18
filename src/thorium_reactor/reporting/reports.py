@@ -56,12 +56,7 @@ def generate_report(
             summary=summary,
         )
     )
-    lines.extend(
-        [
-        "## Reactor Summary",
-        "",
-        ]
-    )
+    lines.extend(["## Reactor Summary", ""])
     _append_value_line(lines, "Design thermal power", config["reactor"].get("design_power_mwth"), "MWth")
     _append_value_line(lines, "Benchmark source", config["reactor"].get("benchmark"))
     lines.append("")
@@ -965,7 +960,7 @@ def _build_key_metrics_lines(
         metric_lines,
         "Peak fuel temperature",
         transient.get("peak_fuel_temperature_c") if isinstance(transient, dict) else None,
-        "degC",
+        "C",
     )
     _append_value_line(
         metric_lines,
@@ -979,7 +974,7 @@ def _build_key_metrics_lines(
         metric_lines,
         "Transient peak fuel temperature p95",
         transient_sweep.get("peak_fuel_temperature_c_p95") if isinstance(transient_sweep, dict) else None,
-        "degC",
+        "C",
     )
     _append_value_line(
         metric_lines,
