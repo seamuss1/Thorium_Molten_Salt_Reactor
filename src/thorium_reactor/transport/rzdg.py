@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -10,6 +11,7 @@ from thorium_reactor.precursors import normalize_precursor_groups
 
 
 RKDG_TRANSPORT_MODEL = "native_rz_rkdg_scalar_transport_v1"
+TRANSPORT_NPZ_SCHEMA_VERSION = 1
 DEFAULT_DECAY_HEAT_PRECURSOR_GROUPS: tuple[dict[str, float | str], ...] = (
     {"name": "decay_heat_fast", "decay_constant_s": 0.21, "yield_fraction": 0.38},
     {"name": "decay_heat_medium", "decay_constant_s": 0.030, "yield_fraction": 0.37},
@@ -303,6 +305,8 @@ def run_transport_case(config: Any, bundle: Any, summary: dict[str, Any]) -> dic
                 "mesh_path": str(mesh_path.name),
                 "summary_path": "transport_summary.json",
                 "solution_path": "transport_solution.npz",
+                "solution_schema_path": "transport_solution.schema.json",
+                "solution_human_summary_path": "transport_solution.summary.md",
             },
             "coupling_status": "additive_artifact_not_coupled_to_reduced_order_physics_core",
         }
@@ -601,16 +605,95 @@ def _axial_power_shape(mesh: RZStructuredMesh, summary: Mapping[str, Any]) -> np
 
 
 def _write_solution_npz(path: Path, result: TransportResult) -> None:
-    np.savez_compressed(
+    arrays = {
+        "field_values": result.field_values,
+        "field_names": np.array([spec.name for spec in result.field_specs]),
+        "group_sets": np.array([spec.group_set for spec in result.field_specs]),
+        "decay_constants_s": np.array([spec.decay_constant_s for spec in result.field_specs], dtype=float),
+        "radial_edges_m": result.mesh.radial_edges_m,
+        "axial_edges_m": result.mesh.axial_edges_m,
+        "cell_volumes_m3": result.mesh.cell_volumes_m3,
+    }
+    np.savez_compressed(path, **arrays)
+    schema = _transport_npz_schema(result, arrays)
+    _write_npz_sidecars(
         path,
-        field_values=result.field_values,
-        field_names=np.array([spec.name for spec in result.field_specs]),
-        group_sets=np.array([spec.group_set for spec in result.field_specs]),
-        decay_constants_s=np.array([spec.decay_constant_s for spec in result.field_specs], dtype=float),
-        radial_edges_m=result.mesh.radial_edges_m,
-        axial_edges_m=result.mesh.axial_edges_m,
-        cell_volumes_m3=result.mesh.cell_volumes_m3,
+        schema,
+        title="Transport Solution NPZ",
+        notes=[
+            "Coordinates use axisymmetric R-Z ordering with field_values[field, axial_cell, radial_cell].",
+            "Cell volumes are in m3 and correspond to axial_cells x radial_cells.",
+            f"Maximum conservation residual reported by the solver: {result.summary.get('conservation_residual')}.",
+        ],
     )
+
+
+def _transport_npz_schema(result: TransportResult, arrays: Mapping[str, np.ndarray]) -> dict[str, Any]:
+    return {
+        "schema_version": TRANSPORT_NPZ_SCHEMA_VERSION,
+        "generator": "thorium_reactor.transport.rzdg._write_solution_npz",
+        "artifact": "transport_solution.npz",
+        "model": RKDG_TRANSPORT_MODEL,
+        "coordinate_conventions": {
+            "mesh": "axisymmetric_rz_structured",
+            "field_values_order": ["field", "axial_cell", "radial_cell"],
+            "radial_coordinate": "radial_edges_m bound radial cells in meters from centerline",
+            "axial_coordinate": "axial_edges_m bound axial cells in meters from inlet plane",
+        },
+        "normalization": {
+            "source_density": "source shapes are normalized over cell volumes before field scaling",
+            "conservation": "field inventories use field_values times cell_volumes_m3",
+            "residual": result.summary.get("conservation_residual"),
+        },
+        "arrays": {
+            name: {
+                "shape": list(value.shape),
+                "dtype": str(value.dtype),
+                "units": _transport_units(name),
+                "description": _transport_array_description(name),
+            }
+            for name, value in arrays.items()
+        },
+    }
+
+
+def _write_npz_sidecars(path: Path, schema: dict[str, Any], *, title: str, notes: Sequence[str]) -> None:
+    schema_path = path.with_suffix(".schema.json")
+    summary_path = path.with_suffix(".summary.md")
+    schema_path.write_text(json.dumps(schema, indent=2, sort_keys=True), encoding="utf-8")
+    lines = [f"# {title}", "", f"- Artifact: `{path.name}`", f"- Schema version: `{schema['schema_version']}`"]
+    lines.extend(f"- {note}" for note in notes)
+    lines.extend(["", "## Arrays", ""])
+    for name, spec in schema["arrays"].items():
+        lines.append(
+            f"- `{name}`: shape=`{spec['shape']}`, dtype=`{spec['dtype']}`, "
+            f"units=`{spec['units']}`, {spec['description']}"
+        )
+    summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _transport_units(name: str) -> str:
+    return {
+        "field_values": "arbitrary precursor density per m3 basis",
+        "field_names": "label",
+        "group_sets": "label",
+        "decay_constants_s": "1/s",
+        "radial_edges_m": "m",
+        "axial_edges_m": "m",
+        "cell_volumes_m3": "m3",
+    }[name]
+
+
+def _transport_array_description(name: str) -> str:
+    return {
+        "field_values": "transported scalar fields on the R-Z mesh",
+        "field_names": "field labels aligned with field_values axis 0",
+        "group_sets": "precursor group-set labels aligned with field_values axis 0",
+        "decay_constants_s": "decay constants aligned with field_values axis 0",
+        "radial_edges_m": "radial cell edge coordinates",
+        "axial_edges_m": "axial cell edge coordinates",
+        "cell_volumes_m3": "axisymmetric cell volumes by axial and radial cell",
+    }[name]
 
 
 def _first_number(mapping: Mapping[str, Any], keys: Sequence[str], *, default: float) -> float:

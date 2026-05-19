@@ -15,6 +15,8 @@ _DEFAULT_FIGURE_METADATA: dict[str, Any] = {
     "title": "Generated plot",
     "caption": "Generated reporting figure.",
     "quality_status": "diagnostic_only",
+    "status": "available",
+    "method_tier": "summary_derived_visual",
     "report_section": "appendix",
     "axes": {},
     "units": {},
@@ -25,20 +27,24 @@ _FIGURE_METADATA: dict[str, dict[str, Any]] = {
     "metrics_overview": {
         "title": "Metrics overview",
         "caption": "Bar chart of numeric top-level run metrics from the summary payload.",
-        "quality_status": "publication_ready",
-        "report_section": "primary",
+        "quality_status": "appendix_only",
+        "status": "available_appendix_only",
+        "method_tier": "mixed_unit_summary_diagnostic",
+        "report_section": "appendix",
         "axes": {"x": "Metric", "y": "Reported value"},
         "units": {"y": "mixed"},
-        "conclusion": "Use as a quick scan of reported case metrics; units vary by metric.",
+        "conclusion": "Appendix diagnostic only because reported metrics use incompatible units.",
     },
     "bop_balance": {
         "title": "Balance of plant overview",
         "caption": "Numeric balance-of-plant outputs plotted as a compact comparison chart.",
-        "quality_status": "publication_ready",
-        "report_section": "primary",
+        "quality_status": "appendix_only",
+        "status": "available_appendix_only",
+        "method_tier": "mixed_unit_summary_diagnostic",
+        "report_section": "appendix",
         "axes": {"x": "BOP metric", "y": "Reported value"},
         "units": {"y": "mixed, commonly MW"},
-        "conclusion": "Use to confirm the thermal and electric plant quantities reported for the case.",
+        "conclusion": "Appendix diagnostic only unless replotted as single-unit quantities.",
     },
     "finance_cost_waterfall": {
         "title": "Capital cost breakdown",
@@ -104,13 +110,16 @@ _FIGURE_METADATA: dict[str, dict[str, Any]] = {
         "conclusion": "Use to assess convergence behavior before presenting neutronics results.",
     },
     "benchmark_residuals": {
-        "title": "Benchmark residuals",
-        "caption": "Residuals between benchmark targets and computed case values.",
+        "title": "Physics benchmark residuals",
+        "caption": "Residuals between completed physics benchmark targets and solver-backed computed case values.",
         "quality_status": "publication_ready",
+        "status": "available_solver_backed_only",
+        "method_tier": "solver_backed_benchmark_residual",
         "report_section": "primary",
         "axes": {"x": "Benchmark target", "y": "Residual"},
-        "units": {"y": "target units"},
-        "conclusion": "Use to identify which validation targets drive benchmark mismatch.",
+        "units": {"y": "pcm"},
+        "conclusion": "Use only when at least one completed physics residual is present; construction checks are excluded and blockers remain report-critical.",
+        "blocker_importance": "high",
     },
     "transient_power": {
         "title": "Transient power fraction",
@@ -150,30 +159,30 @@ _FIGURE_METADATA: dict[str, dict[str, Any]] = {
     },
     "transient_sweep_power_envelope": {
         "title": "Transient sweep power envelope",
-        "caption": "Uncertainty band showing p05, p50, and p95 power-fraction histories.",
+        "caption": "Empirical stress-test ensemble percentiles showing p05, p50, and p95 power-fraction histories.",
         "quality_status": "publication_ready",
         "report_section": "primary",
         "axes": {"x": "Time", "y": "Power fraction"},
         "units": {"x": "s", "y": "dimensionless"},
-        "conclusion": "Use to present the median power response and uncertainty spread.",
+        "conclusion": "Use to present the median response and scenario-envelope spread; this is not calibrated UQ unless distributions are source-backed.",
     },
     "transient_sweep_fuel_temperature_envelope": {
         "title": "Transient sweep fuel temperature envelope",
-        "caption": "Uncertainty band showing p05, p50, and p95 fuel-temperature histories.",
+        "caption": "Empirical stress-test ensemble percentiles showing p05, p50, and p95 fuel-temperature histories.",
         "quality_status": "publication_ready",
         "report_section": "primary",
         "axes": {"x": "Time", "y": "Fuel temperature"},
         "units": {"x": "s", "y": "C"},
-        "conclusion": "Use to present the median fuel-temperature response and uncertainty spread.",
+        "conclusion": "Use to present the median response and scenario-envelope spread; this is not calibrated UQ unless distributions are source-backed.",
     },
     "validation_summary": {
         "title": "Validation summary",
-        "caption": "Counts validation checks by pass, fail, and pending status.",
+        "caption": "Counts validation checks by pass, fail, pending, and blocked status.",
         "quality_status": "publication_ready",
         "report_section": "primary",
         "axes": {"x": "Validation status", "y": "Check count"},
         "units": {"y": "checks"},
-        "conclusion": "Use to summarize readiness; failures and pending checks require reviewer attention.",
+        "conclusion": "Use to summarize readiness; failures, pending checks, and blocked checks require reviewer attention.",
     },
 }
 
@@ -181,6 +190,7 @@ _FIGURE_METADATA: dict[str, dict[str, Any]] = {
 def generate_summary_plots(bundle, summary: dict[str, Any]) -> dict[str, str]:
     bundle.plots_dir.mkdir(parents=True, exist_ok=True)
     assets: dict[str, str] = {}
+    remove_from_manifest: set[str] = set()
 
     numeric_metrics = _coerce_numeric_mapping(summary.get("metrics", {}))
     if numeric_metrics:
@@ -278,22 +288,33 @@ def generate_summary_plots(bundle, summary: dict[str, Any]) -> dict[str, str]:
         if _write_keff_history_svg(statepoint_path, history_path):
             assets["keff_history"] = str(history_path)
 
-    benchmark_residuals = summary.get("benchmark_residuals", {})
+    benchmark_residuals = summary.get("benchmark_residuals")
     if isinstance(benchmark_residuals, dict):
-        residual_metrics = {
-            str(item.get("name", f"target_{index}")): float(item["residual"])
-            for index, item in enumerate(benchmark_residuals.get("items", []), start=1)
-            if isinstance(item, dict) and isinstance(item.get("residual"), (int, float))
-        }
+        residual_metrics: dict[str, float] = {}
+        neutronics_status = _summary_neutronics_status(summary)
+        for index, item in enumerate(benchmark_residuals.get("items", []), start=1):
+            if not isinstance(item, dict) or not _is_completed_physics_residual(
+                item,
+                neutronics_status=neutronics_status,
+            ):
+                continue
+            residual_value = item.get("residual_pcm")
+            if isinstance(residual_value, (int, float)):
+                residual_metrics[str(item.get("name", f"target_{index}"))] = float(residual_value)
         if residual_metrics:
             residual_path = bundle.plots_dir / "benchmark_residuals.svg"
             _write_bar_chart_svg(
                 residual_metrics,
                 residual_path,
-                title=f"{summary['case']} benchmark residuals",
+                title=f"{summary['case']} physics benchmark residuals",
                 palette=["#0f766e", "#1d4ed8", "#b45309", "#7c3aed"],
             )
             assets["benchmark_residuals"] = str(residual_path)
+        else:
+            remove_from_manifest.add("benchmark_residuals")
+            residual_path = bundle.plots_dir / "benchmark_residuals.svg"
+            if residual_path.exists():
+                residual_path.unlink()
 
     transient = summary.get("transient", {})
     transient_path = _resolve_transient_path(bundle, transient)
@@ -430,12 +451,12 @@ def generate_summary_plots(bundle, summary: dict[str, Any]) -> dict[str, str]:
                 )
                 assets["transient_sweep_fuel_temperature_envelope"] = str(fuel_envelope_path)
 
-    return _update_plot_manifest(bundle.root / "plots_manifest.json", assets)
+    return _update_plot_manifest(bundle.root / "plots_manifest.json", assets, remove=remove_from_manifest)
 
 
 def generate_validation_plot(bundle, validation: dict[str, Any]) -> dict[str, str]:
     bundle.plots_dir.mkdir(parents=True, exist_ok=True)
-    counts = {"pass": 0, "fail": 0, "pending": 0}
+    counts = {"pass": 0, "fail": 0, "pending": 0, "blocked": 0}
     for check in validation.get("checks", []):
         status = str(check.get("status", "pending"))
         counts[status] = counts.get(status, 0) + 1
@@ -445,14 +466,14 @@ def generate_validation_plot(bundle, validation: dict[str, Any]) -> dict[str, st
         counts,
         path,
         title=f"{validation.get('case', 'case')} validation summary",
-        palette=["#2e8b57", "#c0392b", "#d4ac0d"],
+        palette=["#2e8b57", "#c0392b", "#d4ac0d", "#64748b"],
     )
     return _update_plot_manifest(bundle.root / "plots_manifest.json", {"validation_summary": str(path)})
 
 
 def load_plot_manifest(path: Path) -> dict[str, str]:
     return {
-        plot_id: str(entry["path"])
+        plot_id: _resolve_manifest_asset_path(path.parent, str(entry["path"]))
         for plot_id, entry in load_figure_catalog(path).items()
         if isinstance(entry.get("path"), str)
     }
@@ -463,32 +484,39 @@ def load_figure_catalog(path: Path) -> dict[str, dict[str, Any]]:
     if not payload:
         return {}
 
+    catalog: dict[str, dict[str, Any]] = {}
     figures = payload.get("figures")
     if isinstance(figures, dict):
-        return {
-            str(plot_id): _normalize_figure_entry(str(plot_id), entry)
-            for plot_id, entry in figures.items()
-            if isinstance(entry, dict) and entry.get("path")
-        }
-    if isinstance(figures, list):
-        catalog: dict[str, dict[str, Any]] = {}
+        catalog.update(
+            {
+                str(plot_id): _normalize_figure_entry(str(plot_id), entry)
+                for plot_id, entry in figures.items()
+                if isinstance(entry, dict) and entry.get("path")
+            }
+        )
+    elif isinstance(figures, list):
         for entry in figures:
             if not isinstance(entry, dict) or not entry.get("path"):
                 continue
             plot_id = str(entry.get("plot_id") or Path(str(entry["path"])).stem)
             catalog[plot_id] = _normalize_figure_entry(plot_id, entry)
-        return catalog
 
-    return {
-        plot_id: _build_figure_entry(plot_id, asset_path)
-        for plot_id, asset_path in _legacy_plot_paths(payload).items()
-    }
+    for plot_id, asset_path in _legacy_plot_paths(payload).items():
+        catalog.setdefault(plot_id, _build_figure_entry(plot_id, asset_path))
+    return catalog
 
 
-def _update_plot_manifest(path: Path, assets: dict[str, str]) -> dict[str, str]:
+def _update_plot_manifest(path: Path, assets: dict[str, str], *, remove: set[str] | None = None) -> dict[str, str]:
     catalog = load_figure_catalog(path)
+    for plot_id in remove or set():
+        catalog.pop(plot_id, None)
     for plot_id, asset_path in assets.items():
-        catalog[plot_id] = _build_figure_entry(plot_id, asset_path)
+        catalog[plot_id] = _build_figure_entry(plot_id, _portable_asset_path(path.parent, asset_path))
+    for entry in catalog.values():
+        entry["path"] = _portable_asset_path(path.parent, str(entry.get("path", "")))
+        for artifact in entry.get("source_artifacts", []):
+            if isinstance(artifact, dict) and artifact.get("path"):
+                artifact["path"] = _portable_asset_path(path.parent, str(artifact["path"]))
     manifest = {
         "schema_version": FIGURE_CATALOG_SCHEMA_VERSION,
         "figures": {plot_id: catalog[plot_id] for plot_id in sorted(catalog)},
@@ -526,10 +554,19 @@ def _build_figure_entry(plot_id: str, asset_path: str) -> dict[str, Any]:
         "title": str(metadata["title"]),
         "caption": str(metadata["caption"]),
         "quality_status": str(metadata["quality_status"]),
+        "status": str(metadata["status"]),
+        "method_tier": str(metadata["method_tier"]),
         "report_section": str(metadata["report_section"]),
         "axes": dict(metadata["axes"]),
         "units": dict(metadata["units"]),
         "conclusion": str(metadata["conclusion"]),
+        "source_artifacts": [
+            {
+                "path": str(asset_path),
+                "role": "rendered_figure",
+                "artifact_type": Path(str(asset_path)).suffix.lstrip(".") or "unknown",
+            }
+        ],
     }
 
 
@@ -547,6 +584,55 @@ def _figure_metadata(plot_id: str) -> dict[str, Any]:
     metadata = dict(_DEFAULT_FIGURE_METADATA)
     metadata.update(_FIGURE_METADATA.get(plot_id, {}))
     return metadata
+
+
+def _portable_asset_path(bundle_root: Path, asset_path: str) -> str:
+    if not asset_path:
+        return asset_path
+    path = Path(asset_path)
+    if not path.is_absolute():
+        return path.as_posix()
+    try:
+        return path.resolve().relative_to(bundle_root.resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _resolve_manifest_asset_path(bundle_root: Path, asset_path: str) -> str:
+    path = Path(asset_path)
+    if path.is_absolute():
+        return str(path)
+    return str(bundle_root / path)
+
+
+def _summary_neutronics_status(summary: dict[str, Any]) -> str | None:
+    neutronics = summary.get("neutronics", {})
+    if not isinstance(neutronics, dict):
+        return None
+    status = neutronics.get("status")
+    if status is None:
+        return None
+    return str(status)
+
+
+def _is_solver_backed_neutronics_status(status: str | None) -> bool:
+    return bool(status) and str(status).lower() == "completed"
+
+
+def _is_completed_physics_residual(item: dict[str, Any], *, neutronics_status: str | None = None) -> bool:
+    if item.get("evidence_category") == "physics_benchmark":
+        item_neutronics_status = item.get("neutronics_status")
+        if item_neutronics_status is not None and not _is_solver_backed_neutronics_status(str(item_neutronics_status)):
+            return False
+        if neutronics_status is not None and not _is_solver_backed_neutronics_status(neutronics_status):
+            return False
+        return item.get("physics_residual_completed") is True and item.get("status") in {"pass", "fail"}
+    # Legacy summaries did not carry evidence categories, so require a solver-backed run-level status.
+    return (
+        item.get("metric") == "keff"
+        and item.get("status") in {"pass", "fail"}
+        and _is_solver_backed_neutronics_status(neutronics_status)
+    )
 
 
 def _coerce_numeric_mapping(values: dict[str, Any]) -> dict[str, float]:
@@ -568,12 +654,16 @@ def _resolve_statepoint_path(bundle, summary: dict[str, Any]) -> Path | None:
         return None
 
     statepoint_path = Path(statepoint)
-    if statepoint_path.exists():
-        return statepoint_path
-
     candidate = bundle.openmc_dir / statepoint_path.name
     if candidate.exists():
         return candidate
+    try:
+        resolved_statepoint = statepoint_path.resolve()
+        resolved_openmc_dir = bundle.openmc_dir.resolve()
+        if resolved_statepoint.exists() and resolved_statepoint.parent == resolved_openmc_dir:
+            return resolved_statepoint
+    except OSError:
+        return None
     return None
 
 

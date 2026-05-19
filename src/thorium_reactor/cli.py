@@ -3,11 +3,17 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
+from datetime import datetime, timezone
 from json import JSONDecodeError
 from pathlib import Path
 
 from thorium_reactor.capabilities import get_case_capabilities
 from thorium_reactor.benchmarking import get_docker_runtime_status, run_solver_backed_benchmark
+from thorium_reactor.benchmark_evidence import (
+    materialize_benchmark_evidence,
+    merge_benchmark_evidence_into_quality,
+)
 from thorium_reactor.bundle_inputs import ensure_bundle_inputs, load_bundle_inputs
 from thorium_reactor.config import load_case_config
 from thorium_reactor.economics import run_economics_case
@@ -23,7 +29,18 @@ from thorium_reactor.integrations import (
 )
 from thorium_reactor.neutronics.openmc_compat import missing_openmc_runtime_message, openmc
 from thorium_reactor.neutronics.workflows import _build_visualization_state, build_case, run_case, validate_case
-from thorium_reactor.paths import ResultBundle, case_config_path, create_result_bundle, discover_repo_root, existing_result_bundle, latest_result_bundle
+from thorium_reactor.paths import (
+    ResultBundle,
+    append_stage_manifest,
+    case_config_path,
+    changed_bundle_artifacts,
+    create_result_bundle,
+    discover_repo_root,
+    existing_result_bundle,
+    latest_result_bundle,
+    refresh_bundle_artifact_statuses,
+    snapshot_bundle_artifacts,
+)
 from thorium_reactor.qa import build_requirements_summary
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot, load_plot_manifest
 from thorium_reactor.reporting.reports import generate_report
@@ -158,8 +175,9 @@ def resolve_benchmark_runtime(
 
 
 def main(argv: list[str] | None = None) -> int:
+    effective_argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(effective_argv)
 
     repo_root = args.repo_root.resolve() if args.repo_root else discover_repo_root()
     if args.command == "qa":
@@ -190,6 +208,9 @@ def main(argv: list[str] | None = None) -> int:
     config = inputs.config
     benchmark = inputs.benchmark
     provenance = inputs.provenance
+    stage_started_utc = _utc_now()
+    stage_artifacts_before = snapshot_bundle_artifacts(bundle)
+    stage_command = _stage_command_from_argv(effective_argv, args.command)
 
     if args.command == "build":
         built = build_case(config, bundle.openmc_dir, benchmark=benchmark)
@@ -201,6 +222,10 @@ def main(argv: list[str] | None = None) -> int:
         bundle.write_json("build_manifest.json", build_manifest)
         if built.model is not None:
             built.model.export_to_xml(directory=str(bundle.openmc_dir))
+        artifact_status = refresh_bundle_artifact_statuses(bundle, summary={"neutronics": {"status": "dry-run"}})
+        build_manifest["artifact_status"] = artifact_status
+        bundle.write_json("build_manifest.json", build_manifest)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=build_manifest)
         print(bundle.root)
         return 0
 
@@ -211,11 +236,13 @@ def main(argv: list[str] | None = None) -> int:
             benchmark=benchmark,
             solver_enabled=not args.no_solver,
             provenance=provenance,
+            repo_root=repo_root,
         )
         print(bundle.root)
         print(summary["neutronics"]["status"])
         if summary["neutronics"].get("message"):
             print(summary["neutronics"]["message"])
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
         return 0
 
     if args.command == "transient":
@@ -231,6 +258,7 @@ def main(argv: list[str] | None = None) -> int:
                 benchmark=benchmark,
                 solver_enabled=False,
                 provenance=provenance,
+                repo_root=repo_root,
             )
         transient = run_transient_case(
             config,
@@ -241,6 +269,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         bundle.write_json("summary.json", summary)
         generate_summary_plots(bundle, summary)
+        refresh_bundle_artifact_statuses(bundle, summary=summary)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
         print(bundle.root)
         print(transient["metrics"]["peak_power_fraction"])
         return 0
@@ -258,6 +288,7 @@ def main(argv: list[str] | None = None) -> int:
                 benchmark=benchmark,
                 solver_enabled=False,
                 provenance=provenance,
+                repo_root=repo_root,
             )
         transient_sweep = run_transient_sweep_case(
             config,
@@ -273,6 +304,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         bundle.write_json("summary.json", summary)
         generate_summary_plots(bundle, summary)
+        refresh_bundle_artifact_statuses(bundle, summary=summary)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
         print(bundle.root)
         print(transient_sweep["backend"])
         print(transient_sweep["metrics"]["peak_power_fraction_p95"])
@@ -319,6 +352,9 @@ def main(argv: list[str] | None = None) -> int:
         validation = validate_case(config, bundle, summary=summary, benchmark=benchmark, provenance=provenance)
         generate_validation_plot(bundle, validation)
         plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
+        geometry_assets = None
+        summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
+        bundle.write_json("summary.json", summary)
         report = generate_report(
             config.name,
             config.data,
@@ -330,6 +366,19 @@ def main(argv: list[str] | None = None) -> int:
             provenance=provenance,
         )
         bundle.write_text("report.md", report)
+        summary = _refresh_benchmark_evidence(bundle, config.data, benchmark, provenance)
+        report = generate_report(
+            config.name,
+            config.data,
+            bundle.root / "summary.json",
+            bundle.root / "validation.json",
+            geometry_assets,
+            benchmark,
+            plot_assets,
+            provenance=provenance,
+        )
+        bundle.write_text("report.md", report)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
         print(bundle.root)
         print(summary.get("uncertainty_sweep", {}).get("coverage_status", "missing"))
         return 0
@@ -347,6 +396,7 @@ def main(argv: list[str] | None = None) -> int:
                 benchmark=benchmark,
                 solver_enabled=False,
                 provenance=provenance,
+                repo_root=repo_root,
             )
         runtime_benchmark = run_runtime_benchmark_case(
             config,
@@ -360,6 +410,8 @@ def main(argv: list[str] | None = None) -> int:
             fail_on_gpu_fallback=args.fail_on_gpu_fallback,
             provenance=provenance,
         )
+        refresh_bundle_artifact_statuses(bundle, summary=summary)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
         print(bundle.root)
         print(runtime_benchmark["recommendation"].get("backend"))
         print(runtime_benchmark["recommendation"].get("speedup_vs_reference"))
@@ -378,9 +430,12 @@ def main(argv: list[str] | None = None) -> int:
                 benchmark=benchmark,
                 solver_enabled=False,
                 provenance=provenance,
+                repo_root=repo_root,
             )
         transport = run_transport_case(config, bundle, summary)
         generate_summary_plots(bundle, summary)
+        refresh_bundle_artifact_statuses(bundle, summary=summary)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
         print(bundle.root)
         print(transport["status"])
         print(transport["conservation_residual"])
@@ -399,9 +454,12 @@ def main(argv: list[str] | None = None) -> int:
                 benchmark=benchmark,
                 solver_enabled=False,
                 provenance=provenance,
+                repo_root=repo_root,
             )
         depletion = run_depletion_case(config, bundle, summary)
         generate_summary_plots(bundle, summary)
+        refresh_bundle_artifact_statuses(bundle, summary=summary)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
         print(bundle.root)
         print(depletion["status"])
         print(depletion["atom_balance_residual"])
@@ -425,6 +483,8 @@ def main(argv: list[str] | None = None) -> int:
             if render_assets_path.exists():
                 geometry_assets = json.loads(render_assets_path.read_text(encoding="utf-8"))
             plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
+            summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
+            bundle.write_json("summary.json", summary)
             report = generate_report(
                 config.name,
                 config.data,
@@ -436,6 +496,10 @@ def main(argv: list[str] | None = None) -> int:
                 provenance=provenance,
             )
             bundle.write_text("report.md", report)
+        else:
+            summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
+            bundle.write_json("summary.json", summary)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
         print(bundle.root)
         print(plan["status"])
         if plan["finance"].get("status") == "completed":
@@ -454,6 +518,8 @@ def main(argv: list[str] | None = None) -> int:
         summary_path = bundle.root / "summary.json"
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         persist_integration_result(bundle, summary, "moose", result)
+        refresh_bundle_artifact_statuses(bundle, summary=summary)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
         print(bundle.root)
         print(result["status"])
         return 0
@@ -469,6 +535,8 @@ def main(argv: list[str] | None = None) -> int:
         summary_path = bundle.root / "summary.json"
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         persist_integration_result(bundle, summary, "scale", result)
+        refresh_bundle_artifact_statuses(bundle, summary=summary)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
         print(bundle.root)
         print(result["status"])
         return 0
@@ -484,6 +552,8 @@ def main(argv: list[str] | None = None) -> int:
         summary_path = bundle.root / "summary.json"
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         persist_integration_result(bundle, summary, "thermochimica", result)
+        refresh_bundle_artifact_statuses(bundle, summary=summary)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
         print(bundle.root)
         print(result["status"])
         return 0
@@ -499,6 +569,8 @@ def main(argv: list[str] | None = None) -> int:
         summary_path = bundle.root / "summary.json"
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         persist_integration_result(bundle, summary, "saltproc", result)
+        refresh_bundle_artifact_statuses(bundle, summary=summary)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
         print(bundle.root)
         print(result["status"])
         return 0
@@ -514,12 +586,18 @@ def main(argv: list[str] | None = None) -> int:
         summary_path = bundle.root / "summary.json"
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         persist_integration_result(bundle, summary, "moltres", result)
+        refresh_bundle_artifact_statuses(bundle, summary=summary)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
         print(bundle.root)
         print(result["status"])
         return 0
 
     if args.command == "validate":
         result = validate_case(config, bundle, benchmark=benchmark, provenance=provenance)
+        summary_path = bundle.root / "summary.json"
+        summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {}
+        refresh_bundle_artifact_statuses(bundle, summary=summary)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status="completed" if result.get("passed") else "failed")
         print(result["passed"])
         return 0
 
@@ -559,7 +637,11 @@ def main(argv: list[str] | None = None) -> int:
             build_manifest = json.loads(build_manifest_path.read_text(encoding="utf-8"))
             build_manifest["geometry_assets"] = assets
             build_manifest["visualization_state"] = _build_visualization_state(bundle, assets=assets)
+            build_manifest["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
             bundle.write_json("build_manifest.json", build_manifest)
+        else:
+            refresh_bundle_artifact_statuses(bundle, summary=summary)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
         print(json.dumps(assets, indent=2))
         return 0
 
@@ -593,6 +675,8 @@ def main(argv: list[str] | None = None) -> int:
                 build_manifest = json.loads(build_manifest_path.read_text(encoding="utf-8"))
                 geometry_assets = build_manifest.get("geometry_assets")
         plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
+        summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
+        bundle.write_json("summary.json", summary)
         report = generate_report(
             config.name,
             config.data,
@@ -604,6 +688,19 @@ def main(argv: list[str] | None = None) -> int:
             provenance=provenance,
         )
         report_path = bundle.write_text("report.md", report)
+        summary = _refresh_benchmark_evidence(bundle, config.data, benchmark, provenance)
+        report = generate_report(
+            config.name,
+            config.data,
+            summary_path,
+            validation_path,
+            geometry_assets,
+            benchmark,
+            plot_assets,
+            provenance=provenance,
+        )
+        report_path = bundle.write_text("report.md", report)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
         print(report_path)
         return 0
 
@@ -624,6 +721,7 @@ def main(argv: list[str] | None = None) -> int:
                 benchmark=benchmark,
                 solver_enabled=True,
                 provenance=provenance,
+                repo_root=repo_root,
             )
             bundle.write_json(
                 "benchmark_execution.json",
@@ -655,6 +753,8 @@ def main(argv: list[str] | None = None) -> int:
                 build_manifest = json.loads(build_manifest_path.read_text(encoding="utf-8"))
                 geometry_assets = build_manifest.get("geometry_assets")
         plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
+        summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
+        bundle.write_json("summary.json", summary)
         report = generate_report(
             config.name,
             config.data,
@@ -666,10 +766,127 @@ def main(argv: list[str] | None = None) -> int:
             provenance=provenance,
         )
         bundle.write_text("report.md", report)
+        summary = _refresh_benchmark_evidence(bundle, config.data, benchmark, provenance)
+        report = generate_report(
+            config.name,
+            config.data,
+            bundle.root / "summary.json",
+            bundle.root / "validation.json",
+            geometry_assets,
+            benchmark,
+            plot_assets,
+            provenance=provenance,
+        )
+        bundle.write_text("report.md", report)
+        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
         print(bundle.root)
         return 0
 
     return 1
+
+
+def _refresh_benchmark_evidence(
+    bundle: ResultBundle,
+    config_data: dict[str, object],
+    benchmark: dict[str, object] | None,
+    provenance: dict[str, object],
+) -> dict[str, object]:
+    summary_path = bundle.root / "summary.json"
+    if not summary_path.exists():
+        return {}
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    if not (summary.get("benchmark_quality") or benchmark):
+        return summary
+    evidence = materialize_benchmark_evidence(
+        bundle,
+        config_data,
+        summary,
+        benchmark or {},
+        provenance=provenance,
+        openmc_module=openmc,
+    )
+    summary["benchmark_evidence"] = evidence
+    if summary.get("benchmark_quality"):
+        summary["benchmark_quality"] = merge_benchmark_evidence_into_quality(
+            summary.get("benchmark_quality"),
+            evidence,
+        )
+        quality_checks = _benchmark_quality_status_checks(summary["benchmark_quality"])
+        summary["model_validity"] = _replace_model_validity_benchmark_quality_checks(
+            summary.get("model_validity", {}),
+            quality_checks,
+        )
+        _replace_validation_benchmark_quality_checks(bundle, quality_checks)
+        metrics = summary.get("metrics")
+        if isinstance(metrics, dict):
+            metrics["benchmark_quality_score"] = summary["benchmark_quality"].get("quality_score", 0.0)
+    summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
+    bundle.write_json("summary.json", summary)
+    return summary
+
+
+def _benchmark_quality_status_checks(quality: dict[str, object]) -> list[dict[str, str]]:
+    checks = []
+    for gate in quality.get("gates", []):
+        if not isinstance(gate, dict):
+            continue
+        checks.append(
+            {
+                "name": f"benchmark_quality::{gate.get('id', 'gate')}",
+                "status": str(gate.get("status", "pending")),
+                "message": str(gate.get("message", "")),
+            }
+        )
+    return checks
+
+
+def _replace_model_validity_benchmark_quality_checks(
+    model_validity: object,
+    quality_checks: list[dict[str, str]],
+) -> dict[str, object]:
+    existing = model_validity if isinstance(model_validity, dict) else {}
+    checks = [
+        check
+        for check in existing.get("checks", [])
+        if isinstance(check, dict) and not str(check.get("name", "")).startswith("benchmark_quality::")
+    ]
+    checks.extend(quality_checks)
+    passed_count = sum(1 for check in checks if check.get("status") == "pass")
+    failed = [check for check in checks if check.get("status") == "fail"]
+    pending_count = sum(1 for check in checks if check.get("status") == "pending")
+    return {
+        "status": "valid" if not failed else "invalid",
+        "passed": not failed,
+        "check_count": len(checks),
+        "passed_count": passed_count,
+        "failed_count": len(failed),
+        "pending_count": pending_count,
+        "failed_check_names": [str(check.get("name")) for check in failed],
+        "failed_messages": [str(check.get("message")) for check in failed if check.get("message")],
+        "checks": checks,
+    }
+
+
+def _replace_validation_benchmark_quality_checks(
+    bundle: ResultBundle,
+    quality_checks: list[dict[str, str]],
+) -> None:
+    validation_path = bundle.root / "validation.json"
+    if not validation_path.exists():
+        return
+    try:
+        validation = json.loads(validation_path.read_text(encoding="utf-8"))
+    except JSONDecodeError:
+        return
+    checks = [
+        check
+        for check in validation.get("checks", [])
+        if isinstance(check, dict) and not str(check.get("name", "")).startswith("benchmark_quality::")
+    ]
+    checks.extend(quality_checks)
+    validation["checks"] = checks
+    validation["passed"] = all(check.get("status") == "pass" for check in checks)
+    bundle.write_json("validation.json", validation)
 
 def _load_or_create_bundle(repo_root: Path, case_name: str, run_id: str | None, *, allow_existing: bool = False) -> ResultBundle:
     if run_id is None:
@@ -684,6 +901,90 @@ def _load_or_create_bundle(repo_root: Path, case_name: str, run_id: str | None, 
 
 def _load_existing_bundle(repo_root: Path, case_name: str, run_id: str) -> ResultBundle:
     return existing_result_bundle(repo_root, case_name, run_id)
+
+
+def _stage_command_from_argv(argv: list[str] | None, command: str) -> list[str]:
+    effective_argv = list(sys.argv[1:] if argv is None else argv)
+    index = 0
+    while index < len(effective_argv):
+        token = effective_argv[index]
+        if token == command:
+            return effective_argv[index:]
+        if token == "--repo-root":
+            index += 2
+            continue
+        if token.startswith("--repo-root="):
+            index += 1
+            continue
+        index += 1
+    return [command]
+
+
+def _finish_cli_stage(
+    bundle: ResultBundle,
+    stage: str,
+    command: list[str],
+    started_utc: str,
+    artifacts_before: dict[str, str],
+    provenance: dict[str, object],
+    *,
+    summary: dict[str, object] | None = None,
+    status: str | None = None,
+    repo_root: Path | None = None,
+) -> None:
+    after = snapshot_bundle_artifacts(bundle)
+    summary = summary or {}
+    stage_repo_root = repo_root or _repo_root_from_bundle(bundle)
+    append_stage_manifest(
+        bundle,
+        stage=stage,
+        command=command,
+        started_utc=started_utc,
+        ended_utc=_utc_now(),
+        status=status or _stage_status_from_summary(summary),
+        inputs=provenance,
+        output_artifacts=sorted(changed_bundle_artifacts(artifacts_before, after)),
+        method_tier=_method_tier_from_summary(summary),
+        repo_root=stage_repo_root,
+    )
+
+
+def _repo_root_from_bundle(bundle: ResultBundle) -> Path | None:
+    try:
+        results_root = bundle.root.parents[2]
+    except IndexError:
+        return None
+    if bundle.root.parents[1].name == "results":
+        return results_root
+    return None
+
+
+def _stage_status_from_summary(summary: dict[str, object]) -> str:
+    neutronics = summary.get("neutronics")
+    if isinstance(neutronics, dict) and str(neutronics.get("status", "")).lower() == "failed":
+        return "failed"
+    return "completed"
+
+
+def _method_tier_from_summary(summary: dict[str, object]) -> str:
+    neutronics = summary.get("neutronics")
+    if isinstance(neutronics, dict):
+        status = str(neutronics.get("status", "")).lower()
+        if status == "completed":
+            return "solver_backed_openmc"
+        if status in {"dry-run", "dry_run"}:
+            return "dry_run_proxy"
+        if status.startswith("skipped"):
+            return "skipped_solver"
+        if status:
+            return status
+    if summary.get("model"):
+        return str(summary["model"])
+    return "workflow_artifact"
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 if __name__ == "__main__":

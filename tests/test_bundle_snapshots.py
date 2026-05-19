@@ -35,8 +35,14 @@ def test_new_bundle_captures_case_and_benchmark_snapshots() -> None:
         assert provenance["source_benchmark_path"] == "benchmarks/tmsr_lf1/benchmark.yaml"
         assert provenance["schema_version"] == 1
         assert provenance["used_snapshot"] is True
+        assert provenance["generator"] == "thorium_reactor.bundle_inputs.ensure_bundle_inputs"
+        assert provenance["git"]["dirty"] in {True, False}
+        assert provenance["dependency_hash"]
+        assert provenance["input_snapshots"]["case"]["sha256"]
+        assert provenance["input_snapshots"]["benchmark"]["sha256"]
         assert inputs.provenance["case"]["source"] == "bundled snapshot"
         assert inputs.provenance["benchmark"]["source"] == "bundled snapshot"
+        assert inputs.provenance["input_snapshots"]["case"]["sha256"] == provenance["input_snapshots"]["case"]["sha256"]
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
@@ -74,7 +80,7 @@ def test_report_prefers_bundled_case_snapshot_after_repo_case_changes() -> None:
 
         assert "# Example Pin Smoke Test" in report
         assert "Mutated Report Name" not in report
-        assert "- Design thermal power (MWth): `1.0`" in report
+        assert "- Design thermal power: `1 MWth`" in report
         assert "`999.0`" not in report
         assert "- Case definition: `bundled snapshot`" in report
     finally:

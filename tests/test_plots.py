@@ -67,16 +67,21 @@ def test_generate_summary_plots_populates_plots_dir(tmp_path: Path) -> None:
 
     assert payload["schema_version"] == 2
     assert legacy_manifest["metrics_overview"] == assets["metrics_overview"]
-    assert catalog["bop_balance"]["path"] == assets["bop_balance"]
+    assert catalog["bop_balance"]["path"] == "plots/bop_balance.svg"
     assert metrics_figure["plot_id"] == "metrics_overview"
-    assert metrics_figure["path"] == assets["metrics_overview"]
+    assert metrics_figure["path"] == "plots/metrics_overview.svg"
     assert metrics_figure["title"] == "Metrics overview"
     assert metrics_figure["caption"]
-    assert metrics_figure["quality_status"] == "publication_ready"
-    assert metrics_figure["report_section"] == "primary"
+    assert metrics_figure["quality_status"] == "appendix_only"
+    assert metrics_figure["status"] == "available_appendix_only"
+    assert metrics_figure["method_tier"] == "mixed_unit_summary_diagnostic"
+    assert metrics_figure["report_section"] == "appendix"
     assert metrics_figure["axes"]["x"] == "Metric"
     assert metrics_figure["units"]["y"] == "mixed"
     assert metrics_figure["conclusion"]
+    assert not Path(metrics_figure["path"]).is_absolute()
+    assert metrics_figure["source_artifacts"][0]["role"] == "rendered_figure"
+    assert metrics_figure["source_artifacts"][0]["path"] == "plots/metrics_overview.svg"
 
 
 def test_generate_summary_plots_emits_flow_interface_plot_when_available(tmp_path: Path) -> None:
@@ -156,6 +161,29 @@ def test_generate_validation_plot_updates_manifest(tmp_path: Path) -> None:
     assert "failures" in figure["conclusion"]
 
 
+def test_generate_validation_plot_colors_blocked_status_separately(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
+    validation = {
+        "case": "plot_case",
+        "checks": [
+            {"status": "blocked"},
+        ],
+    }
+
+    assets = generate_validation_plot(bundle, validation)
+    root = _svg_root(Path(assets["validation_summary"]))
+    bar_rects = [
+        element
+        for element in root.findall(".//svg:rect", SVG_NS)
+        if element.attrib.get("data-series") == "bar"
+    ]
+    text_values = [element.text or "" for element in root.findall(".//svg:text", SVG_NS)]
+
+    assert "blocked" in text_values
+    assert len(bar_rects) == 1
+    assert bar_rects[0].attrib["fill"] == "#64748b"
+
+
 def test_load_plot_manifest_reads_legacy_flat_manifest(tmp_path: Path) -> None:
     manifest_path = tmp_path / "plots_manifest.json"
     plot_path = tmp_path / "plots" / "legacy.svg"
@@ -169,6 +197,48 @@ def test_load_plot_manifest_reads_legacy_flat_manifest(tmp_path: Path) -> None:
     assert catalog["legacy_plot"]["path"] == str(plot_path)
     assert catalog["legacy_plot"]["quality_status"] == "diagnostic_only"
     assert catalog["legacy_plot"]["caption"]
+
+
+def test_mixed_v2_manifest_preserves_legacy_top_level_entries(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
+    manifest_path = bundle.root / "plots_manifest.json"
+    v2_path = bundle.plots_dir / "metrics_overview.svg"
+    legacy_path = bundle.plots_dir / "uncertainty_tornado.svg"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "figures": {
+                    "metrics_overview": {
+                        "plot_id": "metrics_overview",
+                        "path": str(v2_path),
+                        "title": "Custom metrics title",
+                    }
+                },
+                "uncertainty_tornado": str(legacy_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = load_plot_manifest(manifest_path)
+    catalog = load_figure_catalog(manifest_path)
+
+    assert manifest == {
+        "metrics_overview": str(v2_path),
+        "uncertainty_tornado": str(legacy_path),
+    }
+    assert catalog["metrics_overview"]["title"] == "Custom metrics title"
+    assert catalog["uncertainty_tornado"]["plot_id"] == "uncertainty_tornado"
+    assert catalog["uncertainty_tornado"]["path"] == str(legacy_path)
+
+    generate_validation_plot(bundle, {"case": "plot_case", "checks": [{"status": "pass"}]})
+    updated_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    updated_manifest = load_plot_manifest(manifest_path)
+
+    assert "uncertainty_tornado" in updated_payload["figures"]
+    assert updated_manifest["uncertainty_tornado"] == str(legacy_path)
+    assert updated_manifest["validation_summary"].endswith("validation_summary.svg")
 
 
 def test_generate_summary_plots_emits_transient_plots_when_history_exists(tmp_path: Path) -> None:
@@ -252,6 +322,9 @@ def test_generate_summary_plots_emits_transient_sweep_envelopes_when_history_exi
     assert "transient_sweep_fuel_temperature_envelope" in assets
     assert Path(assets["transient_sweep_power_envelope"]).exists()
     assert Path(assets["transient_sweep_fuel_temperature_envelope"]).exists()
+    figure = load_figure_catalog(bundle.root / "plots_manifest.json")["transient_sweep_power_envelope"]
+    assert "stress-test ensemble percentiles" in figure["caption"]
+    assert "not calibrated UQ" in figure["conclusion"]
     assert _axis_tick_labels(Path(assets["transient_sweep_power_envelope"]), "x") == ["0", "5", "10"]
     assert len(_axis_tick_marks(Path(assets["transient_sweep_power_envelope"]), "x")) == 3
 
@@ -309,3 +382,163 @@ def test_zero_valued_bar_entries_do_not_render_filled_bar_rects(tmp_path: Path) 
     assert len(bar_rects) == 1
     assert "fail" in text_values
     assert "pending" in text_values
+
+
+def test_benchmark_residual_plot_is_blocked_without_completed_physics_residual(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
+    summary = {
+        "case": "plot_case",
+        "metrics": {"expected_cells": 456, "channel_count": 91},
+        "neutronics": {"status": "dry-run"},
+        "benchmark_residuals": {
+            "status": "blocked_missing_primary_physics",
+            "residual_plot_status": "blocked_no_meaningful_physics_residual",
+            "items": [
+                {
+                    "name": "expected_cells",
+                    "metric": "expected_cells",
+                    "evidence_category": "construction_check",
+                    "status": "pass",
+                    "residual": 0.0,
+                },
+                {
+                    "name": "keff_core_band",
+                    "metric": "keff",
+                    "evidence_category": "physics_benchmark",
+                    "status": "pending",
+                    "residual": None,
+                    "primary_benchmark_gap": True,
+                },
+            ],
+        },
+    }
+
+    assets = generate_summary_plots(bundle, summary)
+
+    assert "benchmark_residuals" not in assets
+    assert not (bundle.plots_dir / "benchmark_residuals.svg").exists()
+
+
+def test_blocked_benchmark_residual_regeneration_prunes_stale_manifest_entry(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
+    completed_summary = {
+        "case": "plot_case",
+        "neutronics": {"status": "completed"},
+        "benchmark_residuals": {
+            "status": "completed",
+            "residual_plot_status": "available",
+            "items": [
+                {
+                    "name": "keff_experimental_criticality",
+                    "metric": "keff",
+                    "evidence_category": "physics_benchmark",
+                    "physics_residual_completed": True,
+                    "status": "pass",
+                    "residual": 0.001,
+                    "residual_pcm": 100.0,
+                },
+            ],
+        },
+    }
+    blocked_summary = {
+        "case": "plot_case",
+        "neutronics": {"status": "dry-run"},
+        "benchmark_residuals": {
+            "status": "blocked_missing_primary_physics",
+            "residual_plot_status": "blocked_no_meaningful_physics_residual",
+            "items": [
+                {
+                    "name": "expected_cells",
+                    "metric": "expected_cells",
+                    "evidence_category": "construction_check",
+                    "status": "pass",
+                    "residual": 0.0,
+                },
+                {
+                    "name": "keff_core_band",
+                    "metric": "keff",
+                    "evidence_category": "physics_benchmark",
+                    "status": "pending",
+                    "residual": None,
+                    "primary_benchmark_gap": True,
+                },
+            ],
+        },
+    }
+
+    completed_assets = generate_summary_plots(bundle, completed_summary)
+    residual_path = Path(completed_assets["benchmark_residuals"])
+    assert residual_path.exists()
+    assert "benchmark_residuals" in load_plot_manifest(bundle.root / "plots_manifest.json")
+
+    blocked_assets = generate_summary_plots(bundle, blocked_summary)
+    manifest = load_plot_manifest(bundle.root / "plots_manifest.json")
+    catalog = load_figure_catalog(bundle.root / "plots_manifest.json")
+
+    assert "benchmark_residuals" not in blocked_assets
+    assert "benchmark_residuals" not in manifest
+    assert "benchmark_residuals" not in catalog
+    assert not residual_path.exists()
+
+
+def test_legacy_benchmark_residual_plot_requires_solver_backed_neutronics(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
+    summary = {
+        "case": "plot_case",
+        "metrics": {"keff": 1.01},
+        "neutronics": {"status": "dry-run"},
+        "benchmark_residuals": {
+            "items": [
+                {
+                    "name": "keff_core_band",
+                    "metric": "keff",
+                    "status": "pass",
+                    "residual": 0.01,
+                },
+            ],
+        },
+    }
+
+    assets = generate_summary_plots(bundle, summary)
+
+    assert "benchmark_residuals" not in assets
+    assert not (bundle.plots_dir / "benchmark_residuals.svg").exists()
+
+
+def test_benchmark_residual_plot_uses_completed_physics_residuals_only(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "plot_case", "run")
+    summary = {
+        "case": "plot_case",
+        "metrics": {"expected_cells": 456, "keff": 1.001},
+        "neutronics": {"status": "completed"},
+        "benchmark_residuals": {
+            "status": "completed",
+            "residual_plot_status": "available",
+            "items": [
+                {
+                    "name": "expected_cells",
+                    "metric": "expected_cells",
+                    "evidence_category": "construction_check",
+                    "status": "pass",
+                    "residual": 999.0,
+                },
+                {
+                    "name": "keff_experimental_criticality",
+                    "metric": "keff",
+                    "evidence_category": "physics_benchmark",
+                    "physics_residual_completed": True,
+                    "status": "pass",
+                    "residual": 0.001,
+                    "residual_pcm": 100.0,
+                },
+            ],
+        },
+    }
+
+    assets = generate_summary_plots(bundle, summary)
+
+    assert "benchmark_residuals" in assets
+    root = _svg_root(Path(assets["benchmark_residuals"]))
+    text_values = [element.text or "" for element in root.findall(".//svg:text", SVG_NS)]
+    assert "keff_experimental_criticality" in text_values
+    assert "expected_cells" not in text_values

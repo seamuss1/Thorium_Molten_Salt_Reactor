@@ -1,10 +1,8 @@
 # Thorium Molten Salt Reactor Lab
 
-Config-driven molten-salt reactor simulation workbench with a Python CLI, reproducible result bundles, benchmark traceability, reduced-order thermal/flow models, geometry exports, and a single-port FastAPI + React browser lab.
+This repository is a working lab for molten-salt reactor studies. Case files define the reactor, materials, operating point, transients, validation targets, and planning assumptions. The command-line tools turn those inputs into result bundles with snapshots, metrics, reports, plots, geometry exports, and provenance records. A single-port FastAPI + React app reads the same bundles for browser-based review.
 
-This is a research and engineering scaffold, not a licensed design tool. The project is deliberately honest about maturity: dry-run neutronics are separated from solver-backed OpenMC work, modern TMSR-style cases are marked as traceable surrogates until deeper source data lands, and generated reports carry validation gaps instead of burying them.
-
-![Thorium Lab dashboard](resources/readme/web-dashboard.png)
+The workflow keeps evidence levels explicit. Dry-run neutronics, reduced-order thermal/flow models, solver-backed OpenMC paths, historical MSRE benchmarks, TMSR-LF1 surrogates, and commercial planning cases each carry their own traceability, validation status, and review context.
 
 ## Start Here
 
@@ -34,17 +32,24 @@ The Windows `.cmd` wrappers are the normal entrypoints on this host because Powe
 
 ## Simulation Figures
 
-The README figures below are copied from real result bundles into [resources/readme](resources/readme) so the front page stays stable even though `results/` is ignored by Git.
+The README figures below are durable copies of generated outputs. They live in [resources/readme](resources/readme) because `results/` is intentionally ignored by Git.
 
-| TMSR-LF1 cutaway | Physics state overlay |
+| TMSR-LF1 cutaway | Flagship plant render |
 | --- | --- |
-| ![TMSR-LF1 annotated cutaway](resources/readme/tmsr-lf1-annotated-cutaway.png) | ![TMSR-LF1 physics overlay](resources/readme/tmsr-lf1-physics-overlay.png) |
+| ![TMSR-LF1 annotated cutaway](resources/readme/tmsr-lf1-annotated-cutaway.png) | ![Flagship grid thorium MSR plant render](resources/readme/flagship-grid-msr-plant-render.png) |
 
 | Transient uncertainty envelope | Flagship finance waterfall |
 | --- | --- |
 | ![TMSR-LF1 fuel temperature uncertainty envelope](resources/readme/tmsr-lf1-temperature-envelope.svg) | ![Flagship cost waterfall](resources/readme/flagship-finance-cost-waterfall.svg) |
 
-The latest TMSR-LF1 gallery source bundle used here is `results/tmsr_lf1_core/full-suite-20260502-1916-r2/`. Its summary reports a 250 MWth surrogate core, 456 generated cells, 91 channels, 85 active-flow salt-bearing channels, `beta_eff = 0.000495`, a traceability score of 88.3, and a validation maturity score of 68.9. Its transient ensemble used the NumPy backend with 512 samples; the p95 fuel-temperature peak is 718.7 C for the configured mild reactivity insertion scenario.
+Figure sources:
+
+| Figure | Source bundle | Context |
+| --- | --- | --- |
+| TMSR-LF1 cutaway | `results/tmsr_lf1_core/full-suite-20260502-1916-r2/` | 250 MWth traceable surrogate core, 456 generated cells, 91 channels, 85 active-flow salt-bearing channels, `beta_eff = 0.000495`, traceability score 88.3, validation maturity score 68.9 |
+| Transient uncertainty envelope | `results/tmsr_lf1_core/full-suite-20260502-1916-r2/` | NumPy backend, 512 samples, p95 fuel-temperature peak 718.7 C for `mild_reactivity_insertion` |
+| Flagship plant render | `results/flagship_grid_msr/flagship-plant-schematic/` | Full-plant 3D schematic for the 300 MWe flagship grid thorium MSR planning case |
+| Flagship finance waterfall | `results/flagship_grid_msr/full-suite-20260502-1916-r2/` | Commercial planning cost breakdown; planning-grade, not a vendor quote or investment estimate |
 
 ## Browser Lab
 
@@ -57,11 +62,11 @@ Main screens:
 | Screen | Purpose |
 | --- | --- |
 | Dashboard | Portfolio snapshot, latest outputs, documentation index, quick launch |
-| Simulations | Case cards, capabilities, parameters, and latest run context |
+| Simulations (`/cases`) | Case cards, capabilities, parameters, and latest run context |
 | Builder | Draft-per-run YAML parameter edits and safe command selection |
-| Run log | Job status, event stream, reports, plots, raw JSON, and artifacts |
+| Runs (`/runs`) | Job status, event stream, reports, plots, raw JSON, and artifacts |
 | Science | `README.md` plus `docs/*.md` rendered inside the app |
-| 3D | glTF geometry viewer with generated image fallback |
+| 3D viewer | glTF geometry viewer with generated image fallback |
 | Admin | Local/deployed run limit reset tools for configured admins |
 
 Browser-launched runs write isolated snapshots under `results/<case>/<run_id>/` and do not mutate `configs/cases/*/case.yaml`. The web command allowlist is intentionally narrow: `build`, `run --no-solver`, `transient`, `transient-sweep`, `validate`, `render`, and `report`.
@@ -77,7 +82,7 @@ Browser-launched runs write isolated snapshots under `results/<case>/<run_id>/` 
 | [`msre_u233_zero_power`](configs/cases/msre_u233_zero_power/case.yaml) | U-233 MSRE zero-power harness | `.\scripts\Run-Reactor.cmd validate msre_u233_zero_power` | Historical benchmark path |
 | [`tmsr_lf1_core`](configs/cases/tmsr_lf1_core/case.yaml) | Modern TMSR-LF1-inspired core | `.\scripts\Run-Reactor.cmd render tmsr_lf1_core` | Detailed ring-lattice CSG, transient proxy, uncertainty sweep |
 | [`immersed_pool_reference`](configs/cases/immersed_pool_reference/case.yaml) | Immersed-pool demonstrator | `.\scripts\Run-Reactor.cmd transient immersed_pool_reference --scenario partial_heat_sink_loss` | Pool layout, loop segments, flow animation assets |
-| [`flagship_grid_msr`](configs/cases/flagship_grid_msr/case.yaml) | Commercial planning target | `.\scripts\Run-Reactor.cmd economics flagship_grid_msr --scenario conservative_foak` | 300 MWe planning case with cost and schedule outputs |
+| [`flagship_grid_msr`](configs/cases/flagship_grid_msr/case.yaml) | Commercial planning target | `.\scripts\Run-Reactor.cmd render flagship_grid_msr` | 300 MWe planning case with plant schematic exports; run `.\scripts\Run-Reactor.cmd economics flagship_grid_msr --scenario conservative_foak` for cost and schedule outputs |
 
 More detail lives in [configs/cases/README.md](configs/cases/README.md).
 
@@ -139,6 +144,18 @@ This repository is useful because it exposes uncertainty instead of pretending i
 | Native advanced physics | Additive R-Z SSP-RK3 precursor transport and sparse Bateman depletion artifacts for verification and reporting; not yet a replacement for `physics_core` |
 | Geometry exports | Procedural CSG-derived render assets, mesh checks, OBJ/STL/glTF exports, and image overlays |
 | Commercial planning | Finance and schedule model for `flagship_grid_msr`, separated from benchmark and research cases |
+
+## Freshness Review
+
+The README was reviewed against the local repository state on 2026-05-19. The main stale item was the old physics overlay figure; it has been replaced with the full flagship plant render above.
+
+| Area | Current status | Needs update when |
+| --- | --- | --- |
+| README figures | Durable assets now point at current selected source bundles in [resources/README.md](resources/README.md) | A newer accepted result bundle should become the public front-page evidence |
+| MSRE first criticality | Still blocked from benchmark-ready language by open geometry, materials, solver-bundle, and cross-code evidence gaps | Source-indexed reconstruction and solver-backed peer-review gates are accepted |
+| TMSR-LF1 core | Still a traceable surrogate, not validated plant performance | Source-linked or solver-backed evidence justifies tighter acceptance bands |
+| Browser lab docs | Single-port FastAPI + React model still matches the code; route names are listed with labels to avoid nav-name drift | The app adds/removes screens or broadens browser-launchable commands |
+| Result bundle summary | Top-level README shows the short contract; [results/README.md](results/README.md) remains the authoritative artifact list | New first-class artifacts become required for every workflow |
 
 Key science references and design reasoning are in:
 

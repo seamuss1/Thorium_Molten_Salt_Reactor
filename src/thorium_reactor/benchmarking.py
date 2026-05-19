@@ -20,6 +20,15 @@ OPERATING_POINT_STATUSES = {"literature-backed", "cross-code-backed", "surrogate
 UNCERTAINTY_COVERAGE_STATUSES = {"quantified", "partial", "qualitative", "missing"}
 QUALITY_GATE_PASS_STATUSES = {"completed", "complete", "pass", "passed"}
 PCM_PER_DELTA_K = 100000.0
+PRIMARY_PHYSICS_BENCHMARK_METRICS = {"keff"}
+CONSTRUCTION_CHECK_METRICS = {"expected_cells", "cell_count", "channel_count"}
+NON_SOLVER_NEUTRONICS_STATUSES = {
+    "dry-run",
+    "skipped_missing_solver",
+    "completed_without_statepoint",
+    "failed",
+    "not_run",
+}
 
 
 def assess_benchmark_traceability(
@@ -142,6 +151,9 @@ def assess_benchmark_traceability(
             + ", ".join(missing_validation_links)
             + "."
         )
+    scale_alignment = _assess_scale_alignment(reactor, targets)
+    if scale_alignment.get("status") == "scale_mismatch":
+        gaps.append(str(scale_alignment["message"]))
     validation_maturity = _assess_validation_maturity(benchmark, targets)
     benchmark_quality = _assess_benchmark_quality(config, benchmark, targets, validation_maturity)
 
@@ -185,6 +197,7 @@ def assess_benchmark_traceability(
         },
         "reactor_parameter_links": reactor_parameter_links,
         "physics_validation_links": physics_validation_links,
+        "scale_alignment": scale_alignment,
         "gaps": gaps,
         "validation_maturity": validation_maturity,
         "benchmark_quality": benchmark_quality,
@@ -565,6 +578,18 @@ def _assess_benchmark_quality(
         )
     )
 
+    unresolved_required = _coerce_float(source_dossier.get("unresolved_required_parameter_count"))
+    required_parameters_resolved = unresolved_required == 0.0
+    gates.append(
+        _quality_gate(
+            "required_source_parameters_resolved",
+            required_parameters_resolved,
+            "All required source-indexed benchmark parameters are resolved."
+            if required_parameters_resolved
+            else f"{int(unresolved_required) if unresolved_required is not None else 'Unknown'} required source-indexed benchmark parameter(s) remain unresolved.",
+        )
+    )
+
     placeholder_targets = [
         item["id"]
         for item in targets
@@ -651,6 +676,21 @@ def _assess_benchmark_quality(
         )
     )
 
+    promotion_blockers = [
+        str(item)
+        for item in benchmark_model.get("promotion_blockers", [])
+        if str(item).strip()
+    ]
+    gates.append(
+        _quality_gate(
+            "promotion_blockers_cleared",
+            not promotion_blockers,
+            "No benchmark promotion blockers are declared in the case configuration."
+            if not promotion_blockers
+            else "Benchmark promotion blockers remain: " + ", ".join(promotion_blockers) + ".",
+        )
+    )
+
     if isinstance(quality_gates, list):
         for index, gate in enumerate(quality_gates, start=1):
             if not isinstance(gate, dict):
@@ -699,6 +739,50 @@ def _contains_placeholder_language(value: Any) -> bool:
     return "placeholder" in lowered or "surrogate" in lowered
 
 
+def _assess_scale_alignment(reactor: dict[str, Any], targets: list[dict[str, Any]]) -> dict[str, Any]:
+    case_power = _coerce_float(reactor.get("design_power_mwth"))
+    benchmark_power = None
+    benchmark_source = None
+    for target in targets:
+        if target.get("id") != "nominal_thermal_power_mwth":
+            continue
+        benchmark_power = _coerce_float(target.get("value"))
+        benchmark_source = target.get("dataset_id") or target.get("id")
+        if benchmark_power is not None:
+            break
+    if case_power is None or benchmark_power is None or case_power <= 0.0 or benchmark_power <= 0.0:
+        return {
+            "status": "not_assessed",
+            "case_power_mwth": case_power,
+            "benchmark_power_mwth": benchmark_power,
+            "scale_ratio": None,
+            "message": "Benchmark thermal-power scale could not be assessed.",
+        }
+
+    scale_ratio = max(case_power, benchmark_power) / min(case_power, benchmark_power)
+    if scale_ratio <= 1.25:
+        status = "same_scale"
+        message = (
+            f"Case design power {case_power:g} MWth is aligned with benchmark nominal thermal power "
+            f"{benchmark_power:g} MWth."
+        )
+    else:
+        status = "scale_mismatch"
+        message = (
+            f"Case design power {case_power:g} MWth differs from benchmark nominal thermal power "
+            f"{benchmark_power:g} MWth by {scale_ratio:.1f}x; treat this benchmark as surrogate/context, "
+            "not same-scale validation."
+        )
+    return {
+        "status": status,
+        "case_power_mwth": case_power,
+        "benchmark_power_mwth": benchmark_power,
+        "benchmark_source": benchmark_source,
+        "scale_ratio": round(scale_ratio, 3),
+        "message": message,
+    }
+
+
 def _normalize_cross_code_check(index: int, item: Any) -> dict[str, Any]:
     if not isinstance(item, dict):
         return {
@@ -716,10 +800,86 @@ def _normalize_cross_code_check(index: int, item: Any) -> dict[str, Any]:
     }
 
 
+def _classify_residual_evidence(metric: str, target: dict[str, Any], source_name: str) -> str:
+    explicit = target.get("evidence_category") or target.get("benchmark_role")
+    if explicit:
+        normalized = str(explicit).strip().lower().replace("-", "_")
+        if normalized in {"physics_benchmark", "construction_check", "diagnostic_check"}:
+            return normalized
+    if metric in PRIMARY_PHYSICS_BENCHMARK_METRICS:
+        return "physics_benchmark"
+    if metric in CONSTRUCTION_CHECK_METRICS or source_name in {"manifest", "build_manifest"}:
+        return "construction_check"
+    if _infer_benchmark_targets_for_validation(target):
+        return "physics_benchmark"
+    return "diagnostic_check"
+
+
+def _neutronics_status(summary: dict[str, Any]) -> str | None:
+    neutronics = summary.get("neutronics", {})
+    if not isinstance(neutronics, dict):
+        return None
+    status = neutronics.get("status")
+    if status is None:
+        return None
+    return str(status)
+
+
+def _is_non_solver_neutronics_status(status: str | None) -> bool:
+    return bool(status) and str(status).lower() in NON_SOLVER_NEUTRONICS_STATUSES
+
+
+def _summarize_residual_items(items: list[dict[str, Any]]) -> dict[str, Any]:
+    physics_items = [item for item in items if item.get("evidence_category") == "physics_benchmark"]
+    completed_physics = [
+        item
+        for item in physics_items
+        if item.get("physics_residual_completed") is True and item.get("status") in {"pass", "fail"}
+    ]
+    construction_items = [item for item in items if item.get("evidence_category") == "construction_check"]
+    diagnostic_items = [item for item in items if item.get("evidence_category") == "diagnostic_check"]
+    primary_gaps = [
+        item
+        for item in physics_items
+        if item.get("primary_physics_metric") and item.get("status") not in {"pass", "fail"}
+    ]
+    blockers = [
+        str(item.get("message"))
+        for item in items
+        if item.get("benchmark_blocker") and item.get("message")
+    ]
+    if primary_gaps and not blockers:
+        blockers.extend(str(item.get("message")) for item in primary_gaps if item.get("message"))
+
+    if primary_gaps:
+        status = "blocked_missing_primary_physics"
+    elif physics_items and not completed_physics:
+        status = "blocked_no_completed_physics_residual"
+    elif completed_physics:
+        status = "completed"
+    elif construction_items or diagnostic_items:
+        status = "diagnostic_only"
+    else:
+        status = "not_configured"
+
+    residual_plot_status = "available" if completed_physics else "blocked_no_meaningful_physics_residual"
+    return {
+        "status": status,
+        "physics_item_count": len(physics_items),
+        "completed_physics_item_count": len(completed_physics),
+        "construction_check_count": len(construction_items),
+        "diagnostic_check_count": len(diagnostic_items),
+        "primary_benchmark_gap_count": len(primary_gaps),
+        "blockers": blockers,
+        "residual_plot_status": residual_plot_status,
+    }
+
+
 def build_benchmark_residuals(
     config: CaseConfig | dict[str, Any],
     summary: dict[str, Any],
     benchmark: dict[str, Any] | None,
+    manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     benchmark = benchmark or {}
     _, validation_targets = _extract_config_parts(config)
@@ -727,11 +887,13 @@ def build_benchmark_residuals(
     for name, target in validation_targets.items():
         if not isinstance(target, dict):
             continue
-        items.append(_build_residual_item(name, target, summary, benchmark))
+        items.append(_build_residual_item(name, target, summary, benchmark, manifest=manifest))
+    summary_status = _summarize_residual_items(items)
     return {
         "item_count": len(items),
         "items": items,
         "dataset_count": len(benchmark.get("datasets", [])) if isinstance(benchmark.get("datasets"), list) else 0,
+        **summary_status,
     }
 
 
@@ -741,11 +903,13 @@ def evaluate_validation_target(
     metrics: dict[str, Any],
     manifest: dict[str, Any],
     benchmark: dict[str, Any] | None = None,
+    summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate a validation target with the same residual rules used in reports."""
 
-    summary = {"metrics": metrics}
-    item = _build_residual_item(name, target, summary, benchmark or {}, manifest=manifest)
+    residual_summary = dict(summary) if isinstance(summary, dict) else {}
+    residual_summary["metrics"] = metrics if isinstance(metrics, dict) else {}
+    item = _build_residual_item(name, target, residual_summary, benchmark or {}, manifest=manifest)
     metric = item.get("metric", "metric")
     if item["status"] == "pending":
         return {
@@ -779,18 +943,30 @@ def _build_residual_item(
     manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source_name = str(target.get("source", "metrics"))
-    source = _resolve_metric_source(source_name, summary, manifest)
-    metric = target.get("metric")
+    source, resolved_source_name = _resolve_metric_source(source_name, summary, manifest)
+    metric = str(target.get("metric", ""))
     value = source.get(metric)
     benchmark_target_ids = _infer_benchmark_targets_for_validation(target)
     benchmark_targets = _benchmark_target_map(benchmark)
     reference = _resolve_reference_target(target, benchmark_target_ids, benchmark_targets)
     minimum = target.get("min")
     maximum = target.get("max")
+    evidence_category = _classify_residual_evidence(metric, target, source_name)
+    primary_physics_metric = metric in PRIMARY_PHYSICS_BENCHMARK_METRICS
+    neutronics_status = _neutronics_status(summary)
+    non_solver_physics_value = (
+        evidence_category == "physics_benchmark"
+        and value is not None
+        and _is_non_solver_neutronics_status(neutronics_status)
+    )
     item: dict[str, Any] = {
         "name": name,
         "metric": metric,
         "value": value,
+        "source": source_name,
+        "resolved_source": resolved_source_name,
+        "evidence_category": evidence_category,
+        "primary_physics_metric": primary_physics_metric,
         "min": minimum,
         "max": maximum,
         "center": None,
@@ -798,6 +974,8 @@ def _build_residual_item(
         "status": "pending",
         "benchmark_target_ids": benchmark_target_ids,
     }
+    if neutronics_status:
+        item["neutronics_status"] = neutronics_status
     if reference:
         item["target_value"] = reference.get("value")
         item["target_units"] = reference.get("units")
@@ -805,7 +983,25 @@ def _build_residual_item(
         item["reference_source"] = reference.get("source")
 
     if value is None:
-        item["message"] = f"Metric '{metric}' is not available yet."
+        if primary_physics_metric:
+            item["primary_benchmark_gap"] = True
+            item["benchmark_blocker"] = True
+            item["message"] = (
+                f"Primary physics benchmark metric '{metric}' is unavailable; "
+                "a solver-backed OpenMC result is required before benchmark residuals are meaningful."
+            )
+        else:
+            item["message"] = f"Metric '{metric}' is not available yet."
+        return item
+
+    if non_solver_physics_value:
+        item["primary_benchmark_gap"] = primary_physics_metric
+        item["benchmark_blocker"] = primary_physics_metric
+        item["status"] = "blocked"
+        item["message"] = (
+            f"Metric '{metric}' is present only under neutronics status '{neutronics_status}', "
+            "so it is treated as a dry-run/proxy value rather than a solver-backed benchmark residual."
+        )
         return item
 
     numeric_value = _coerce_float(value)
@@ -835,6 +1031,8 @@ def _build_residual_item(
             item["combined_uncertainty_pcm"] = round(combined_uncertainty, 3)
             item["normalized_residual"] = round(normalized, 3)
             item["status"] = "pass" if abs(normalized) <= sigma_multiplier else "fail"
+            if evidence_category == "physics_benchmark":
+                item["physics_residual_completed"] = True
             item["message"] = (
                 f"{numeric_value} residual is {item['residual_pcm']} pcm against "
                 f"{round(combined_uncertainty, 3)} pcm combined uncertainty."
@@ -856,6 +1054,8 @@ def _build_residual_item(
         item["message"] = f"{numeric_value} is above the maximum bound {maximum}."
     else:
         item["message"] = f"{numeric_value} is within the expected range."
+    if evidence_category == "physics_benchmark":
+        item["physics_residual_completed"] = True
     return item
 
 
@@ -863,17 +1063,28 @@ def _resolve_metric_source(
     source_name: str,
     summary: dict[str, Any],
     manifest: dict[str, Any] | None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], str]:
     if source_name == "metrics":
-        return summary.get("metrics", {})
-    if source_name == "manifest":
-        return manifest or {}
+        metrics = summary.get("metrics", {})
+        return (metrics if isinstance(metrics, dict) else {}), "metrics"
+    if source_name in {"manifest", "build_manifest"}:
+        if manifest:
+            return manifest, source_name
+        source = summary.get(source_name)
+        if isinstance(source, dict):
+            return source, source_name
+        metrics = summary.get("metrics", {})
+        if isinstance(metrics, dict):
+            return metrics, "metrics_fallback_for_build_manifest"
+        return {}, source_name
     source = summary.get(source_name)
     if isinstance(source, dict):
-        return source
+        return source, source_name
     if manifest and source_name in manifest and isinstance(manifest[source_name], dict):
-        return manifest[source_name]
-    return manifest or {}
+        return manifest[source_name], f"manifest.{source_name}"
+    if manifest:
+        return manifest, "manifest_fallback"
+    return {}, source_name
 
 
 def _benchmark_target_map(benchmark: dict[str, Any]) -> dict[str, dict[str, Any]]:

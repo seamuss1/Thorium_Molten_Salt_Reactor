@@ -17,6 +17,10 @@ from thorium_reactor.capabilities import (
 from thorium_reactor.benchmarking import assess_benchmark_traceability
 from thorium_reactor.benchmarking import build_benchmark_residuals
 from thorium_reactor.benchmarking import evaluate_validation_target
+from thorium_reactor.benchmark_evidence import (
+    materialize_benchmark_evidence,
+    merge_benchmark_evidence_into_quality,
+)
 from thorium_reactor.bop.steady_state import BOPInputs, run_steady_state_bop
 from thorium_reactor.config import CaseConfig, load_yaml
 from thorium_reactor.flow.properties import (
@@ -46,6 +50,7 @@ from thorium_reactor.literature_models import (
     build_tritium_transport_summary,
 )
 from thorium_reactor.neutronics.openmc_compat import missing_openmc_runtime_message, openmc
+from thorium_reactor.paths import refresh_bundle_artifact_statuses
 from thorium_reactor.physics_core import build_physics_core_summary
 from thorium_reactor.property_audit import build_property_audit
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot
@@ -114,6 +119,10 @@ def _summarize_model_validity(checks: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _benchmark_quality_checks_to_status_checks(benchmark_traceability: dict[str, Any]) -> list[dict[str, Any]]:
     quality = benchmark_traceability.get("benchmark_quality", {})
+    return _benchmark_quality_dict_to_status_checks(quality)
+
+
+def _benchmark_quality_dict_to_status_checks(quality: dict[str, Any]) -> list[dict[str, Any]]:
     if not quality:
         return []
     checks: list[dict[str, Any]] = []
@@ -174,7 +183,7 @@ def _build_validation_result(
     checks: list[dict[str, Any]] = []
     metrics = summary.get("metrics", {})
     for name, target in config.validation_targets.items():
-        checks.append(evaluate_validation_target(name, target, metrics, manifest, benchmark=benchmark))
+        checks.append(evaluate_validation_target(name, target, metrics, manifest, benchmark=benchmark, summary=summary))
     checks = _merge_checks(
         checks,
         manifest.get("model_validity", {}).get("checks", []),
@@ -301,9 +310,10 @@ def run_case(
     benchmark: dict[str, Any] | None = None,
     solver_enabled: bool = True,
     provenance: dict[str, Any] | None = None,
+    repo_root: Path | str | None = None,
 ) -> dict[str, Any]:
     built = build_case(config, bundle.openmc_dir, benchmark=benchmark)
-    runtime_context = build_runtime_context(command=["run", config.name])
+    runtime_context = build_runtime_context(command=["run", config.name], cwd=repo_root)
     property_audit = build_property_audit(config)
     capabilities = get_case_capabilities(config)
     bundle.write_json("geometry_description.json", built.geometry_description)
@@ -510,17 +520,39 @@ def run_case(
         summary["metrics"]["validation_maturity_score"] = built.manifest.get("validation_maturity", {}).get("validation_maturity_score", 0.0)
         if summary["benchmark_quality"]:
             summary["metrics"]["benchmark_quality_score"] = summary["benchmark_quality"].get("quality_score", 0.0)
-    benchmark_residuals = build_benchmark_residuals(config, summary, built.benchmark)
+    benchmark_residuals = build_benchmark_residuals(config, summary, built.benchmark, manifest=build_manifest)
     summary["benchmark_residuals"] = _json_copy(benchmark_residuals)
+    if provenance:
+        summary["input_provenance"] = _json_copy(provenance)
+
+    bundle.write_json("runtime_context.json", runtime_context)
+    bundle.write_json("property_audit.json", property_audit)
+    bundle.write_json("benchmark_residuals.json", benchmark_residuals)
+    bundle.write_json("summary.json", summary)
+    if summary.get("benchmark_quality"):
+        benchmark_evidence = materialize_benchmark_evidence(
+            bundle,
+            config.data,
+            summary,
+            built.benchmark,
+            provenance=provenance,
+            openmc_module=openmc,
+        )
+        summary["benchmark_evidence"] = _json_copy(benchmark_evidence)
+        summary["benchmark_quality"] = merge_benchmark_evidence_into_quality(
+            summary.get("benchmark_quality"),
+            benchmark_evidence,
+        )
+        summary["metrics"]["benchmark_quality_score"] = summary["benchmark_quality"].get("quality_score", 0.0)
+
     summary["model_validity"] = _summarize_model_validity(
         _merge_checks(
             build_manifest.get("model_validity", {}).get("checks", []),
+            _benchmark_quality_dict_to_status_checks(summary.get("benchmark_quality", {})),
             dynamic_validity_checks,
             summary.get("primary_system", {}).get("checks", []),
         )
     )
-    if provenance:
-        summary["input_provenance"] = _json_copy(provenance)
 
     validation_result = _build_validation_result(
         config,
@@ -531,9 +563,38 @@ def run_case(
     )
     bundle.write_json("validation.json", validation_result)
     generate_validation_plot(bundle, validation_result)
-    bundle.write_json("runtime_context.json", runtime_context)
-    bundle.write_json("property_audit.json", property_audit)
-    bundle.write_json("benchmark_residuals.json", benchmark_residuals)
+    if summary.get("benchmark_quality"):
+        benchmark_evidence = materialize_benchmark_evidence(
+            bundle,
+            config.data,
+            summary,
+            built.benchmark,
+            provenance=provenance,
+            openmc_module=openmc,
+        )
+        summary["benchmark_evidence"] = _json_copy(benchmark_evidence)
+        summary["benchmark_quality"] = merge_benchmark_evidence_into_quality(
+            summary.get("benchmark_quality"),
+            benchmark_evidence,
+        )
+        summary["metrics"]["benchmark_quality_score"] = summary["benchmark_quality"].get("quality_score", 0.0)
+        summary["model_validity"] = _summarize_model_validity(
+            _merge_checks(
+                build_manifest.get("model_validity", {}).get("checks", []),
+                _benchmark_quality_dict_to_status_checks(summary.get("benchmark_quality", {})),
+                dynamic_validity_checks,
+                summary.get("primary_system", {}).get("checks", []),
+            )
+        )
+        validation_result = _build_validation_result(
+            config,
+            build_manifest,
+            summary,
+            benchmark=built.benchmark,
+            provenance=provenance,
+        )
+        bundle.write_json("validation.json", validation_result)
+        generate_validation_plot(bundle, validation_result)
     if "physics_core" in summary:
         bundle.write_json("physics_core.json", summary["physics_core"])
     state_store = build_state_store(
@@ -548,7 +609,9 @@ def run_case(
     bundle.write_json("state_store.json", state_store)
     bundle.write_json("summary.json", summary)
     summary["visualization_state"] = _build_visualization_state(bundle)
+    summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
     build_manifest["visualization_state"] = _build_visualization_state(bundle)
+    build_manifest["artifact_status"] = _json_copy(summary["artifact_status"])
     bundle.write_json("summary.json", summary)
     bundle.write_json("build_manifest.json", build_manifest)
     if "flow" in summary:

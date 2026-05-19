@@ -1,11 +1,17 @@
+import json
+import shutil
+import sys
 from pathlib import Path
 
 import pytest
 
-from thorium_reactor.cli import _load_or_create_bundle, build_parser, resolve_benchmark_runtime
-from thorium_reactor.paths import create_result_bundle
+from thorium_reactor.cli import _finish_cli_stage, _load_or_create_bundle, _stage_command_from_argv, build_parser, main, resolve_benchmark_runtime
+from thorium_reactor.paths import create_result_bundle, snapshot_bundle_artifacts
 from thorium_reactor.transient_sweep import DEFAULT_TRANSIENT_SWEEP_SAMPLES
 from thorium_reactor.uncertainty import DEFAULT_UNCERTAINTY_SWEEP_SAMPLES
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_cli_registers_all_commands() -> None:
@@ -182,6 +188,77 @@ def test_cli_explicit_run_id_creation_rejects_collision(tmp_path: Path) -> None:
 
     reused = _load_or_create_bundle(tmp_path, "example_pin", "fixed", allow_existing=True)
     assert reused.root == existing.root
+
+
+def test_cli_run_writes_stage_manifest_and_artifact_status(tmp_path: Path) -> None:
+    scratch = tmp_path / "repo"
+    (scratch / "configs" / "cases" / "example_pin").mkdir(parents=True)
+    (scratch / "benchmarks" / "tmsr_lf1").mkdir(parents=True)
+    shutil.copy2(REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml", scratch / "configs" / "cases" / "example_pin" / "case.yaml")
+    shutil.copy2(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", scratch / "benchmarks" / "tmsr_lf1" / "benchmark.yaml")
+
+    assert main(["--repo-root", str(scratch), "run", "example_pin", "--run-id", "cli-stage", "--no-solver"]) == 0
+
+    bundle_root = scratch / "results" / "example_pin" / "cli-stage"
+    stage_manifest = json.loads((bundle_root / "stage_manifest.json").read_text(encoding="utf-8"))
+    artifact_status = json.loads((bundle_root / "artifact_status.json").read_text(encoding="utf-8"))
+    summary = json.loads((bundle_root / "summary.json").read_text(encoding="utf-8"))
+
+    assert stage_manifest["stages"][0]["stage"] == "run"
+    assert stage_manifest["stages"][0]["command"] == ["run"]
+    assert stage_manifest["stages"][0]["args"] == ["example_pin", "--run-id", "cli-stage", "--no-solver"]
+    assert stage_manifest["stages"][0]["method_tier"] == "dry_run_proxy"
+    assert "summary.json" in stage_manifest["stages"][0]["output_artifacts"]
+    assert artifact_status["groups"]["openmc"]["state"] == "dry_run"
+    assert summary["artifact_status"]["groups"]["openmc"]["blockers"]
+
+
+def test_cli_stage_manifest_records_modified_existing_artifact(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "example_pin", "modified-summary")
+    bundle.write_json("summary.json", {"neutronics": {"status": "dry-run"}, "version": 1})
+    before = snapshot_bundle_artifacts(bundle)
+
+    bundle.write_json("summary.json", {"neutronics": {"status": "dry-run"}, "version": 2})
+    _finish_cli_stage(
+        bundle,
+        "run",
+        ["run", "example_pin", "--no-solver"],
+        "2026-05-18T00:00:00Z",
+        before,
+        {"input_snapshots": {}},
+        summary={"neutronics": {"status": "dry-run"}},
+        repo_root=tmp_path,
+    )
+
+    manifest = json.loads((bundle.root / "stage_manifest.json").read_text(encoding="utf-8"))
+    assert "summary.json" in manifest["stages"][0]["output_artifacts"]
+
+
+def test_stage_command_from_sys_argv_preserves_subcommand_options(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "reactor",
+            "--repo-root",
+            "C:\\repo",
+            "transient-sweep",
+            "immersed_pool_reference",
+            "--scenario",
+            "load_follow_step",
+            "--samples",
+            "16",
+        ],
+    )
+
+    assert _stage_command_from_argv(None, "transient-sweep") == [
+        "transient-sweep",
+        "immersed_pool_reference",
+        "--scenario",
+        "load_follow_step",
+        "--samples",
+        "16",
+    ]
 
 
 def test_cli_registers_economics_command() -> None:

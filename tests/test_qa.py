@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from thorium_reactor.cli import build_parser, main
 from thorium_reactor.qa import (
     REQUIRED_MATRIX_COLUMNS,
@@ -15,6 +17,48 @@ from thorium_reactor.qa import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _make_nonconformance_row(**overrides: str) -> str:
+    values = {
+        "Nonconformance ID": "NCA-2026-006",
+        "Description": "A reviewer-readable deficiency.",
+        "Affected artifact": "`docs/example.md`",
+        "Severity": "minor",
+        "Disposition": "correct_before_use",
+        "Corrective action": "Correct the deficiency.",
+        "Owner": "QA owner",
+        "Closure evidence": "Reviewed evidence path.",
+        "Status": "open",
+    }
+    values.update(overrides)
+    return "| " + " | ".join(values[field] for field in REQUIRED_NONCONFORMANCE_FIELDS) + " |"
+
+
+def _write_nonconformance_log(repo_root: Path, row: str) -> Path:
+    docs_dir = repo_root / "docs"
+    docs_dir.mkdir()
+    record_format_rows = "\n".join(
+        f"| {field} | Required {field}. |" for field in REQUIRED_NONCONFORMANCE_FIELDS
+    )
+    open_header = "| " + " | ".join(REQUIRED_NONCONFORMANCE_FIELDS) + " |"
+    open_separator = "| " + " | ".join("---" for _ in REQUIRED_NONCONFORMANCE_FIELDS) + " |"
+    markdown = f"""# Nonconformance And Corrective-Action Log
+
+## Record Format
+
+| Field | Required content |
+| --- | --- |
+{record_format_rows}
+
+## Open Log
+
+{open_header}
+{open_separator}
+{row}
+"""
+    (docs_dir / "nonconformance-corrective-action-log.md").write_text(markdown, encoding="utf-8")
+    return repo_root
 
 
 def test_requirements_traceability_artifacts_validate() -> None:
@@ -98,6 +142,55 @@ def test_nonconformance_log_declares_required_fields_and_rows() -> None:
     assert tuple(result["columns"]) == REQUIRED_NONCONFORMANCE_FIELDS
     assert {check["name"] for check in result["checks"]} == {"qa::nonconformance_log_required_fields"}
     assert {check["status"] for check in result["checks"]} == {"pass"}
+
+
+def test_nonconformance_log_rejects_bad_nca_id(tmp_path: Path) -> None:
+    repo_root = _write_nonconformance_log(
+        tmp_path,
+        _make_nonconformance_row(**{"Nonconformance ID": "NCA-review-gap"}),
+    )
+
+    result = validate_nonconformance_log(repo_root)
+
+    assert result["passed"] is False
+    assert any("NCA-YYYY-NNN" in error for error in result["errors"])
+
+
+@pytest.mark.parametrize(
+    ("field_name", "bad_value"),
+    [
+        ("Severity", "blocker"),
+        ("Disposition", "ship_it"),
+        ("Status", "done"),
+    ],
+)
+def test_nonconformance_log_rejects_undocumented_enum_values(
+    tmp_path: Path,
+    field_name: str,
+    bad_value: str,
+) -> None:
+    repo_root = _write_nonconformance_log(
+        tmp_path,
+        _make_nonconformance_row(**{field_name: bad_value}),
+    )
+
+    result = validate_nonconformance_log(repo_root)
+
+    assert result["passed"] is False
+    assert any(field_name in error and bad_value in error for error in result["errors"])
+
+
+def test_nonconformance_log_rejects_malformed_extra_cell_row(tmp_path: Path) -> None:
+    repo_root = _write_nonconformance_log(
+        tmp_path,
+        _make_nonconformance_row(Description="Unescaped delimiter | shifts the row"),
+    )
+
+    result = validate_nonconformance_log(repo_root)
+
+    assert result["passed"] is False
+    assert any("has 10 cell(s), expected 9" in error for error in result["errors"])
+    assert any("Escape literal pipe characters" in error for error in result["errors"])
 
 
 def test_nonconformance_log_explains_when_github_issue_needs_record() -> None:

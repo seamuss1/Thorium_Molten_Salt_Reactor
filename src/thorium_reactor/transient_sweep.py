@@ -110,6 +110,12 @@ def build_transient_sweep_payload(
         transient_config,
         property_uncertainty=property_uncertainty,
     )
+    ensemble_definition = _build_ensemble_definition(
+        uncertainty_model,
+        scenario=scenario,
+        seed=int(seed),
+        requested_samples=max(int(samples), MIN_TRANSIENT_SWEEP_SAMPLES),
+    )
     sample_count = max(int(samples), MIN_TRANSIENT_SWEEP_SAMPLES)
     requested_backend = "auto" if backend == "auto" else backend
     if prefer_gpu and backend == "auto":
@@ -149,6 +155,7 @@ def build_transient_sweep_payload(
         "property_uncertainty": property_uncertainty,
         "model_parameters": model_parameters,
         "uncertainty_model": uncertainty_model,
+        "ensemble_definition": ensemble_definition,
         "metrics": metrics,
         "history": history,
         "backend_report": backend_report,
@@ -195,6 +202,57 @@ def transient_sweep_summary(payload: dict[str, Any], *, history_path: str) -> di
         "backend_report": payload["backend_report"],
         "runtime_performance": payload["runtime_performance"],
         "numerical_checks": payload["numerical_checks"],
+        "ensemble_definition": payload.get("ensemble_definition", {}),
+    }
+
+
+def _build_ensemble_definition(
+    uncertainty_model: dict[str, float],
+    *,
+    scenario: dict[str, Any],
+    seed: int,
+    requested_samples: int,
+) -> dict[str, Any]:
+    parameter_metadata = {
+        "event_reactivity_sigma_fraction": ("fraction", "normal multiplier on event reactivity amplitudes", "configured event reactivity stress spread"),
+        "flow_sigma_fraction": ("fraction", "normal multiplier on flow fractions", "property and flow-model screening uncertainty"),
+        "heat_sink_sigma_fraction": ("fraction", "normal multiplier on heat-sink fractions", "heat-transfer screening uncertainty"),
+        "cleanup_sigma_fraction": ("fraction", "normal multiplier on cleanup rates", "cleanup process screening uncertainty"),
+        "temperature_feedback_sigma_fraction": ("fraction", "normal multiplier on feedback coefficients", "reactivity-feedback sensitivity screen"),
+        "precursor_worth_sigma_fraction": ("fraction", "normal multiplier on precursor worth", "flowing-fuel precursor worth sensitivity"),
+        "xenon_worth_sigma_fraction": ("fraction", "normal multiplier on xenon worth", "poison-worth sensitivity screen"),
+        "sink_offset_sigma_c": ("C", "normal additive sink-temperature offset", "heat-sink scenario spread"),
+        "redox_setpoint_sigma_ev": ("eV", "normal additive redox setpoint offset", "chemistry-control sensitivity screen"),
+        "impurity_ingress_sigma_fraction": ("fraction", "normal multiplier on impurity ingress", "chemistry ingress stress spread"),
+        "gas_stripping_sigma_fraction": ("fraction", "normal multiplier on gas stripping efficiency", "offgas/removal sensitivity screen"),
+    }
+    varied_parameters = []
+    for parameter, sigma in sorted(uncertainty_model.items()):
+        units, distribution, basis = parameter_metadata.get(
+            parameter,
+            ("dimensionless", "independent normal perturbation", "configured screening spread"),
+        )
+        varied_parameters.append(
+            {
+                "parameter": parameter,
+                "units": units,
+                "distribution": distribution,
+                "bounds": "clipped where required by physical fractional limits",
+                "sigma": sigma,
+                "physical_basis": basis,
+            }
+        )
+    return {
+        "ensemble_meaning": "stress_test_envelope",
+        "uq_vs_stress_test": "stress-test/scenario envelope unless every distribution is source-backed and calibrated",
+        "scenario_name": scenario.get("name"),
+        "event_count": len(scenario.get("events", []) if isinstance(scenario.get("events"), list) else []),
+        "seed": seed,
+        "requested_samples": requested_samples,
+        "sampler": "pseudo_random_independent_normal",
+        "correlation_assumptions": "independent perturbations; no cross-parameter covariance is modeled",
+        "percentile_definitions": "p05/p50/p95 are empirical sample percentiles at each recorded time step",
+        "varied_parameters": varied_parameters,
     }
 
 

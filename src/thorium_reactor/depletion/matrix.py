@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -18,6 +19,7 @@ except Exception:  # noqa: BLE001 - the repository runtime may not have SciPy un
 
 
 DEPLETION_MATRIX_MODEL = "native_sparse_bateman_depletion_matrix_v1"
+DEPLETION_NPZ_SCHEMA_VERSION = 1
 
 
 @dataclass(slots=True)
@@ -209,6 +211,8 @@ def run_depletion_case(config: Any, bundle: Any, summary: dict[str, Any]) -> dic
             "summary_path": "depletion_summary.json",
             "history_path": "depletion_history.json",
             "matrix_path": "depletion_matrix.npz",
+            "matrix_schema_path": "depletion_matrix.schema.json",
+            "matrix_human_summary_path": "depletion_matrix.summary.md",
         },
         "coupling_status": "native_constant_rate_matrix_not_yet_predictor_corrector_coupled",
     }
@@ -321,15 +325,117 @@ def _as_dense(matrix: Any) -> np.ndarray:
 
 def _write_matrix_npz(path: Path, matrix_result: DepletionMatrixResult) -> None:
     if scipy_sparse is not None and hasattr(matrix_result.matrix, "tocoo"):
-        scipy_sparse.save_npz(path, matrix_result.matrix)
-        return
-    np.savez_compressed(
+        matrix = matrix_result.matrix.tocsr()
+        arrays = {
+            "matrix_format": np.array(["csr"]),
+            "data": np.asarray(matrix.data, dtype=float),
+            "indices": np.asarray(matrix.indices, dtype=np.int64),
+            "indptr": np.asarray(matrix.indptr, dtype=np.int64),
+            "shape": np.asarray(matrix.shape, dtype=np.int64),
+            "backend": np.array([matrix_result.backend]),
+            "nuclide_names": np.array(matrix_result.nuclide_names),
+            "zone_names": np.array(matrix_result.zone_names),
+            "feed_vector": matrix_result.feed_vector,
+            "removal_rates": matrix_result.removal_rates,
+        }
+    else:
+        arrays = {
+            "matrix_format": np.array(["dense"]),
+            "dense_matrix": _as_dense(matrix_result.matrix),
+            "shape": np.asarray(matrix_result.shape, dtype=np.int64),
+            "backend": np.array([matrix_result.backend]),
+            "nuclide_names": np.array(matrix_result.nuclide_names),
+            "zone_names": np.array(matrix_result.zone_names),
+            "feed_vector": matrix_result.feed_vector,
+            "removal_rates": matrix_result.removal_rates,
+        }
+    np.savez_compressed(path, **arrays)
+    schema = _depletion_npz_schema(matrix_result, arrays)
+    _write_npz_sidecars(
         path,
-        dense_matrix=_as_dense(matrix_result.matrix),
-        backend=np.array([matrix_result.backend]),
-        nuclide_names=np.array(matrix_result.nuclide_names),
-        zone_names=np.array(matrix_result.zone_names),
+        schema,
+        title="Depletion Matrix NPZ",
+        notes=[
+            "Matrix columns map parent nuclide-zone inventory to product nuclide-zone rates.",
+            "Flat inventory order is zone-major: zone index, then nuclide index.",
+            "Closed-chain conservation is assessed from matrix column sums; open systems use feed/removal vectors.",
+        ],
     )
+
+
+def _depletion_npz_schema(matrix_result: DepletionMatrixResult, arrays: Mapping[str, np.ndarray]) -> dict[str, Any]:
+    return {
+        "schema_version": DEPLETION_NPZ_SCHEMA_VERSION,
+        "generator": "thorium_reactor.depletion.matrix._write_matrix_npz",
+        "artifact": "depletion_matrix.npz",
+        "model": DEPLETION_MATRIX_MODEL,
+        "coordinate_conventions": {
+            "inventory_order": ["zone", "nuclide"],
+            "matrix_orientation": "rows are produced nuclide-zone states; columns are depleted parent states",
+            "zones": matrix_result.zone_names,
+            "nuclides": matrix_result.nuclide_names,
+        },
+        "normalization": {
+            "matrix_units": "1/s",
+            "feed_vector_units": "atoms/s",
+            "removal_rates_units": "1/s",
+            "conservation": "closed systems should have near-zero matrix column sums with zero feed vector",
+        },
+        "arrays": {
+            name: {
+                "shape": list(value.shape),
+                "dtype": str(value.dtype),
+                "units": _depletion_units(name),
+                "description": _depletion_array_description(name),
+            }
+            for name, value in arrays.items()
+        },
+    }
+
+
+def _write_npz_sidecars(path: Path, schema: dict[str, Any], *, title: str, notes: Sequence[str]) -> None:
+    path.with_suffix(".schema.json").write_text(json.dumps(schema, indent=2, sort_keys=True), encoding="utf-8")
+    lines = [f"# {title}", "", f"- Artifact: `{path.name}`", f"- Schema version: `{schema['schema_version']}`"]
+    lines.extend(f"- {note}" for note in notes)
+    lines.extend(["", "## Arrays", ""])
+    for name, spec in schema["arrays"].items():
+        lines.append(
+            f"- `{name}`: shape=`{spec['shape']}`, dtype=`{spec['dtype']}`, "
+            f"units=`{spec['units']}`, {spec['description']}"
+        )
+    path.with_suffix(".summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _depletion_units(name: str) -> str:
+    return {
+        "matrix_format": "label",
+        "data": "1/s",
+        "indices": "index",
+        "indptr": "index",
+        "shape": "count",
+        "dense_matrix": "1/s",
+        "backend": "label",
+        "nuclide_names": "label",
+        "zone_names": "label",
+        "feed_vector": "atoms/s",
+        "removal_rates": "1/s",
+    }[name]
+
+
+def _depletion_array_description(name: str) -> str:
+    return {
+        "matrix_format": "storage layout marker",
+        "data": "CSR nonzero matrix values",
+        "indices": "CSR column indices for data",
+        "indptr": "CSR row pointer offsets",
+        "shape": "matrix shape",
+        "dense_matrix": "dense depletion matrix",
+        "backend": "runtime backend used to assemble and step the matrix",
+        "nuclide_names": "nuclide labels aligned with the flat inventory vector",
+        "zone_names": "zone labels aligned with the flat inventory vector",
+        "feed_vector": "external feed source term for each flat inventory state",
+        "removal_rates": "explicit removal sink rate for each flat inventory state",
+    }[name]
 
 
 def _nonzero_count(matrix: Any) -> int:
