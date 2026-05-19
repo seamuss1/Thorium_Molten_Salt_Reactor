@@ -1,10 +1,8 @@
 # Thorium Molten Salt Reactor Lab
 
-Config-driven molten-salt reactor simulation workbench with a Python CLI, reproducible result bundles, benchmark traceability, reduced-order thermal/flow models, geometry exports, and a single-port FastAPI + React browser lab.
+This repository is a working lab for molten-salt reactor studies. Case files define the reactor, materials, operating point, transients, validation targets, and planning assumptions. The command-line tools turn those inputs into result bundles with snapshots, metrics, reports, plots, geometry exports, and provenance records. A single-port FastAPI + React app reads the same bundles for browser-based review.
 
-This is a research and engineering scaffold, not a licensed design tool. The project is deliberately honest about maturity: dry-run neutronics are separated from solver-backed OpenMC work, modern TMSR-style cases are marked as traceable surrogates until deeper source data lands, and generated reports carry validation gaps instead of burying them.
-
-![Thorium Lab dashboard](resources/readme/web-dashboard.png)
+The workflow keeps evidence levels explicit. Dry-run neutronics, reduced-order thermal/flow models, solver-backed OpenMC paths, historical MSRE benchmarks, TMSR-LF1 surrogates, and commercial planning cases each carry their own traceability, validation status, and review context.
 
 ## Start Here
 
