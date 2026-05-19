@@ -578,6 +578,18 @@ def _assess_benchmark_quality(
         )
     )
 
+    unresolved_required = _coerce_float(source_dossier.get("unresolved_required_parameter_count"))
+    required_parameters_resolved = unresolved_required == 0.0
+    gates.append(
+        _quality_gate(
+            "required_source_parameters_resolved",
+            required_parameters_resolved,
+            "All required source-indexed benchmark parameters are resolved."
+            if required_parameters_resolved
+            else f"{int(unresolved_required) if unresolved_required is not None else 'Unknown'} required source-indexed benchmark parameter(s) remain unresolved.",
+        )
+    )
+
     placeholder_targets = [
         item["id"]
         for item in targets
@@ -661,6 +673,21 @@ def _assess_benchmark_quality(
             "A solver-backed benchmark bundle is marked published."
             if solver_ready
             else "A solver-backed benchmark bundle has not been marked published.",
+        )
+    )
+
+    promotion_blockers = [
+        str(item)
+        for item in benchmark_model.get("promotion_blockers", [])
+        if str(item).strip()
+    ]
+    gates.append(
+        _quality_gate(
+            "promotion_blockers_cleared",
+            not promotion_blockers,
+            "No benchmark promotion blockers are declared in the case configuration."
+            if not promotion_blockers
+            else "Benchmark promotion blockers remain: " + ", ".join(promotion_blockers) + ".",
         )
     )
 

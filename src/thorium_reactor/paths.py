@@ -137,6 +137,8 @@ def refresh_bundle_artifact_statuses(bundle: ResultBundle, *, summary: dict[str,
             "geometry_exports": _directory_group_status(bundle, "geometry_exports", bundle.geometry_exports_dir),
         },
     }
+    if _has_benchmark_evidence_contract(summary):
+        status["groups"]["benchmark_evidence"] = _benchmark_evidence_group_status(bundle, summary)
     status["blockers"] = [
         blocker
         for group in status["groups"].values()
@@ -276,6 +278,38 @@ def _openmc_group_status(bundle: ResultBundle, summary: dict[str, Any]) -> dict[
         "blockers": blockers,
         "warnings": warnings,
         "neutronics_status": raw_status or None,
+    }
+
+
+def _has_benchmark_evidence_contract(summary: dict[str, Any]) -> bool:
+    return bool(summary.get("benchmark_quality") or summary.get("benchmark_evidence"))
+
+
+def _benchmark_evidence_group_status(bundle: ResultBundle, summary: dict[str, Any]) -> dict[str, Any]:
+    required = [
+        "summary.json",
+        "validation.json",
+        "benchmark_residuals.json",
+        "report.md",
+        "nuclear_data_provenance.json",
+        "source_convergence_diagnostics.json",
+        "cross_code_comparison.json",
+        "uncertainty_budget.json",
+        "benchmark_evidence.json",
+    ]
+    missing = [name for name in required if not (bundle.root / name).exists()]
+    evidence = summary.get("benchmark_evidence", {}) if isinstance(summary.get("benchmark_evidence"), dict) else {}
+    evidence_blockers = [str(item) for item in evidence.get("blockers", []) if str(item).strip()]
+    blockers = [f"Required benchmark evidence artifact is missing: {name}." for name in missing]
+    blockers.extend(evidence_blockers)
+    return {
+        "kind": "benchmark_evidence",
+        "path": ".",
+        "state": "completed" if not blockers else "blocked",
+        "artifact_count": len(required) - len(missing),
+        "artifacts": [name for name in required if (bundle.root / name).exists()],
+        "blockers": blockers,
+        "warnings": [],
     }
 
 

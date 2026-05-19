@@ -273,6 +273,7 @@ def generate_report(
     lines.extend(_build_key_metrics_lines(config, summary, benchmark_traceability, validation_maturity))
     lines.extend(_build_additional_metrics_lines(summary))
     lines.extend(_build_results_generated_lines(summary_path.parent, summary))
+    lines.extend(_build_benchmark_evidence_lines(summary_path.parent, summary))
     lines.extend(_build_design_readiness_lines(design_readiness))
     lines.extend(_build_validation_and_blocker_lines(validation_summary, benchmark_quality))
     lines.extend(_build_interpretation_lines(summary, validation_summary, design_readiness, benchmark_quality))
@@ -1331,6 +1332,11 @@ def _build_results_generated_lines(bundle_dir: Path, summary: dict[str, Any]) ->
         "summary.json",
         "validation.json",
         "report.md",
+        "benchmark_evidence.json",
+        "nuclear_data_provenance.json",
+        "source_convergence_diagnostics.json",
+        "cross_code_comparison.json",
+        "uncertainty_budget.json",
         "validation_summary.json",
         "validation_details.csv",
         "limitations_matrix.json",
@@ -1345,6 +1351,44 @@ def _build_results_generated_lines(bundle_dir: Path, summary: dict[str, Any]) ->
             lines.append(f"- `{name}`")
     if summary.get("neutronics"):
         lines.append(f"- Neutronics status for this run: `{_neutronics_status(summary)}`")
+    lines.append("")
+    return lines
+
+
+def _build_benchmark_evidence_lines(bundle_dir: Path, summary: dict[str, Any]) -> list[str]:
+    evidence = summary.get("benchmark_evidence", {})
+    if not isinstance(evidence, dict) or not evidence:
+        evidence_path = bundle_dir / "benchmark_evidence.json"
+        if evidence_path.exists():
+            try:
+                evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            except JSONDecodeError:
+                evidence = {}
+    if not evidence:
+        return []
+
+    lines = ["## Benchmark Evidence Contract", ""]
+    lines.append(f"- Evidence status: `{evidence.get('status', 'unknown')}`")
+    lines.append(f"- Evidence benchmark-ready: `{evidence.get('benchmark_ready_evidence', False)}`")
+    lines.append(f"- Failed evidence gates: `{evidence.get('failed_gate_count', 0)}`")
+    for gate in evidence.get("gates", []):
+        if not isinstance(gate, dict):
+            continue
+        if gate.get("status") == "pass":
+            continue
+        lines.append(
+            f"- Gate `{gate.get('id', 'gate')}`: `{gate.get('status', 'fail')}`"
+            + (f" ({gate.get('message')})" if gate.get("message") else "")
+        )
+    for artifact in (
+        "benchmark_evidence.json",
+        "nuclear_data_provenance.json",
+        "source_convergence_diagnostics.json",
+        "cross_code_comparison.json",
+        "uncertainty_budget.json",
+    ):
+        if (bundle_dir / artifact).exists():
+            lines.append(f"- Evidence artifact: `{artifact}`")
     lines.append("")
     return lines
 
@@ -1719,6 +1763,16 @@ def _build_artifact_index_lines(
     if geometry_assets:
         for name, path in sorted(geometry_assets.items()):
             _append_artifact(primary, f"{_humanize_label(name)} geometry", path, "rendered geometry evidence for reader inspection.")
+    for artifact, description in (
+        ("benchmark_evidence.json", "compiled fail-closed benchmark evidence gates for this bundle."),
+        ("nuclear_data_provenance.json", "OpenMC nuclear-data library provenance and path/hash evidence."),
+        ("source_convergence_diagnostics.json", "OpenMC batch, particle, statepoint, and source convergence diagnostics."),
+        ("cross_code_comparison.json", "OpenMC residuals against declared Serpent/SCALE-style references."),
+        ("uncertainty_budget.json", "geometry/material uncertainty propagation budget."),
+    ):
+        path = summary_path.parent / artifact
+        if path.exists():
+            _append_artifact(primary, _humanize_label(artifact), path, description)
     if benchmark:
         primary.append(
             "- Benchmark context: this report - source assumptions, references, traceability, and evidence trail."

@@ -654,12 +654,16 @@ def _resolve_statepoint_path(bundle, summary: dict[str, Any]) -> Path | None:
         return None
 
     statepoint_path = Path(statepoint)
-    if statepoint_path.exists():
-        return statepoint_path
-
     candidate = bundle.openmc_dir / statepoint_path.name
     if candidate.exists():
         return candidate
+    try:
+        resolved_statepoint = statepoint_path.resolve()
+        resolved_openmc_dir = bundle.openmc_dir.resolve()
+        if resolved_statepoint.exists() and resolved_statepoint.parent == resolved_openmc_dir:
+            return resolved_statepoint
+    except OSError:
+        return None
     return None
 
 

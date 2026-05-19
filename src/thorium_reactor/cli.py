@@ -10,6 +10,10 @@ from pathlib import Path
 
 from thorium_reactor.capabilities import get_case_capabilities
 from thorium_reactor.benchmarking import get_docker_runtime_status, run_solver_backed_benchmark
+from thorium_reactor.benchmark_evidence import (
+    materialize_benchmark_evidence,
+    merge_benchmark_evidence_into_quality,
+)
 from thorium_reactor.bundle_inputs import ensure_bundle_inputs, load_bundle_inputs
 from thorium_reactor.config import load_case_config
 from thorium_reactor.economics import run_economics_case
@@ -348,6 +352,7 @@ def main(argv: list[str] | None = None) -> int:
         validation = validate_case(config, bundle, summary=summary, benchmark=benchmark, provenance=provenance)
         generate_validation_plot(bundle, validation)
         plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
+        geometry_assets = None
         summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
         bundle.write_json("summary.json", summary)
         report = generate_report(
@@ -356,6 +361,18 @@ def main(argv: list[str] | None = None) -> int:
             bundle.root / "summary.json",
             bundle.root / "validation.json",
             None,
+            benchmark,
+            plot_assets,
+            provenance=provenance,
+        )
+        bundle.write_text("report.md", report)
+        summary = _refresh_benchmark_evidence(bundle, config.data, benchmark, provenance)
+        report = generate_report(
+            config.name,
+            config.data,
+            bundle.root / "summary.json",
+            bundle.root / "validation.json",
+            geometry_assets,
             benchmark,
             plot_assets,
             provenance=provenance,
@@ -671,6 +688,18 @@ def main(argv: list[str] | None = None) -> int:
             provenance=provenance,
         )
         report_path = bundle.write_text("report.md", report)
+        summary = _refresh_benchmark_evidence(bundle, config.data, benchmark, provenance)
+        report = generate_report(
+            config.name,
+            config.data,
+            summary_path,
+            validation_path,
+            geometry_assets,
+            benchmark,
+            plot_assets,
+            provenance=provenance,
+        )
+        report_path = bundle.write_text("report.md", report)
         _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
         print(report_path)
         return 0
@@ -737,11 +766,127 @@ def main(argv: list[str] | None = None) -> int:
             provenance=provenance,
         )
         bundle.write_text("report.md", report)
+        summary = _refresh_benchmark_evidence(bundle, config.data, benchmark, provenance)
+        report = generate_report(
+            config.name,
+            config.data,
+            bundle.root / "summary.json",
+            bundle.root / "validation.json",
+            geometry_assets,
+            benchmark,
+            plot_assets,
+            provenance=provenance,
+        )
+        bundle.write_text("report.md", report)
         _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
         print(bundle.root)
         return 0
 
     return 1
+
+
+def _refresh_benchmark_evidence(
+    bundle: ResultBundle,
+    config_data: dict[str, object],
+    benchmark: dict[str, object] | None,
+    provenance: dict[str, object],
+) -> dict[str, object]:
+    summary_path = bundle.root / "summary.json"
+    if not summary_path.exists():
+        return {}
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    if not (summary.get("benchmark_quality") or benchmark):
+        return summary
+    evidence = materialize_benchmark_evidence(
+        bundle,
+        config_data,
+        summary,
+        benchmark or {},
+        provenance=provenance,
+        openmc_module=openmc,
+    )
+    summary["benchmark_evidence"] = evidence
+    if summary.get("benchmark_quality"):
+        summary["benchmark_quality"] = merge_benchmark_evidence_into_quality(
+            summary.get("benchmark_quality"),
+            evidence,
+        )
+        quality_checks = _benchmark_quality_status_checks(summary["benchmark_quality"])
+        summary["model_validity"] = _replace_model_validity_benchmark_quality_checks(
+            summary.get("model_validity", {}),
+            quality_checks,
+        )
+        _replace_validation_benchmark_quality_checks(bundle, quality_checks)
+        metrics = summary.get("metrics")
+        if isinstance(metrics, dict):
+            metrics["benchmark_quality_score"] = summary["benchmark_quality"].get("quality_score", 0.0)
+    summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
+    bundle.write_json("summary.json", summary)
+    return summary
+
+
+def _benchmark_quality_status_checks(quality: dict[str, object]) -> list[dict[str, str]]:
+    checks = []
+    for gate in quality.get("gates", []):
+        if not isinstance(gate, dict):
+            continue
+        checks.append(
+            {
+                "name": f"benchmark_quality::{gate.get('id', 'gate')}",
+                "status": str(gate.get("status", "pending")),
+                "message": str(gate.get("message", "")),
+            }
+        )
+    return checks
+
+
+def _replace_model_validity_benchmark_quality_checks(
+    model_validity: object,
+    quality_checks: list[dict[str, str]],
+) -> dict[str, object]:
+    existing = model_validity if isinstance(model_validity, dict) else {}
+    checks = [
+        check
+        for check in existing.get("checks", [])
+        if isinstance(check, dict) and not str(check.get("name", "")).startswith("benchmark_quality::")
+    ]
+    checks.extend(quality_checks)
+    passed_count = sum(1 for check in checks if check.get("status") == "pass")
+    failed = [check for check in checks if check.get("status") == "fail"]
+    pending_count = sum(1 for check in checks if check.get("status") == "pending")
+    return {
+        "status": "valid" if not failed else "invalid",
+        "passed": not failed,
+        "check_count": len(checks),
+        "passed_count": passed_count,
+        "failed_count": len(failed),
+        "pending_count": pending_count,
+        "failed_check_names": [str(check.get("name")) for check in failed],
+        "failed_messages": [str(check.get("message")) for check in failed if check.get("message")],
+        "checks": checks,
+    }
+
+
+def _replace_validation_benchmark_quality_checks(
+    bundle: ResultBundle,
+    quality_checks: list[dict[str, str]],
+) -> None:
+    validation_path = bundle.root / "validation.json"
+    if not validation_path.exists():
+        return
+    try:
+        validation = json.loads(validation_path.read_text(encoding="utf-8"))
+    except JSONDecodeError:
+        return
+    checks = [
+        check
+        for check in validation.get("checks", [])
+        if isinstance(check, dict) and not str(check.get("name", "")).startswith("benchmark_quality::")
+    ]
+    checks.extend(quality_checks)
+    validation["checks"] = checks
+    validation["passed"] = all(check.get("status") == "pass" for check in checks)
+    bundle.write_json("validation.json", validation)
 
 def _load_or_create_bundle(repo_root: Path, case_name: str, run_id: str | None, *, allow_existing: bool = False) -> ResultBundle:
     if run_id is None:
