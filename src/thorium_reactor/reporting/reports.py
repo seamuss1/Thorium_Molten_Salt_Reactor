@@ -396,6 +396,43 @@ def generate_report(
             "- Core outlet temperature uncertainty 95% (C): "
             f"`{property_uncertainty.get('core_outlet_temperature_uncertainty_95_c', 'n/a')}`"
         )
+        lines.append(f"- Source backing: `{property_uncertainty.get('property_source_backing', 'n/a')}`")
+        basis_by_property = property_uncertainty.get("basis_by_property", {})
+        if isinstance(basis_by_property, dict) and basis_by_property:
+            basis_parts = [f"{key}={value}" for key, value in sorted(basis_by_property.items())]
+            lines.append(f"- Basis by property: `{', '.join(basis_parts)}`")
+        source_applicability = property_uncertainty.get("property_source_applicability", {})
+        if isinstance(source_applicability, dict):
+            for key, source in sorted(source_applicability.items()):
+                if not isinstance(source, dict):
+                    continue
+                source_parts = [
+                    f"provider={source.get('provider') or 'unavailable'}",
+                    f"backing={source.get('source_kind') or 'unavailable'}",
+                    f"range={source.get('range_status') or 'unavailable'}",
+                ]
+                if source.get("formula"):
+                    source_parts.append(f"formula={source.get('formula')}")
+                lines.append(
+                    f"- {key} source: `{', '.join(source_parts)}`"
+                )
+
+    property_audit = summary.get("property_audit", {})
+    if property_audit:
+        lines.extend(["", "## Property Provenance", ""])
+        lines.append(f"- Provider declaration: `{property_audit.get('provider', 'n/a')}`")
+        lines.append(f"- Source backing: `{property_audit.get('source_backing', 'n/a')}`")
+        counts = property_audit.get("source_backing_counts", {})
+        if isinstance(counts, dict):
+            lines.append(f"- Backing counts: `{', '.join(f'{key}={value}' for key, value in sorted(counts.items()))}`")
+        for record in property_audit.get("records", []):
+            if not isinstance(record, dict):
+                continue
+            lines.append(
+                f"- `{record.get('path', 'property')}`: provider `{record.get('provider', 'n/a')}`, "
+                f"backing `{record.get('source_backing', record.get('model', 'configured'))}`, "
+                f"validity `{record.get('validity', 'n/a')}`"
+            )
 
     reduced_order_flow = summary.get("flow", {}).get("reduced_order", {})
     if reduced_order_flow:
@@ -405,6 +442,7 @@ def generate_report(
         lines.append(f"- Allocation rule: `{reduced_order_flow.get('allocation_rule', 'n/a')}`")
         lines.append(f"- Salt bulk temperature (C): `{reduced_order_flow.get('salt_bulk_temperature_c', 'n/a')}`")
         lines.append(f"- Salt density (kg/m3): `{reduced_order_flow.get('salt_density_kg_m3', 'n/a')}`")
+        lines.append(f"- Salt property source backing: `{reduced_order_flow.get('salt_source_backing', 'n/a')}`")
         lines.append(f"- Active through-flow channels: `{active_flow.get('channel_count', 'n/a')}`")
         lines.append(f"- Active flow area (cm2): `{active_flow.get('total_flow_area_cm2', 'n/a')}`")
         lines.append(f"- Representative velocity (m/s): `{active_flow.get('representative_velocity_m_s', 'n/a')}`")

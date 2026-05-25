@@ -1,3 +1,4 @@
+from copy import deepcopy
 from pathlib import Path
 
 from thorium_reactor.config import load_case_config
@@ -21,6 +22,29 @@ def test_property_uncertainty_defaults_reflect_tmsr_sf0_bands() -> None:
     assert summary["cp_uncertainty_95_fraction"] == 0.10
     assert summary["dynamic_viscosity_uncertainty_95_fraction"] == 0.10
     assert summary["core_outlet_temperature_uncertainty_95_c"] == 10.0
+
+
+def test_property_uncertainty_uses_msd_tp_source_metadata_when_not_overridden(synthetic_msd_tp_data_dir: str) -> None:
+    config = load_case_config(REPO_ROOT / "configs" / "cases" / "flagship_grid_msr" / "case.yaml")
+    config.data = deepcopy(config.data)
+    config.materials["fuel_salt"]["density"] = {
+        "provider": "msd_tp",
+        "units": "g/cm3",
+        "formula": "A-B",
+        "composition": [0.25, 0.75],
+        "data_dir": synthetic_msd_tp_data_dir,
+    }
+
+    summary = build_property_uncertainty_summary(config, primary_delta_t_c=140.0)
+
+    assert summary["density_uncertainty_95_fraction"] == 0.05
+    assert summary["cp_uncertainty_95_fraction"] == 0.10
+    assert summary["basis_by_property"]["density"] == "source_metadata"
+    assert summary["basis_by_property"]["cp"] == "default_band"
+    assert summary["property_source_backing"] == "partial"
+    density_source = summary["property_source_applicability"]["density"]
+    assert density_source["record_id"] == "101"
+    assert density_source["range_status"] == "in_range"
 
 
 def test_tritium_screen_credits_gas_removal_and_reports_distribution() -> None:

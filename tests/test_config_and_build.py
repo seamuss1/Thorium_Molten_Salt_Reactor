@@ -437,3 +437,22 @@ def test_case_loader_rejects_unsupported_property_provider() -> None:
             load_case_config(case_path)
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
+
+
+def test_case_loader_requires_msd_tp_mixture_composition() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "msre_first_criticality" / "case.yaml").read_text(encoding="utf-8"))
+        payload["materials"]["fuel_salt"]["density"] = {
+            "provider": "msd_tp",
+            "units": "g/cm3",
+            "formula": "LiF-BeF2-UF4",
+        }
+        case_path = scratch_root / "case.yaml"
+        case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+        with pytest.raises(ConfigError, match="must declare composition"):
+            load_case_config(case_path)
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)

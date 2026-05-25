@@ -330,6 +330,7 @@ def run_case(
         "result_dir": str(bundle.root),
         "model_representation": _json_copy(build_manifest.get("model_representation", get_model_representation(config))),
         "validation_maturity": _json_copy(build_manifest.get("validation_maturity", {})),
+        "property_audit": _json_copy(property_audit),
         "neutronics": {
             "status": "dry-run",
             "openmc_available": openmc is not None,

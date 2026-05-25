@@ -38,7 +38,13 @@ PROPERTY_MODEL_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
 SUPPORTED_BOUNDARY_TYPES = {"reflective", "vacuum", "periodic", "transmission", "white"}
 SUPPORTED_SOURCE_TYPES = {"point"}
 SUPPORTED_REACTOR_MODES = {"historic_benchmark", "modern_test_reactor", "aspirational_breeder", "commercial_grid"}
-SUPPORTED_PROPERTY_PROVIDERS = {"legacy_correlation", "evaluated_table", "thermochemical_equilibrium"}
+SUPPORTED_PROPERTY_PROVIDERS = {
+    "legacy_correlation",
+    "evaluated_table",
+    "thermochemical_equilibrium",
+    "msd_tp",
+    "msd_tp_redlich_kister",
+}
 SUPPORTED_INTEGRATIONS = ("moose", "scale", "thermochimica", "saltproc", "moltres")
 SUPPORTED_DETERMINISTIC_NEUTRONICS_METHODS = {"diffusion", "sp3", "transport"}
 
@@ -229,6 +235,23 @@ def _validate_material_properties(path: Path, materials: Any) -> None:
                     raise ConfigError(
                         f"Case config {path} material '{material_name}' property '{quantity}' must declare "
                         "fallback_value, reference_value, or value for thermochemical_equilibrium mode."
+                    )
+                continue
+            if provider in {"msd_tp", "msd_tp_redlich_kister"}:
+                if not str(property_spec.get("formula", "")).strip():
+                    raise ConfigError(
+                        f"Case config {path} material '{material_name}' property '{quantity}' using {provider} "
+                        "must declare formula."
+                    )
+                if "-" in str(property_spec.get("formula", "")) and "composition" not in property_spec:
+                    raise ConfigError(
+                        f"Case config {path} material '{material_name}' property '{quantity}' using {provider} "
+                        "must declare composition for mixtures."
+                    )
+                if provider == "msd_tp_redlich_kister" and quantity not in {"density", "dynamic_viscosity"}:
+                    raise ConfigError(
+                        f"Case config {path} material '{material_name}' property '{quantity}' cannot use "
+                        "msd_tp_redlich_kister; only density and dynamic_viscosity are supported."
                     )
                 continue
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from typing import Any, Mapping
 
+from thorium_reactor.flow.properties import average_primary_temperature_c, evaluate_primary_coolant_properties
+
 
 DEFAULT_PROPERTY_UNCERTAINTIES_95: dict[str, float] = {
     "density": 0.02,
@@ -21,9 +23,14 @@ def build_property_uncertainty_summary(
     primary_delta_t_c: float | None = None,
 ) -> dict[str, Any]:
     settings = _mapping_section(config, "property_uncertainty")
+    source_summary = _primary_property_source_summary(config)
     uncertainties = {
-        key: _setting_float(settings, f"{key}_uncertainty_95_fraction", default)
+        key: _select_property_uncertainty(settings, source_summary["uncertainties"], key, default)
         for key, default in DEFAULT_PROPERTY_UNCERTAINTIES_95.items()
+    }
+    uncertainty_basis = {
+        key: _property_uncertainty_basis(settings, source_summary["uncertainties"], key)
+        for key in DEFAULT_PROPERTY_UNCERTAINTIES_95
     }
     density = uncertainties["density"]
     cp = uncertainties["cp"]
@@ -38,7 +45,7 @@ def build_property_uncertainty_summary(
     )
     flow_uncertainty = math.sqrt(density * density + viscosity * viscosity)
     heat_transfer_uncertainty = math.sqrt(cp * cp + conductivity * conductivity)
-    return {
+    result = {
         "model": str(settings.get("model", "tmsr_sf0_property_uncertainty_screen")),
         "confidence_level": _setting_float(settings, "confidence_level", 0.95),
         "density_uncertainty_95_fraction": _round_float(density),
@@ -48,9 +55,18 @@ def build_property_uncertainty_summary(
         "flow_uncertainty_95_fraction": _round_float(flow_uncertainty),
         "heat_transfer_uncertainty_95_fraction": _round_float(heat_transfer_uncertainty),
         "core_outlet_temperature_uncertainty_95_c": _round_float(outlet_uncertainty_c),
-        "basis": "TMSR-SF0 RELAP5 uncertainty study default bands; case config may override.",
+        "basis": _property_uncertainty_basis_text(uncertainty_basis),
+        "basis_by_property": uncertainty_basis,
+        "property_source_backing": source_summary["source_backing"],
+        "property_source_uncertainties_95_fraction": {
+            key: _round_float(value) for key, value in source_summary["uncertainties"].items()
+        },
+        "property_source_applicability": source_summary["applicability"],
         "source": "https://doi.org/10.1016/j.net.2023.11.016",
     }
+    if source_summary.get("error"):
+        result["property_source_error"] = source_summary["error"]
+    return result
 
 
 def build_tritium_transport_summary(
@@ -250,6 +266,84 @@ def _setting_float(settings: Mapping[str, Any], key: str, default: float) -> flo
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _select_property_uncertainty(
+    settings: Mapping[str, Any],
+    source_uncertainties: Mapping[str, float],
+    key: str,
+    default: float,
+) -> float:
+    setting_key = f"{key}_uncertainty_95_fraction"
+    if setting_key in settings:
+        return _setting_float(settings, setting_key, default)
+    if key in source_uncertainties:
+        return float(source_uncertainties[key])
+    return float(default)
+
+
+def _property_uncertainty_basis(
+    settings: Mapping[str, Any],
+    source_uncertainties: Mapping[str, float],
+    key: str,
+) -> str:
+    if f"{key}_uncertainty_95_fraction" in settings:
+        return "case_override"
+    if key in source_uncertainties:
+        return "source_metadata"
+    return "default_band"
+
+
+def _property_uncertainty_basis_text(basis_by_property: Mapping[str, str]) -> str:
+    if "source_metadata" in set(basis_by_property.values()):
+        return "MSD-TP source metadata where available; case overrides and TMSR-SF0 RELAP5 default bands fill gaps."
+    return "TMSR-SF0 RELAP5 uncertainty study default bands; case config may override."
+
+
+def _primary_property_source_summary(config: Any) -> dict[str, Any]:
+    try:
+        properties = evaluate_primary_coolant_properties(
+            config,
+            temperature_c=average_primary_temperature_c(config.reactor),
+        )
+    except Exception as exc:
+        return {
+            "source_backing": "unavailable",
+            "uncertainties": {},
+            "applicability": {},
+            "error": str(exc),
+        }
+
+    source_records = properties.get("property_sources", {})
+    if not isinstance(source_records, Mapping):
+        source_records = {}
+    uncertainties: dict[str, float] = {}
+    applicability: dict[str, dict[str, Any]] = {}
+    for key in DEFAULT_PROPERTY_UNCERTAINTIES_95:
+        source = source_records.get(key)
+        if not isinstance(source, Mapping):
+            continue
+        uncertainty = source.get("uncertainty_95_fraction")
+        if uncertainty is not None:
+            try:
+                uncertainties[key] = float(uncertainty)
+            except (TypeError, ValueError):
+                pass
+        applicability[key] = {
+            "provider": source.get("provider"),
+            "source_kind": source.get("source_kind"),
+            "range_status": source.get("range_status"),
+            "valid_temperature_range_k": source.get("valid_temperature_range_k"),
+            "formula": source.get("formula"),
+            "composition": source.get("composition"),
+            "record_id": source.get("record_id"),
+            "reference": source.get("reference"),
+        }
+    return {
+        "source_backing": properties.get("source_backing", "unavailable"),
+        "uncertainties": uncertainties,
+        "applicability": applicability,
+    }
 
 
 def _infer_lithium6_fraction(config: Any) -> float:
