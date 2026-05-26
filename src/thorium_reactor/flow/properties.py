@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from thorium_reactor.capabilities import resolve_primary_coolant_material_name
+from thorium_reactor.msd_tp import evaluate_msd_tp_property
 
 
 def evaluate_fluid_properties(
@@ -20,34 +21,68 @@ def evaluate_fluid_properties(
     conductivity_spec = material_spec.get("thermal_conductivity")
     viscosity_spec = material_spec.get("dynamic_viscosity")
 
+    density_value, density_metadata = _evaluate_property_spec_with_metadata(
+        density_spec,
+        temperature_c=temperature_c,
+        expected_quantity="density",
+    )
     density_kg_m3 = _convert_property_value(
-        _evaluate_property_spec(density_spec, temperature_c=temperature_c),
+        density_value,
         density_spec.get("units"),
         expected_quantity="density",
     )
+    cp_value, cp_metadata = _evaluate_property_spec_with_metadata(
+        cp_spec,
+        temperature_c=temperature_c,
+        expected_quantity="specific_heat",
+    ) if cp_spec else (None, None)
     cp_j_kgk = _convert_property_value(
-        _evaluate_property_spec(cp_spec, temperature_c=temperature_c),
+        cp_value,
         cp_spec.get("units") if isinstance(cp_spec, dict) else None,
         expected_quantity="specific_heat",
-    ) if cp_spec else None
+    ) if cp_value is not None else None
+    conductivity_value, conductivity_metadata = _evaluate_property_spec_with_metadata(
+        conductivity_spec,
+        temperature_c=temperature_c,
+        expected_quantity="thermal_conductivity",
+    ) if conductivity_spec else (None, None)
     conductivity_w_mk = _convert_property_value(
-        _evaluate_property_spec(conductivity_spec, temperature_c=temperature_c),
+        conductivity_value,
         conductivity_spec.get("units") if isinstance(conductivity_spec, dict) else None,
         expected_quantity="thermal_conductivity",
-    ) if conductivity_spec else None
+    ) if conductivity_value is not None else None
+    viscosity_value, viscosity_metadata = _evaluate_property_spec_with_metadata(
+        viscosity_spec,
+        temperature_c=temperature_c,
+        expected_quantity="dynamic_viscosity",
+    ) if viscosity_spec else (None, None)
     viscosity_pa_s = _convert_property_value(
-        _evaluate_property_spec(viscosity_spec, temperature_c=temperature_c),
+        viscosity_value,
         viscosity_spec.get("units") if isinstance(viscosity_spec, dict) else None,
         expected_quantity="dynamic_viscosity",
-    ) if viscosity_spec else None
+    ) if viscosity_value is not None else None
 
-    return {
+    properties = {
         "temperature_c": _round_float(temperature_c),
         "density_kg_m3": _round_float(density_kg_m3),
         "cp_j_kgk": _round_float(cp_j_kgk) if cp_j_kgk is not None else None,
         "thermal_conductivity_w_mk": _round_float(conductivity_w_mk) if conductivity_w_mk is not None else None,
         "dynamic_viscosity_pa_s": _round_float(viscosity_pa_s) if viscosity_pa_s is not None else None,
     }
+    sources = {
+        name: metadata
+        for name, metadata in {
+            "density": density_metadata,
+            "cp": cp_metadata,
+            "thermal_conductivity": conductivity_metadata,
+            "dynamic_viscosity": viscosity_metadata,
+        }.items()
+        if metadata
+    }
+    if sources:
+        properties["property_sources"] = sources
+        properties["source_backing"] = _source_backing_status(sources)
+    return properties
 
 
 def evaluate_property(
@@ -56,8 +91,13 @@ def evaluate_property(
     temperature_c: float,
     expected_quantity: str,
 ) -> float:
+    value, _metadata = _evaluate_property_spec_with_metadata(
+        spec,
+        temperature_c=temperature_c,
+        expected_quantity=expected_quantity,
+    )
     return _convert_property_value(
-        _evaluate_property_spec(spec, temperature_c=temperature_c),
+        value,
         spec.get("units"),
         expected_quantity=expected_quantity,
     )
@@ -146,46 +186,82 @@ def primary_coolant_cp_kj_kgk(config: Any, *, temperature_c: float | None = None
             )
         return float(reactor_cp)
     evaluation_temperature_c = average_primary_temperature_c(config.reactor) if temperature_c is None else float(temperature_c)
+    cp_value, _metadata = _evaluate_property_spec_with_metadata(
+        cp_spec,
+        temperature_c=evaluation_temperature_c,
+        expected_quantity="specific_heat",
+    )
     cp_j_kgk = _convert_property_value(
-        _evaluate_property_spec(cp_spec, temperature_c=evaluation_temperature_c),
+        cp_value,
         cp_spec.get("units") if isinstance(cp_spec, dict) else None,
         expected_quantity="specific_heat",
     )
     return cp_j_kgk / 1000.0
 
 
-def _evaluate_property_spec(spec: dict[str, Any] | None, *, temperature_c: float) -> float:
+def _evaluate_property_spec_with_metadata(
+    spec: dict[str, Any] | None,
+    *,
+    temperature_c: float,
+    expected_quantity: str,
+) -> tuple[float, dict[str, Any] | None]:
     if not spec:
         raise ValueError("Missing property specification.")
 
     provider = str(spec.get("provider", "legacy_correlation"))
+    if provider in {"msd_tp", "msd_tp_redlich_kister"}:
+        result = evaluate_msd_tp_property(spec, temperature_c=temperature_c, expected_quantity=expected_quantity)
+        return result.value, result.metadata
     if provider == "evaluated_table":
-        return _evaluate_tabulated_property(spec, temperature_c=temperature_c)
+        return _evaluate_tabulated_property(spec, temperature_c=temperature_c), _configured_property_metadata(
+            spec,
+            provider=provider,
+            temperature_c=temperature_c,
+        )
     if provider == "thermochemical_equilibrium":
         if "fallback_value" in spec:
-            return float(spec["fallback_value"])
-        if "reference_value" in spec:
-            return float(spec["reference_value"])
-        if "value" in spec:
-            return float(spec["value"])
-        raise ValueError("thermochemical_equilibrium properties require fallback_value, reference_value, or value.")
+            value = float(spec["fallback_value"])
+        elif "reference_value" in spec:
+            value = float(spec["reference_value"])
+        elif "value" in spec:
+            value = float(spec["value"])
+        else:
+            raise ValueError("thermochemical_equilibrium properties require fallback_value, reference_value, or value.")
+        return value, _configured_property_metadata(spec, provider=provider, temperature_c=temperature_c)
 
     model = spec.get("model", "constant")
     if model == "constant":
-        return float(spec["value"])
+        return float(spec["value"]), _configured_property_metadata(spec, provider=provider, temperature_c=temperature_c)
     if model == "linear":
         reference_value = float(spec["reference_value"])
         reference_temperature_c = float(spec.get("reference_temperature_c", 25.0))
         slope_per_c = float(spec["slope_per_c"])
-        return reference_value + slope_per_c * (temperature_c - reference_temperature_c)
+        return reference_value + slope_per_c * (temperature_c - reference_temperature_c), _configured_property_metadata(
+            spec,
+            provider=provider,
+            temperature_c=temperature_c,
+        )
     if model == "arrhenius":
         pre_exponential = float(spec["pre_exponential"])
         activation_temperature_k = float(spec["activation_temperature_k"])
         temperature_k = temperature_c + 273.15
         if temperature_k <= 0.0:
             raise ValueError("Temperature must remain above absolute zero for Arrhenius properties.")
-        return pre_exponential * math.exp(activation_temperature_k / temperature_k)
+        return pre_exponential * math.exp(activation_temperature_k / temperature_k), _configured_property_metadata(
+            spec,
+            provider=provider,
+            temperature_c=temperature_c,
+        )
     raise ValueError(f"Unsupported property model: {model}")
+
+
+def _evaluate_property_spec(spec: dict[str, Any] | None, *, temperature_c: float) -> float:
+    value, _metadata = _evaluate_property_spec_with_metadata(
+        spec,
+        temperature_c=temperature_c,
+        expected_quantity=str(spec.get("quantity", "density")) if isinstance(spec, dict) else "density",
+    )
+    return value
 
 
 def _evaluate_tabulated_property(spec: dict[str, Any], *, temperature_c: float) -> float:
@@ -243,5 +319,42 @@ def _convert_property_value(value: float, units: str | None, *, expected_quantit
     raise ValueError(f"Unsupported units '{units}' for {expected_quantity}.")
 
 
+def _configured_property_metadata(
+    spec: dict[str, Any],
+    *,
+    provider: str,
+    temperature_c: float,
+) -> dict[str, Any]:
+    metadata = {
+        "provider": provider,
+        "source_kind": "configured_property",
+        "model": spec.get("model", "constant"),
+        "temperature_k": _round_float(float(temperature_c) + 273.15),
+        "units": spec.get("units"),
+    }
+    if "uncertainty" in spec:
+        metadata["uncertainty"] = spec["uncertainty"]
+    if provider == "evaluated_table":
+        temperatures = spec.get("temperatures_c") or []
+        if temperatures:
+            metadata["valid_temperature_range_c"] = {
+                "min": min(float(value) for value in temperatures),
+                "max": max(float(value) for value in temperatures),
+            }
+        metadata["table_label"] = spec.get("table_label")
+    if provider == "thermochemical_equilibrium":
+        metadata["source_kind"] = "fallback_property"
+    return metadata
+
+
+def _source_backing_status(sources: dict[str, dict[str, Any]]) -> str:
+    source_kinds = {str(source.get("source_kind")) for source in sources.values()}
+    if source_kinds and source_kinds <= {"direct_record", "redlich_kister_estimate"}:
+        return "source_backed"
+    if "direct_record" in source_kinds or "redlich_kister_estimate" in source_kinds:
+        return "partial"
+    return "configured"
+
+
 def _round_float(value: float) -> float:
-    return round(float(value), 6)
+    return round(float(value), 9)

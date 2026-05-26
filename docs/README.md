@@ -8,6 +8,7 @@ The browser Science view indexes the top-level [README.md](../README.md) and eve
 | --- | --- |
 | [current-model-equations.md](current-model-equations.md) | The equations, correlations, unit assumptions, and current reduced-order model details |
 | [thermal-hydraulics-modeling-strategy.md](thermal-hydraulics-modeling-strategy.md) | The modeling ladder from whole-loop reduced-order screens to local CFD |
+| [msd-tp-thermophysical-data.md](msd-tp-thermophysical-data.md) | MSD-TP data provenance, formulas, runtime providers, guardrails, and limitations |
 | [recent-msr-simulation-literature.md](recent-msr-simulation-literature.md) | Literature context behind delayed-neutron transport, property uncertainty, and realism upgrades |
 | [msre-first-criticality-validation-plan.md](msre-first-criticality-validation-plan.md) | What the MSRE benchmark path still needs before claiming benchmark-ready status |
 | [msre-first-criticality-peer-review-handoff.md](msre-first-criticality-peer-review-handoff.md) | Manual OpenMC bundle workflow and peer-review gates for MSRE first criticality |

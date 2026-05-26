@@ -135,6 +135,10 @@ dmypy.json
 .pyre/
 .pytest_cache/
 
+# External MSD-TP acquisition artifacts
+MSTDBTP_GUI_windows_x86.exe
+*.hdf5
+
 # Reactor platform runtime outputs
 results/*
 !results/.gitkeep

@@ -57,6 +57,7 @@ def test_reduced_order_flow_uses_only_plenum_connected_salt_channels() -> None:
     assert reduced_order["core_model"]["active_variants"] == ["fuel", "control_guides"]
     assert reduced_order["core_model"]["stagnant_variants"] == ["instrumentation_wells"]
     assert reduced_order["salt_bulk_temperature_c"] == 630.0
+    assert reduced_order["salt_source_backing"] == "configured"
     assert reduced_order["primary_mass_flow_kg_s"] == 1116.071429
     active_flow = reduced_order["active_flow"]
     assert active_flow["channel_count"] == 85
@@ -194,6 +195,77 @@ def test_temperature_dependent_property_models_are_supported() -> None:
     assert properties["cp_j_kgk"] == 1620.0
     assert properties["thermal_conductivity_w_mk"] == 1.05
     assert properties["dynamic_viscosity_pa_s"] > 0.0
+
+
+def test_msd_tp_direct_provider_reads_user_supplied_public_safe_data(synthetic_msd_tp_data_dir: str) -> None:
+    material_spec = {
+        "density": {
+            "provider": "msd_tp",
+            "units": "g/cm3",
+            "formula": "A-B",
+            "composition": [0.25, 0.75],
+            "data_dir": synthetic_msd_tp_data_dir,
+        },
+        "dynamic_viscosity": {
+            "provider": "msd_tp",
+            "units": "pa-s",
+            "formula": "A-B",
+            "composition": [0.25, 0.75],
+            "data_dir": synthetic_msd_tp_data_dir,
+        },
+    }
+
+    properties = evaluate_fluid_properties(material_spec, temperature_c=726.85)
+
+    assert properties["density_kg_m3"] == pytest.approx(2500.0, rel=1.0e-9)
+    assert properties["dynamic_viscosity_pa_s"] == pytest.approx(0.002, rel=1.0e-9)
+    assert properties["source_backing"] == "source_backed"
+    density_source = properties["property_sources"]["density"]
+    assert density_source["provider"] == "msd_tp"
+    assert density_source["source_kind"] == "direct_record"
+    assert density_source["record_id"] == "101"
+    assert density_source["range_status"] == "in_range"
+
+
+def test_msd_tp_provider_fails_closed_outside_valid_temperature_range(synthetic_msd_tp_data_dir: str) -> None:
+    material_spec = {
+        "density": {
+            "provider": "msd_tp",
+            "units": "g/cm3",
+            "formula": "A-B",
+            "composition": [0.25, 0.75],
+            "data_dir": synthetic_msd_tp_data_dir,
+        },
+    }
+
+    with pytest.raises(ValueError, match="valid for 900-1100 K"):
+        evaluate_fluid_properties(material_spec, temperature_c=900.0)
+
+
+def test_msd_tp_redlich_kister_provider_reads_user_supplied_public_safe_data(synthetic_msd_tp_data_dir: str) -> None:
+    material_spec = {
+        "density": {
+            "provider": "msd_tp_redlich_kister",
+            "units": "g/cm3",
+            "formula": "A-B",
+            "composition": [0.5, 0.5],
+            "data_dir": synthetic_msd_tp_data_dir,
+        },
+        "dynamic_viscosity": {
+            "provider": "msd_tp_redlich_kister",
+            "units": "pa-s",
+            "formula": "A-B",
+            "composition": [0.5, 0.5],
+            "data_dir": synthetic_msd_tp_data_dir,
+        },
+    }
+
+    properties = evaluate_fluid_properties(material_spec, temperature_c=726.85)
+
+    assert properties["density_kg_m3"] == pytest.approx(3000.0, rel=1.0e-9)
+    assert properties["dynamic_viscosity_pa_s"] == pytest.approx(0.002, rel=1.0e-9)
+    assert properties["property_sources"]["density"]["source_kind"] == "redlich_kister_estimate"
+    assert properties["property_sources"]["dynamic_viscosity"]["source_kind"] == "redlich_kister_estimate"
 
 
 def test_reduced_order_default_allocation_rule_is_conservative() -> None:

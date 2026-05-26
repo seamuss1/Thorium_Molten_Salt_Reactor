@@ -159,6 +159,8 @@ def build_reduced_order_flow_summary(
         "salt_density_kg_m3": _round_float(density_kg_m3),
         "salt_bulk_temperature_c": _round_float(bulk_temperature_c),
         "salt_properties": salt_properties,
+        "salt_source_backing": salt_properties.get("source_backing", "unavailable"),
+        "salt_property_sources": salt_properties.get("property_sources", {}),
         "primary_mass_flow_kg_s": _round_float(primary_mass_flow_kg_s),
         "geometric_inventory": connectivity_summary.get("interface_metrics", {}),
         "active_flow": {
@@ -216,6 +218,8 @@ def _build_homogenized_core_summary(
         "salt_density_kg_m3": _round_float(density_kg_m3),
         "salt_bulk_temperature_c": _round_float(bulk_temperature_c),
         "salt_properties": salt_properties,
+        "salt_source_backing": salt_properties.get("source_backing", "unavailable"),
+        "salt_property_sources": salt_properties.get("property_sources", {}),
         "primary_mass_flow_kg_s": _round_float(primary_mass_flow_kg_s),
         "geometric_inventory": geometric_inventory,
         "active_flow": {
