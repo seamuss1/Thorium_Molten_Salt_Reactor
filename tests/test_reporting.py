@@ -1409,6 +1409,49 @@ def test_report_surfaces_model_validity_and_validation_maturity() -> None:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
 
+def test_report_includes_volatile_species_transport_section() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-reporting-volatile-species" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "case": "immersed_pool_reference",
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "dry-run"},
+                    "metrics": {"keff": 1.01},
+                    "volatile_species": {
+                        "model": "contact_limited_volatile_species_screen",
+                        "loop_residence_time_s": 6.0,
+                        "contact_factor": 0.706,
+                        "bubble_contact_efficiency": 0.462875,
+                        "cleanup_polish_fraction": 0.000005,
+                        "effective_removal_fraction": 0.462878,
+                        "equilibrium_xenon_inventory_multiplier": 0.000304,
+                        "screening_status": "screening_only",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "immersed_pool_reference",
+            {"reactor": {"name": "Immersed Pool MSR Reference", "family": "reference", "stage": "full-core"}},
+            summary_path,
+            None,
+            None,
+        )
+
+        section = _section(report, "## Volatile Species Transport")
+        assert "contact_limited_volatile_species_screen" in section
+        assert "Xe-135 equilibrium inventory multiplier" in section
+        assert "screening_only" in section
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
 def test_report_includes_flagship_finance_schedule_and_taxonomy() -> None:
     scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-finance" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)

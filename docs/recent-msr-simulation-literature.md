@@ -8,7 +8,9 @@ screen, summary-derived deterministic physics-core loop residence handoff, and
 static adjoint-shape weighting for flowing-fuel precursor worth. The May 17,
 2026 follow-up also made the existing deterministic decay-heat precursor
 transport explicit in reports and metrics with core and external-loop segment
-source fractions. These implemented equations are documented in
+source fractions. A June 2026 follow-up added a volatile-species transport
+screen that treats gas removal as contact-limited bubble transfer plus slower
+cleanup polishing. These implemented equations are documented in
 `docs/current-model-equations.md`.
 
 The May 2026 refresh prioritized primary or official-lab sources published since
@@ -69,7 +71,7 @@ context until higher-fidelity data or architecture exists.
 | Reduced-order thermal hydraulics | Recent RELAP5-TMSR, SyTH, and RESTA3D work reinforces explicit loop residence, flow-fraction scaling, and finite-volume handoff patterns. The repo already had the core reduced-order closures, so the material gap was not a new TH correlation but better residence propagation into coupled precursor outputs. | Kept the reduced-order TH architecture. Used summary-derived loop residence in the deterministic precursor handoff. |
 | Neutronics handoffs | Squirrel and Griffin/Pronghorn/Squirrel MSRE validation work shows that point-kinetics reductions for liquid fuel should account for spatial source importance when precursor material moves out of high-worth regions. | Changed deterministic `physics_core.beta_eff` to use static adjoint-shape-weighted flowing precursor source, while preserving `unweighted_beta_eff` for comparison. |
 | Delayed-neutron precursor transport | New and recent DNP studies consistently support multi-group moving precursor treatment with core/external-loop residence effects. The existing segmented six-group model is directionally appropriate, but its deterministic handoff needed a worth-weighted metric. | Added cell-level delayed-neutron source fractions and the adjoint-weighted flowing-fuel worth report. |
-| Species transport | Mole/Griffin and ThorFPMC results show that fission-product migration, decay heat, xenon poison, source term, and online removal are coupled. That is scientifically relevant, but a real implementation would require a finite-volume species inventory model rather than a narrow patch. | No code change in this pass. Kept as roadmap context; current xenon, cleanup, and tritium pieces remain screening proxies. |
+| Species transport | Recent ORNL and Argonne work makes a narrower point that is implementable here: volatile-species removal is contact-limited at the gas-liquid interface, while cleanup systems act more like slower polishing stages. Full species transport still requires a finite-volume inventory solve, but that does not prevent a better reduced-order screen. | Added a volatile-species transport summary that combines loop residence, segment-weighted contact factor, gas stripping, and cleanup polishing into an effective removal fraction and Xe-135 equilibrium inventory multiplier. |
 | Chemistry | Recent multiphysics and fission-product transport work supports coupling chemistry, cleanup, and species state. The available public findings did not provide a small defensible replacement for the current redox/impurity/corrosion proxy. | No chemistry model change. Existing chemistry outputs remain explicitly labeled as proxy/screening values. |
 | Depletion | Current literature points toward online processing and inventory-control coupling, but implementing that well would require depletion-chain transport or SaltProc-style integration beyond this reduced-order patch. | No depletion code change. Existing depletion fields remain assumption metadata and reduced-order transient terms. |
 | Validation | MSRE remains the strongest public validation anchor, and recent CAD/CSG OpenMC plus Squirrel/Griffin/Pronghorn work increases confidence that MSRE pump and natural-circulation cases are the right next validation targets. | No new benchmark dataset was added in this pass. The literature note now records the validation relevance and the implemented metric can be compared against MSRE flowing-fuel delayed-neutron worth studies. |
@@ -82,6 +84,29 @@ context until higher-fidelity data or architecture exists.
   flow-dependent primary-loop velocity. Their results reinforce that MSR
   neutronics should not treat delayed precursors as stationary-core inventory.
   Source: https://doi.org/10.1016/j.nucengdes.2023.112824
+
+- Lee et al. separately reported 2024 ORNL PHYSOR work on xenon-135 and
+  tritium transport in the MSRE and emphasized that interfacial area and
+  mass-transfer coefficients are central to predicting gas removal. This is a
+  direct argument against treating volatile removal as only a fixed scalar
+  cleanup fraction.
+  Sources: https://doi.org/10.13182/PHYSOR24-43702 and
+  https://www.ornl.gov/publication/transport-highly-volatile-gases-related-noble-gases-and-tritium-msre
+
+- Marone et al. used a multiphysics tool to study helium-bubble fission-gas
+  removal in a liquid-fueled MSR and concluded that removal efficiency depends
+  strongly on bubble/interface behavior; accurate prediction ultimately needs
+  three-dimensional two-phase simulation. That supports adding a screening model
+  while keeping it explicitly labeled as reduced-order.
+  Source: https://doi.org/10.1080/00295639.2025.2455884
+
+- Argonne's 2024 SAM species-transport report added gas/liquid phase transport,
+  two-film interphase transfer, and parent-to-daughter decay transfer for
+  Xe-135-class species in MSRE-like conditions. The report is more detailed
+  than this repository should emulate directly, but it supports reporting a
+  loop-residence and phase-contact-aware proxy instead of a pure fixed-removal
+  term.
+  Source: https://publications.anl.gov/anlpubs/2024/10/191780.pdf
 
 - Chen et al. used RELAP5-TMSR with one-dimensional DNP transport for MSBR
   transients and reported strong coupling among DNP redistribution, temperature
@@ -216,6 +241,8 @@ The implemented models are intentionally reduced-order bridges:
 - core delayed-neutron source fraction reported into transient history and
   summaries.
 - property uncertainty bands in run summaries and transient sweeps,
+- contact-limited volatile-species removal and Xe-135 equilibrium inventory
+  screening,
 - normalized tritium production/distribution accounting,
 - and graphite fast-flux/lifetime screening metrics.
 - and the MSRE pump-transient validation screen for one-dimensional reactivity

@@ -48,6 +48,7 @@ from thorium_reactor.literature_models import (
     build_msre_pump_transient_benchmark_screen,
     build_property_uncertainty_summary,
     build_tritium_transport_summary,
+    build_volatile_species_transport_summary,
 )
 from thorium_reactor.neutronics.openmc_compat import missing_openmc_runtime_message, openmc
 from thorium_reactor.paths import refresh_bundle_artifact_statuses
@@ -473,6 +474,12 @@ def run_case(
                         fuel_salt_volume_m3=float(primary_system["inventory"]["fuel_salt"]["total_m3"]),
                         chemistry_summary=summary["chemistry"],
                     )
+                    summary["volatile_species"] = build_volatile_species_transport_summary(
+                        config,
+                        fuel_cycle_summary=summary["fuel_cycle"],
+                        chemistry_summary=summary["chemistry"],
+                        primary_system_summary=primary_system,
+                    )
                     hydraulics = primary_system["loop_hydraulics"]
                     heat_exchanger = primary_system["heat_exchanger"]
                     summary["metrics"]["primary_total_pressure_drop_kpa"] = hydraulics["total_pressure_drop_kpa"]
@@ -484,6 +491,12 @@ def run_case(
                     summary["metrics"]["chemistry_corrosion_index"] = primary_system["chemistry"]["corrosion_index"]
                     summary["metrics"]["tritium_environmental_release_fraction"] = summary["tritium"][
                         "environmental_release_fraction"
+                    ]
+                    summary["metrics"]["volatile_species_effective_removal_fraction"] = summary["volatile_species"][
+                        "effective_removal_fraction"
+                    ]
+                    summary["metrics"]["volatile_species_xenon_inventory_multiplier"] = summary["volatile_species"][
+                        "equilibrium_xenon_inventory_multiplier"
                     ]
     if TRANSIENT_ANALYSIS in capabilities and "bop" in summary and "flow" in summary:
         physics_core = build_physics_core_summary(config, summary)

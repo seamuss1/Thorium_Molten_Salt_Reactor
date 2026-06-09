@@ -15,6 +15,11 @@ DEFAULT_PROPERTY_UNCERTAINTIES_95: dict[str, float] = {
 DEFAULT_GRAPHITE_FAST_FLUENCE_LIMIT_N_CM2 = 3.0e22
 SECONDS_PER_YEAR = 365.25 * 24.0 * 3600.0
 MSRE_PUMP_TRANSIENT_BENCHMARK_SOURCE = "https://doi.org/10.1080/00295639.2025.2475650"
+VOLATILE_SPECIES_TRANSPORT_SOURCES = (
+    "https://doi.org/10.13182/PHYSOR24-43702",
+    "https://doi.org/10.1080/00295639.2025.2455884",
+    "https://publications.anl.gov/anlpubs/2024/10/191780.pdf",
+)
 
 
 def build_property_uncertainty_summary(
@@ -134,6 +139,66 @@ def build_tritium_transport_summary(
         "control_effect": _tritium_control_effect(environmental_release_fraction),
         "basis": "Reduced-order distribution screen inspired by the 10 MWe TMSR tritium-removal study.",
         "source": "https://doi.org/10.1016/j.anucene.2023.110272",
+    }
+
+
+def build_volatile_species_transport_summary(
+    config: Any,
+    *,
+    fuel_cycle_summary: Mapping[str, Any],
+    chemistry_summary: Mapping[str, Any],
+    primary_system_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    settings = _mapping_section(config, "volatile_species")
+    loop_segments = primary_system_summary.get("loop_segments", [])
+    cleanup_turnover_days = max(float(fuel_cycle_summary.get("cleanup_turnover_days", 14.0)), 1.0e-9)
+    cleanup_removal_efficiency = _clamp(float(fuel_cycle_summary.get("cleanup_removal_efficiency", 0.0)), 0.0, 1.0)
+    gas_stripping_efficiency = _clamp(float(chemistry_summary.get("gas_stripping_efficiency", 0.0)), 0.0, 1.0)
+    xenon_removal_fraction = _clamp(float(fuel_cycle_summary.get("xenon_removal_fraction", 1.0)), 0.0, 1.0)
+    primary_volumetric_flow_m3_s = max(float(primary_system_summary.get("primary_volumetric_flow_m3_s", 0.0)), 0.0)
+    fuel_salt_volume_m3 = max(
+        float(_mapping_value(_mapping_value(primary_system_summary, "inventory"), "fuel_salt").get("total_m3", 0.0)),
+        0.0,
+    )
+    loop_residence_time_s = (
+        fuel_salt_volume_m3 / primary_volumetric_flow_m3_s
+        if primary_volumetric_flow_m3_s > 0.0
+        else 0.0
+    )
+    contact_factor = _loop_contact_factor(loop_segments)
+    bubble_contact_efficiency = 1.0 - math.exp(-gas_stripping_efficiency * contact_factor)
+    cleanup_polish_fraction = 1.0 - math.exp(
+        -cleanup_removal_efficiency * loop_residence_time_s / max(cleanup_turnover_days * 86400.0, 1.0e-9)
+    )
+    effective_removal_fraction = 1.0 - (1.0 - bubble_contact_efficiency) * (1.0 - cleanup_polish_fraction)
+    effective_xenon_removal_rate_s = (
+        effective_removal_fraction * xenon_removal_fraction / max(loop_residence_time_s, 1.0e-9)
+        if loop_residence_time_s > 0.0
+        else 0.0
+    )
+    xenon_decay_constant_s = _setting_float(settings, "xenon_135_decay_constant_s", 2.11e-5)
+    equilibrium_xenon_inventory_multiplier = (
+        xenon_decay_constant_s / max(xenon_decay_constant_s + effective_xenon_removal_rate_s, 1.0e-12)
+    )
+    return {
+        "model": str(settings.get("model", "contact_limited_volatile_species_screen")),
+        "loop_residence_time_s": _round_float(loop_residence_time_s),
+        "fuel_salt_volume_m3": _round_float(fuel_salt_volume_m3),
+        "primary_volumetric_flow_m3_s": _round_float(primary_volumetric_flow_m3_s),
+        "contact_factor": _round_float(contact_factor),
+        "bubble_contact_efficiency": _round_float(bubble_contact_efficiency),
+        "cleanup_polish_fraction": _round_float(cleanup_polish_fraction),
+        "effective_removal_fraction": _round_float(effective_removal_fraction),
+        "effective_xenon_removal_rate_s": _round_float(effective_xenon_removal_rate_s),
+        "equilibrium_xenon_inventory_multiplier": _round_float(equilibrium_xenon_inventory_multiplier),
+        "xenon_135_decay_constant_s": _round_float(xenon_decay_constant_s),
+        "xenon_removal_fraction": _round_float(xenon_removal_fraction),
+        "screening_status": "screening_only",
+        "basis": (
+            "Reduced-order volatile-species screen: gas removal is contact-limited and cleanup polishing is slower "
+            "than direct gas-bubble transfer."
+        ),
+        "sources": list(VOLATILE_SPECIES_TRANSPORT_SOURCES),
     }
 
 
@@ -383,6 +448,23 @@ def _control_channel_fraction(reduced_order_flow: Mapping[str, Any]) -> float:
         if "control" in str(key).lower()
     )
     return control / total
+
+
+def _loop_contact_factor(loop_segments: Any) -> float:
+    if not isinstance(loop_segments, list):
+        return 1.0
+    weighted_contact = 0.0
+    total_residence = 0.0
+    for segment in loop_segments:
+        if not isinstance(segment, Mapping):
+            continue
+        residence_fraction = max(float(segment.get("residence_fraction", 0.0)), 0.0)
+        cleanup_weight = max(float(segment.get("cleanup_weight", 0.0)), 0.0)
+        weighted_contact += residence_fraction * cleanup_weight
+        total_residence += residence_fraction
+    if total_residence <= 0.0:
+        return 1.0
+    return weighted_contact / total_residence
 
 
 def _tritium_control_effect(environmental_release_fraction: float) -> str:

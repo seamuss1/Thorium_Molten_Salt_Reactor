@@ -7,6 +7,7 @@ from thorium_reactor.literature_models import (
     build_msre_pump_transient_benchmark_screen,
     build_property_uncertainty_summary,
     build_tritium_transport_summary,
+    build_volatile_species_transport_summary,
 )
 
 
@@ -87,6 +88,36 @@ def test_graphite_lifetime_screen_reports_fast_flux_margin() -> None:
     assert summary["fast_flux_peaking_factor"] > 0.0
     assert summary["estimated_lifespan_years"] > 0.0
     assert summary["screening_status"] in {"pass", "watch"}
+
+
+def test_volatile_species_screen_reports_contact_limited_xenon_removal() -> None:
+    config = load_case_config(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml")
+
+    summary = build_volatile_species_transport_summary(
+        config,
+        fuel_cycle_summary={
+            "cleanup_turnover_days": 10.0,
+            "cleanup_removal_efficiency": 0.78,
+            "xenon_removal_fraction": 0.9,
+        },
+        chemistry_summary={"gas_stripping_efficiency": 0.88},
+        primary_system_summary={
+            "primary_volumetric_flow_m3_s": 0.02,
+            "inventory": {"fuel_salt": {"total_m3": 0.12}},
+            "loop_segments": [
+                {"id": "hot_leg", "residence_fraction": 0.46, "cleanup_weight": 0.3},
+                {"id": "gas_contact", "residence_fraction": 0.32, "cleanup_weight": 1.5},
+                {"id": "cold_leg", "residence_fraction": 0.22, "cleanup_weight": 0.4},
+            ],
+        },
+    )
+
+    assert summary["loop_residence_time_s"] == 6.0
+    assert summary["contact_factor"] == 0.706
+    assert summary["effective_removal_fraction"] > summary["cleanup_polish_fraction"]
+    assert summary["effective_xenon_removal_rate_s"] > 0.0
+    assert 0.0 < summary["equilibrium_xenon_inventory_multiplier"] < 1.0
+    assert summary["screening_status"] == "screening_only"
 
 
 def test_msre_pump_transient_screen_reports_1d_validation_bounds() -> None:

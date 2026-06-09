@@ -163,6 +163,11 @@ def test_web_run_detail_exposes_curated_output_sections() -> None:
                 "fuel_cycle": {"fissile_inventory_kg": 80.0, "specific_power_mw_per_t_hm": 500.0},
                 "chemistry": {"corrosion_risk": "low", "corrosion_index": 1.01, "redox_state_ev": -0.02},
                 "tritium": {"removal_fraction": 0.66, "environmental_release_fraction": 0.18},
+                "volatile_species": {
+                    "effective_removal_fraction": 0.46,
+                    "equilibrium_xenon_inventory_multiplier": 0.003,
+                    "basis": "contact-limited gas transfer plus cleanup polishing",
+                },
                 "benchmark_traceability": {
                     "traceability_score": 88.0,
                     "confidence_summary": {"high": 2, "medium": 1},
@@ -220,6 +225,7 @@ def test_web_run_detail_exposes_curated_output_sections() -> None:
         assert sections["plant_balance"]["metrics"][0]["label"] == "Thermal power"
         assert any(metric["label"] == "k-effective" for metric in sections["neutronics"]["metrics"])
         assert any(metric["label"] == "Atom-balance residual" for metric in sections["advanced_physics"]["metrics"])
+        assert any(metric["label"] == "Volatile removal" for metric in sections["fuel_chemistry"]["metrics"])
         assert sections["validation_maturity"]["status"] == "screening_backed"
         assert any(metric["label"] == "LCOE" for metric in sections["commercial_planning"]["metrics"])
     finally:

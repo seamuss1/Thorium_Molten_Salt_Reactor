@@ -609,6 +609,21 @@ def generate_report(
         lines.append(f"- Circulating inventory fraction: `{tritium.get('circulating_inventory_fraction', 'n/a')}`")
         lines.append(f"- Control effect: `{tritium.get('control_effect', 'n/a')}`")
 
+    volatile_species = summary.get("volatile_species", {})
+    if volatile_species:
+        lines.extend(["", "## Volatile Species Transport", ""])
+        lines.append(f"- Model: `{volatile_species.get('model', 'n/a')}`")
+        lines.append(f"- Loop residence time (s): `{volatile_species.get('loop_residence_time_s', 'n/a')}`")
+        lines.append(f"- Contact factor: `{volatile_species.get('contact_factor', 'n/a')}`")
+        lines.append(f"- Bubble contact efficiency: `{volatile_species.get('bubble_contact_efficiency', 'n/a')}`")
+        lines.append(f"- Cleanup polish fraction: `{volatile_species.get('cleanup_polish_fraction', 'n/a')}`")
+        lines.append(f"- Effective removal fraction: `{volatile_species.get('effective_removal_fraction', 'n/a')}`")
+        lines.append(
+            "- Xe-135 equilibrium inventory multiplier: "
+            f"`{volatile_species.get('equilibrium_xenon_inventory_multiplier', 'n/a')}`"
+        )
+        lines.append(f"- Screening status: `{volatile_species.get('screening_status', 'n/a')}`")
+
     graphite_lifetime = summary.get("graphite_lifetime", {})
     if graphite_lifetime:
         lines.extend(["", "## Graphite Lifetime", ""])

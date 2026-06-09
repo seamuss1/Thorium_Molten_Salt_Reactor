@@ -614,7 +614,8 @@ class WebRepository:
         graphite = as_mapping(summary.get("graphite_lifetime"))
         chemistry = as_mapping(summary.get("chemistry"))
         tritium = as_mapping(summary.get("tritium"))
-        if not fuel_cycle and not graphite and not chemistry and not tritium:
+        volatile_species = as_mapping(summary.get("volatile_species"))
+        if not fuel_cycle and not graphite and not chemistry and not tritium and not volatile_species:
             return
 
         metrics = output_metrics(
@@ -629,11 +630,19 @@ class WebRepository:
             ("Redox state", chemistry.get("redox_state_ev"), "eV", "number"),
             ("Tritium removal", tritium.get("removal_fraction"), "fraction", "number"),
             ("Environmental release", tritium.get("environmental_release_fraction"), "fraction", "number"),
+            ("Volatile removal", volatile_species.get("effective_removal_fraction"), "fraction", "number"),
+            ("Xe inventory multiplier", volatile_species.get("equilibrium_xenon_inventory_multiplier"), "fraction", "number"),
             ("Graphite lifespan", graphite.get("estimated_lifespan_years"), "years", "number"),
             ("Graphite margin", graphite.get("lifetime_margin"), "fraction", "number"),
         )
         notes = []
-        for source in (fuel_cycle.get("depletion_model"), chemistry.get("model"), tritium.get("basis"), graphite.get("basis")):
+        for source in (
+            fuel_cycle.get("depletion_model"),
+            chemistry.get("model"),
+            tritium.get("basis"),
+            volatile_species.get("basis"),
+            graphite.get("basis"),
+        ):
             if source:
                 notes.append(str(source))
         self._append_section(

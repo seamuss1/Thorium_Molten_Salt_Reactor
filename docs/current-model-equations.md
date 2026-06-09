@@ -581,6 +581,63 @@ can release about one-third of produced tritium, while MSRE-like spray-gas
 removal can remove about two-thirds and reduce permeation toward roughly 10%.
 Graphite saturation adds a configurable release penalty over operating time.
 
+## Volatile Species Transport Screen
+
+Recent ORNL and Argonne species-transport work reinforces that xenon and
+tritium removal in liquid-fueled MSRs is contact-limited: gas-bubble transfer
+depends on interfacial area and mass-transfer closure, while cleanup systems
+provide slower polishing. The repository does not solve a two-phase transport
+field, so it reports a reduced-order screening closure instead.
+
+The current screen derives:
+
+- total loop residence time from fuel-salt inventory and volumetric flow,
+- a contact factor from configured loop-segment residence fractions and cleanup
+  weights,
+- a bubble-contact removal efficiency,
+- a slower cleanup-polish removal fraction over one loop pass,
+- and an Xe-135 equilibrium inventory multiplier relative to a no-removal
+  baseline.
+
+Using loop residence time $\tau_{\mathrm{loop}}$, gas-stripping efficiency
+$\eta_{\mathrm{gas}}$, contact factor $F_{\mathrm{contact}}$, cleanup
+efficiency $\eta_{\mathrm{cleanup}}$, cleanup turnover time
+$\tau_{\mathrm{cleanup}}$, Xe removal credit $f_{\mathrm{Xe}}$, and Xe-135
+decay constant $\lambda_{\mathrm{Xe}}$, the implemented screen is:
+
+$$
+\eta_{\mathrm{contact}}
+=
+1-\exp(-\eta_{\mathrm{gas}} F_{\mathrm{contact}})
+$$
+
+$$
+\eta_{\mathrm{polish}}
+=
+1-\exp\left(-\eta_{\mathrm{cleanup}}\frac{\tau_{\mathrm{loop}}}{\tau_{\mathrm{cleanup}}}\right)
+$$
+
+$$
+\eta_{\mathrm{eff}}
+=
+1-(1-\eta_{\mathrm{contact}})(1-\eta_{\mathrm{polish}})
+$$
+
+$$
+r_{\mathrm{Xe,rem}}
+=
+\frac{\eta_{\mathrm{eff}} f_{\mathrm{Xe}}}{\tau_{\mathrm{loop}}}
+$$
+
+$$
+M_{\mathrm{Xe,eq}}
+=
+\frac{\lambda_{\mathrm{Xe}}}{\lambda_{\mathrm{Xe}} + r_{\mathrm{Xe,rem}}}
+$$
+
+This is intentionally a reporting and sensitivity screen, not a replacement for
+the two-film and multiphase closures used in Mole or SAM.
+
 ## Graphite Irradiation Lifetime Screen
 
 The graphite screen uses recent SINAP graphite optimization literature as a
