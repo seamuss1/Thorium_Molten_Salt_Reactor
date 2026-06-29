@@ -119,6 +119,10 @@ def test_web_run_detail_exposes_curated_output_sections() -> None:
                         "feedback_coefficients": {"fuel_temperature_pcm_per_c": -12.5},
                     },
                 },
+                "msre_delayed_neutron_worth_benchmark": {
+                    "screening_status": "context_only",
+                    "computed_flow_loss_fraction": 0.29,
+                },
                 "primary_system": {
                     "primary_mass_flow_kg_s": 500.0,
                     "primary_volumetric_flow_m3_s": 0.2,
@@ -219,6 +223,8 @@ def test_web_run_detail_exposes_curated_output_sections() -> None:
         }.issubset(sections)
         assert sections["plant_balance"]["metrics"][0]["label"] == "Thermal power"
         assert any(metric["label"] == "k-effective" for metric in sections["neutronics"]["metrics"])
+        assert any(metric["label"] == "Delayed-neutron worth loss" for metric in sections["neutronics"]["metrics"])
+        assert any("MSRE delayed-neutron worth screen" in note for note in sections["neutronics"]["notes"])
         assert any(metric["label"] == "Atom-balance residual" for metric in sections["advanced_physics"]["metrics"])
         assert sections["validation_maturity"]["status"] == "screening_backed"
         assert any(metric["label"] == "LCOE" for metric in sections["commercial_planning"]["metrics"])

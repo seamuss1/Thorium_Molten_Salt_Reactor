@@ -4,6 +4,7 @@ from pathlib import Path
 from thorium_reactor.config import load_case_config
 from thorium_reactor.literature_models import (
     build_graphite_lifetime_summary,
+    build_msre_delayed_neutron_worth_benchmark,
     build_msre_pump_transient_benchmark_screen,
     build_property_uncertainty_summary,
     build_tritium_transport_summary,
@@ -117,3 +118,49 @@ def test_msre_pump_transient_screen_reports_1d_validation_bounds() -> None:
     assert summary["stagnant_salt_inventory_fraction"] == 0.029412
     assert summary["screening_status"] == "watch"
     assert "bypass_flow" in summary["sensitivity_drivers"]
+
+
+def test_msre_delayed_neutron_worth_screen_flags_msre_like_cases_against_reference_band() -> None:
+    config = load_case_config(REPO_ROOT / "configs" / "cases" / "msre_zero_power_physics" / "case.yaml")
+
+    summary = build_msre_delayed_neutron_worth_benchmark(
+        config,
+        physics_core={
+            "neutronics": {
+                "beta_eff": 0.004225,
+                "delayed_neutron_total_yield_fraction": 0.0065,
+                "delayed_neutron_flow_loss_pcm": 227.5,
+                "beta_eff_basis": "static_adjoint_shape_weighted_flowing_precursor_source",
+                "precursor_coupling": {
+                    "adjoint_weighted_core_delayed_neutron_source_fraction": 0.65,
+                },
+            }
+        },
+    )
+
+    assert summary["model"] == "msre_delayed_neutron_worth_benchmark_screen"
+    assert summary["screening_status"] == "pass"
+    assert summary["computed_flow_loss_fraction"] == 0.35
+    assert summary["reference_flow_loss_fraction_band"]["max"] == 0.45
+    assert summary["computed_flow_loss_pcm"] == 227.5
+
+
+def test_msre_delayed_neutron_worth_screen_is_context_only_for_non_msre_cases() -> None:
+    config = load_case_config(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml")
+
+    summary = build_msre_delayed_neutron_worth_benchmark(
+        config,
+        physics_core={
+            "neutronics": {
+                "beta_eff": 0.004875,
+                "delayed_neutron_total_yield_fraction": 0.0065,
+                "delayed_neutron_flow_loss_pcm": 162.5,
+                "precursor_coupling": {
+                    "adjoint_weighted_core_delayed_neutron_source_fraction": 0.75,
+                },
+            }
+        },
+    )
+
+    assert summary["screening_status"] == "context_only"
+    assert summary["computed_flow_loss_fraction"] == 0.25

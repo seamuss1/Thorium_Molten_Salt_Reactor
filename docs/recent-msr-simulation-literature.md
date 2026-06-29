@@ -11,6 +11,26 @@ transport explicit in reports and metrics with core and external-loop segment
 source fractions. These implemented equations are documented in
 `docs/current-model-equations.md`.
 
+The June 29, 2026 follow-up screened additional recent liquid-fueled MSR
+literature and did not find a small defensible reason to replace the existing
+reduced-order closures for species transport, chemistry, or depletion. The most
+useful incremental finding was instead a better validation framing: recent MSRE
+validation work reports roughly 35% flowing-fuel delayed-neutron worth loss for
+MSRE-like cases, which the repository already computes implicitly through its
+adjoint-weighted `beta_eff` handoff. The repository action in this pass is
+therefore a validation/reporting screen, not a new solver closure: summaries
+now compare computed delayed-neutron worth loss against a broad MSRE reference
+band for MSRE-like cases and mark non-MSRE cases as context-only.
+
+Sources checked in this pass: the Frontiers 2025 MSRE validation paper
+(`https://doi.org/10.3389/fnuen.2025.1617048`), the 2025 Squirrel point-kinetics
+paper (`https://doi.org/10.1080/00295639.2025.2494182`), and the INL Virtual
+Test Bed lower-plenum CFD page
+(`https://virtualtestbed.inl.gov/msr/msre/lp_nekrs_model.html`). The first two
+support the new worth-loss benchmark screen; the INL source remains relevant
+for future lower-plenum and radial-distribution validation, but still does not
+map to a narrow code patch inside the current 1D reduced-order architecture.
+
 The May 2026 refresh prioritized primary or official-lab sources published since
 2024-05-17. It did not identify a reason to replace the repository's
 reduced-order architecture, but it did support focused implementation upgrades:

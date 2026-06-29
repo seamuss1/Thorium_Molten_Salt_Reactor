@@ -15,6 +15,7 @@ DEFAULT_PROPERTY_UNCERTAINTIES_95: dict[str, float] = {
 DEFAULT_GRAPHITE_FAST_FLUENCE_LIMIT_N_CM2 = 3.0e22
 SECONDS_PER_YEAR = 365.25 * 24.0 * 3600.0
 MSRE_PUMP_TRANSIENT_BENCHMARK_SOURCE = "https://doi.org/10.1080/00295639.2025.2475650"
+MSRE_DELAYED_NEUTRON_WORTH_BENCHMARK_SOURCE = "https://doi.org/10.3389/fnuen.2025.1617048"
 
 
 def build_property_uncertainty_summary(
@@ -249,6 +250,64 @@ def build_msre_pump_transient_benchmark_screen(
     }
 
 
+def build_msre_delayed_neutron_worth_benchmark(
+    config: Any,
+    *,
+    physics_core: Mapping[str, Any],
+) -> dict[str, Any]:
+    neutronics = _mapping_value(physics_core, "neutronics")
+    total_beta = _setting_float(neutronics, "delayed_neutron_total_yield_fraction", 0.0)
+    beta_eff = _setting_float(neutronics, "beta_eff", 0.0)
+    weighted_core_fraction = _setting_float(
+        _mapping_value(neutronics, "precursor_coupling"),
+        "adjoint_weighted_core_delayed_neutron_source_fraction",
+        0.0,
+    )
+    if total_beta <= 0.0:
+        return {
+            "model": "msre_delayed_neutron_worth_benchmark_screen",
+            "screening_status": "insufficient_data",
+            "source": MSRE_DELAYED_NEUTRON_WORTH_BENCHMARK_SOURCE,
+            "reference_reactor": "MSRE flowing-fuel delayed-neutron worth validation set",
+            "applicability": "msre_like_thermal_spectrum_liquid_fuel_cases",
+            "interpretation": "The benchmark needs a positive delayed-neutron yield to evaluate flowing-fuel worth loss.",
+        }
+
+    flow_loss_fraction = _clamp(1.0 - beta_eff / total_beta, 0.0, 1.0)
+    reference_loss_fraction = 0.35
+    lower_band = 0.25
+    upper_band = 0.45
+    msre_like = _is_msre_like_case(config)
+    if not msre_like:
+        screening_status = "context_only"
+    elif lower_band <= flow_loss_fraction <= upper_band:
+        screening_status = "pass"
+    else:
+        screening_status = "watch"
+    return {
+        "model": "msre_delayed_neutron_worth_benchmark_screen",
+        "screening_status": screening_status,
+        "source": MSRE_DELAYED_NEUTRON_WORTH_BENCHMARK_SOURCE,
+        "reference_reactor": "MSRE flowing-fuel delayed-neutron worth validation set",
+        "applicability": "msre_like_thermal_spectrum_liquid_fuel_cases",
+        "reference_flow_loss_fraction": _round_float(reference_loss_fraction),
+        "reference_flow_loss_fraction_band": {
+            "min": _round_float(lower_band),
+            "max": _round_float(upper_band),
+        },
+        "computed_flow_loss_fraction": _round_float(flow_loss_fraction),
+        "computed_flow_loss_pcm": _round_float((total_beta - beta_eff) * 1.0e5),
+        "computed_beta_eff_fraction": _round_float(beta_eff),
+        "total_delayed_neutron_yield_fraction": _round_float(total_beta),
+        "adjoint_weighted_core_delayed_neutron_source_fraction": _round_float(weighted_core_fraction),
+        "beta_eff_basis": str(neutronics.get("beta_eff_basis", "unknown")),
+        "interpretation": (
+            "Recent MSRE validation studies report roughly 35% flowing-fuel delayed-neutron worth loss. "
+            "This screen compares the reduced-order handoff against a broad MSRE-like reference band."
+        ),
+    }
+
+
 def _mapping_section(config: Any, key: str) -> Mapping[str, Any]:
     data = getattr(config, "data", config if isinstance(config, Mapping) else {})
     section = data.get(key, {}) if isinstance(data, Mapping) else {}
@@ -391,6 +450,16 @@ def _tritium_control_effect(environmental_release_fraction: float) -> str:
     if environmental_release_fraction <= 0.25:
         return "moderate"
     return "weak"
+
+
+def _is_msre_like_case(config: Any) -> bool:
+    name = str(getattr(config, "name", "")).lower()
+    reactor = getattr(config, "reactor", {})
+    family = str(reactor.get("family", "")).lower() if isinstance(reactor, Mapping) else ""
+    mode = str(reactor.get("mode", "")).lower() if isinstance(reactor, Mapping) else ""
+    benchmark = str(reactor.get("benchmark", "")).lower() if isinstance(reactor, Mapping) else ""
+    tokens = (name, family, mode, benchmark)
+    return any("msre" in token for token in tokens) or mode == "historic_benchmark"
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:

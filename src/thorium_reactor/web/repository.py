@@ -320,6 +320,7 @@ class WebRepository:
         metrics = output_metrics(
             ("k-effective", first_present(physics_neutronics.get("k_eff"), neutronics.get("k_eff")), "delta-k/k", "number"),
             ("Beta effective", physics_neutronics.get("beta_eff"), "fraction", "number"),
+            ("Delayed-neutron worth loss", get_path(summary, "msre_delayed_neutron_worth_benchmark.computed_flow_loss_fraction"), "fraction", "number"),
             ("Energy groups", physics_neutronics.get("group_count"), "count", "number"),
             ("Particles", simulation.get("particles"), "histories", "number"),
             ("Batches", simulation.get("batches"), "count", "number"),
@@ -338,6 +339,13 @@ class WebRepository:
         coupling = as_mapping(physics_core.get("coupling"))
         for key, value in list(coupling.items())[:3]:
             notes.append(f"{humanize_key(str(key))}: {value}")
+        benchmark = as_mapping(summary.get("msre_delayed_neutron_worth_benchmark"))
+        if benchmark.get("screening_status"):
+            notes.append(
+                "MSRE delayed-neutron worth screen: "
+                f"{benchmark.get('screening_status')} "
+                f"at loss fraction {format_value(benchmark.get('computed_flow_loss_fraction'))}"
+            )
 
         status = first_present(get_path(physics_core, "integrity_checks.status"), neutronics.get("status"))
         self._append_section(

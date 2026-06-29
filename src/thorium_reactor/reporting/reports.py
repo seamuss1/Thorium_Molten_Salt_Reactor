@@ -475,6 +475,35 @@ def generate_report(
         )
         lines.append(f"- Interpretation: {msre_pump_transient.get('interpretation', 'n/a')}")
 
+    msre_delayed_neutron_worth = summary.get("msre_delayed_neutron_worth_benchmark", {})
+    if msre_delayed_neutron_worth:
+        flow_loss_band = msre_delayed_neutron_worth.get("reference_flow_loss_fraction_band", {})
+        lines.extend(["", "## MSRE Delayed-Neutron Worth Validation", ""])
+        lines.append(f"- Model: `{msre_delayed_neutron_worth.get('model', 'n/a')}`")
+        lines.append(f"- Screening status: `{msre_delayed_neutron_worth.get('screening_status', 'n/a')}`")
+        lines.append(f"- Source: `{msre_delayed_neutron_worth.get('source', 'n/a')}`")
+        lines.append(
+            "- Reference flowing-fuel worth loss fraction: "
+            f"`{msre_delayed_neutron_worth.get('reference_flow_loss_fraction', 'n/a')}`"
+        )
+        lines.append(
+            "- Reference flowing-fuel worth loss band: "
+            f"`{flow_loss_band.get('min', 'n/a')} to {flow_loss_band.get('max', 'n/a')}`"
+        )
+        lines.append(
+            "- Computed flowing-fuel worth loss fraction: "
+            f"`{msre_delayed_neutron_worth.get('computed_flow_loss_fraction', 'n/a')}`"
+        )
+        lines.append(
+            "- Computed flowing-fuel worth loss (pcm): "
+            f"`{msre_delayed_neutron_worth.get('computed_flow_loss_pcm', 'n/a')}`"
+        )
+        lines.append(
+            "- Adjoint-weighted core delayed-neutron source fraction: "
+            f"`{msre_delayed_neutron_worth.get('adjoint_weighted_core_delayed_neutron_source_fraction', 'n/a')}`"
+        )
+        lines.append(f"- Interpretation: {msre_delayed_neutron_worth.get('interpretation', 'n/a')}")
+
     physics_core = summary.get("physics_core", {})
     if physics_core:
         precursor_transport = physics_core.get("precursor_transport", {})

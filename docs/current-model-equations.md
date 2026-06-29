@@ -423,6 +423,28 @@ The older unweighted core delayed-neutron source fraction remains in the JSON as
 `unweighted_beta_eff` and `core_delayed_neutron_source_absolute_fraction` for
 comparison.
 
+The report layer now also carries an MSRE delayed-neutron worth validation
+screen. It does not alter `physics_core`; it compares the computed flowing-fuel
+worth loss fraction
+
+$$
+f_{\beta,\mathrm{loss}} = 1 - \frac{\beta_{\mathrm{eff,flow}}}{\beta_{\mathrm{total}}}
+$$
+
+against a broad MSRE-like reference band centered on the recent validation
+literature value of roughly 35%:
+
+$$
+f_{\beta,\mathrm{loss,MSRE}} \approx 0.35,
+\qquad
+0.25 \le f_{\beta,\mathrm{loss}} \le 0.45 \text{ for the reduced-order screen.}
+$$
+
+For MSRE-like historic benchmark cases, the screen reports `pass` when the
+computed loss stays inside that band and `watch` otherwise. For non-MSRE cases
+it reports `context_only`, because the literature value is used as validation
+context rather than a cross-design acceptance limit.
+
 The same finite-volume ring is also used to screen decay-heat precursor
 transport. Recent 2025-2026 liquid-fueled MSR work emphasizes that decay heat
 is not released only in the core when fuel circulates through the primary loop.

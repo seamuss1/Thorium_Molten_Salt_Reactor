@@ -639,6 +639,17 @@ def test_report_includes_reduced_order_flow_section() -> None:
                         "stagnant_salt_inventory_fraction": 0.03,
                         "interpretation": "Bypass-like inventory can affect early transient reactivity rates.",
                     },
+                    "msre_delayed_neutron_worth_benchmark": {
+                        "model": "msre_delayed_neutron_worth_benchmark_screen",
+                        "screening_status": "context_only",
+                        "source": "https://doi.org/10.3389/fnuen.2025.1617048",
+                        "reference_flow_loss_fraction": 0.35,
+                        "reference_flow_loss_fraction_band": {"min": 0.25, "max": 0.45},
+                        "computed_flow_loss_fraction": 0.29,
+                        "computed_flow_loss_pcm": 182.5,
+                        "adjoint_weighted_core_delayed_neutron_source_fraction": 0.71,
+                        "interpretation": "Recent MSRE validation studies report roughly 35% flowing-fuel delayed-neutron worth loss.",
+                    },
                     "physics_core": {
                         "precursor_transport": {
                             "model": "finite_volume_advection_diffusion_decay",
@@ -751,6 +762,9 @@ def test_report_includes_reduced_order_flow_section() -> None:
         assert "## MSRE Pump Transient Validation" in report
         assert "11 to 21" in report
         assert "0.12" in report
+        assert "## MSRE Delayed-Neutron Worth Validation" in report
+        assert "0.25 to 0.45" in report
+        assert "182.5" in report
         assert "## Physics Core Transport" in report
         assert "finite_volume_decay_heat_precursor_transport" in report
         assert "heat_exchanger_and_offgas_contact" in report

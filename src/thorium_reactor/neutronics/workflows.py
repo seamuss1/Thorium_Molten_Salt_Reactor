@@ -45,6 +45,7 @@ from thorium_reactor.modeling import (
 )
 from thorium_reactor.literature_models import (
     build_graphite_lifetime_summary,
+    build_msre_delayed_neutron_worth_benchmark,
     build_msre_pump_transient_benchmark_screen,
     build_property_uncertainty_summary,
     build_tritium_transport_summary,
@@ -488,14 +489,24 @@ def run_case(
     if TRANSIENT_ANALYSIS in capabilities and "bop" in summary and "flow" in summary:
         physics_core = build_physics_core_summary(config, summary)
         summary["physics_core"] = physics_core
+        summary["msre_delayed_neutron_worth_benchmark"] = build_msre_delayed_neutron_worth_benchmark(
+            config,
+            physics_core=physics_core,
+        )
         summary["metrics"]["physics_core_k_eff"] = physics_core["neutronics"]["k_eff"]
         summary["metrics"]["physics_core_beta_eff"] = physics_core["neutronics"]["beta_eff"]
+        summary["metrics"]["physics_core_delayed_neutron_flow_loss_pcm"] = physics_core["neutronics"][
+            "delayed_neutron_flow_loss_pcm"
+        ]
         summary["metrics"]["physics_core_fuel_temperature_feedback_pcm_per_c"] = physics_core["neutronics"][
             "feedback_coefficients"
         ]["fuel_temperature_pcm_per_c"]
         summary["metrics"]["physics_core_precursor_transport_loss_fraction"] = physics_core["precursor_transport"][
             "transport_loss_fraction"
         ]
+        summary["metrics"]["msre_delayed_neutron_flow_loss_fraction"] = summary[
+            "msre_delayed_neutron_worth_benchmark"
+        ].get("computed_flow_loss_fraction")
         decay_heat = physics_core["precursor_transport"].get("decay_heat_precursors", {})
         if decay_heat:
             summary["metrics"]["physics_core_core_decay_heat_source_fraction"] = decay_heat[
