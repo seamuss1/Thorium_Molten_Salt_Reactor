@@ -11,6 +11,49 @@ transport explicit in reports and metrics with core and external-loop segment
 source fractions. These implemented equations are documented in
 `docs/current-model-equations.md`.
 
+## July 3, 2026 Addendum
+
+This follow-up screened recent primary sources from the last 24 months with
+focus on liquid-fueled MSR thermal hydraulics, flowing-fuel neutronics,
+delayed-neutron precursor transport, species transport, chemistry, depletion,
+validation, and reporting. The main checked items were Deng et al.'s 2026
+RELAP5/RKDG delayed-neutron and decay-heat precursor transport paper, the 2026
+MSR code-to-code benchmark by Pfahl et al., the 2025 MSRE validation study for
+Squirrel/Griffin/Pronghorn, the 2025 MSRE pump-transient benchmark by Elhareef
+et al., the 2025/2026 official INL Virtual Test Bed MSRE lower-plenum CFD
+documentation, and the 2025 Acierno et al. reduced-order MSFR transport work.
+
+Repository assessment: no additional focused implementation is warranted beyond
+the changes already captured in the May 2026 review. The recent sources keep
+pointing in the same direction: reduced-order MSR tools should propagate
+explicit loop residence, multi-group DNP transport, decay-heat precursor
+transport, and validation caveats tied to MSRE pump and plenum behavior. Those
+are now already represented in this repository's current precursor, decay-heat,
+validation-screen, and reporting paths.
+
+The remaining scientific gaps still require larger architecture changes rather
+than a safe narrow patch:
+
+- Species transport: recent Griffin/Mole, ThorFPMC, and related multiphysics
+  work still implies a finite-volume nuclide/species inventory model with
+  cleanup and removal coupling, not a documentation-only coefficient tweak.
+- Chemistry: recent public work remains either mechanistic corrosion research or
+  broad coupled-chemistry statements, without a small peer-reviewed closure that
+  can defensibly replace the current redox/impurity screening proxy.
+- Depletion: recent online-processing and multi-point depletion results still
+  imply zone-coupled inventory transport with reaction-rate feedback, beyond the
+  repository's present constant-rate sparse matrix screen.
+- Validation: the official VTB MSRE lower-plenum CFD model strengthens the case
+  for future inlet-profile and bypass-aware calibration, but the repository does
+  not yet have a radial lower-plenum or resolved inlet-distribution model to
+  tune against it.
+
+Result: no repository code/config/test change was made in this follow-up. The
+current reduced-order architecture remains directionally aligned with the newest
+public science, while the next material upgrades still require larger
+species-transport, chemistry, or depletion coupling work rather than an
+incremental patch.
+
 The May 2026 refresh prioritized primary or official-lab sources published since
 2024-05-17. It did not identify a reason to replace the repository's
 reduced-order architecture, but it did support focused implementation upgrades:
