@@ -60,13 +60,16 @@ class JobManager:
                     append_event(run_dir, "info", phase, f"Starting {phase}.", progress=progress)
                     self._run_phase(run_dir, draft, phase)
                     append_event(run_dir, "info", phase, f"Completed {phase}.", progress=index / len(phases))
+                # Append the closing event before flipping the status to a
+                # terminal value so a live SSE reader that observes "completed"
+                # is guaranteed to also see this final line on its next read.
+                append_event(run_dir, "info", "completed", "Run completed.", progress=1.0)
                 status.update({"status": "completed", "phase": "completed", "finished_at": utc_now(), "progress": 1.0})
                 write_status(run_dir, status)
-                append_event(run_dir, "info", "completed", "Run completed.", progress=1.0)
             except Exception as exc:  # noqa: BLE001 - job failures are persisted for the browser.
+                append_event(run_dir, "error", status.get("phase"), str(exc), progress=status.get("progress"))
                 status.update({"status": "failed", "finished_at": utc_now(), "error": str(exc)})
                 write_status(run_dir, status)
-                append_event(run_dir, "error", status.get("phase"), str(exc), progress=status.get("progress"))
 
     def _run_phase(self, run_dir: Path, draft: SimulationDraft, phase: str) -> None:
         command = build_cli_command(draft, phase)
@@ -116,8 +119,8 @@ class JobManager:
         for index, phase in enumerate(phases, start=1):
             progress = index / max(len(phases), 1)
             status.update({"phase": phase, "progress": progress})
-            write_status(run_dir, status)
             append_event(run_dir, "info", phase, f"Fake {phase} completed.", progress=progress)
+            write_status(run_dir, status)
             if phase == "run":
                 write_json(
                     run_dir / "summary.json",
@@ -134,9 +137,9 @@ class JobManager:
             if phase == "report":
                 (run_dir / "report.md").write_text(f"# {draft.case_name}\n\nFake web report.\n", encoding="utf-8")
             time.sleep(0.01)
+        append_event(run_dir, "info", "completed", "Run completed.", progress=1.0)
         status.update({"status": "completed", "phase": "completed", "finished_at": utc_now(), "progress": 1.0})
         write_status(run_dir, status)
-        append_event(run_dir, "info", "completed", "Run completed.", progress=1.0)
 
 
 def normalize_phases(phases: list[str]) -> list[str]:
@@ -187,14 +190,41 @@ def write_status(run_dir: Path, payload: dict[str, Any]) -> None:
     write_json(run_dir / "job_status.json", payload)
 
 
+_event_state_guard = threading.Lock()
+_event_locks: dict[str, threading.Lock] = {}
+_event_sequences: dict[str, int] = {}
+
+
+def _event_lock(key: str) -> threading.Lock:
+    with _event_state_guard:
+        lock = _event_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _event_locks[key] = lock
+        return lock
+
+
 def append_event(run_dir: Path, level: str, phase: str | None, message: str, *, progress: float | None = None) -> RunEvent:
     path = run_dir / "job_events.ndjson"
-    sequence = 1
-    if path.exists():
-        sequence = len(path.read_text(encoding="utf-8").splitlines()) + 1
-    event = RunEvent(sequence=sequence, timestamp=utc_now(), level=level, phase=phase, message=message, progress=progress)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(model_to_dict(event), sort_keys=True) + "\n")
+    key = str(path)
+    # A per-file lock serializes the sequence assignment and the append, so the
+    # worker thread and the timeout Timer thread cannot mint duplicate sequence
+    # numbers or interleave partial writes. The sequence counter is cached in
+    # memory to avoid re-reading the whole event log on every line, which was
+    # quadratic for chatty phases; on the first append of the process it is
+    # recovered from disk so restarts keep numbering monotonic.
+    with _event_lock(key):
+        sequence = _event_sequences.get(key)
+        if sequence is None:
+            existing = 0
+            if path.exists():
+                existing = sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+            sequence = existing
+        sequence += 1
+        _event_sequences[key] = sequence
+        event = RunEvent(sequence=sequence, timestamp=utc_now(), level=level, phase=phase, message=message, progress=progress)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(model_to_dict(event), sort_keys=True) + "\n")
     return event
 
 

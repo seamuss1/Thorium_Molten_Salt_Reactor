@@ -1,4 +1,6 @@
+import json
 import shutil
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -7,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from thorium_reactor.paths import create_result_bundle
 from thorium_reactor.web.app import create_app
+from thorium_reactor.web.jobs import append_event
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -330,6 +333,48 @@ def test_web_fake_run_records_status_and_streams_events(monkeypatch) -> None:
         assert "Run completed" in body
     finally:
         shutil.rmtree(run_root, ignore_errors=True)
+
+
+def test_append_event_assigns_unique_contiguous_sequences_under_concurrency(tmp_path: Path) -> None:
+    # The worker thread and the timeout Timer thread both append events during a
+    # phase, so sequence assignment must be serialized to stay unique.
+    run_dir = tmp_path
+    per_thread = 150
+    thread_count = 4
+
+    def worker() -> None:
+        for _ in range(per_thread):
+            append_event(run_dir, "log", "run", "line")
+
+    threads = [threading.Thread(target=worker) for _ in range(thread_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    lines = [
+        line
+        for line in (run_dir / "job_events.ndjson").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    sequences = sorted(json.loads(line)["sequence"] for line in lines)
+    assert len(lines) == per_thread * thread_count
+    assert sequences == list(range(1, per_thread * thread_count + 1))
+
+
+def test_append_event_recovers_sequence_from_existing_log(tmp_path: Path) -> None:
+    run_dir = tmp_path
+    (run_dir / "job_events.ndjson").write_text(
+        json.dumps({"sequence": 1, "timestamp": "t", "level": "info", "phase": None, "message": "prior"})
+        + "\n"
+        + json.dumps({"sequence": 2, "timestamp": "t", "level": "info", "phase": None, "message": "prior"})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    event = append_event(run_dir, "info", "run", "resumed")
+
+    assert event.sequence == 3
 
 
 def test_web_requires_access_identity_when_configured(monkeypatch) -> None:
