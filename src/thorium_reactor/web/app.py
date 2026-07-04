@@ -121,10 +121,12 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
                     yield f"event: run\ndata: {json.dumps(model_to_dict(event))}\n\n"
                 seen = len(events)
                 if is_terminal(record.status):
-                    # The job appends its closing event before writing the
-                    # terminal status, so re-read once more to flush any event
-                    # that landed between the reads above and never drop the
-                    # final "Run completed"/error line.
+                    # The terminal status is persisted just before the closing
+                    # event is appended, so re-read once more to flush the
+                    # final "Run completed"/error line if it landed between the
+                    # reads above and the terminal-status check. The status is
+                    # already durable, so any client refetch driven by this
+                    # event sees the terminal status.
                     for event in repository.read_events(case_name, run_id)[seen:]:
                         yield f"event: run\ndata: {json.dumps(model_to_dict(event))}\n\n"
                     return

@@ -60,16 +60,17 @@ class JobManager:
                     append_event(run_dir, "info", phase, f"Starting {phase}.", progress=progress)
                     self._run_phase(run_dir, draft, phase)
                     append_event(run_dir, "info", phase, f"Completed {phase}.", progress=index / len(phases))
-                # Append the closing event before flipping the status to a
-                # terminal value so a live SSE reader that observes "completed"
-                # is guaranteed to also see this final line on its next read.
-                append_event(run_dir, "info", "completed", "Run completed.", progress=1.0)
+                # Persist the terminal status before emitting the closing event
+                # so a client that refetches when the SSE event arrives always
+                # observes the durable "completed" status, never a stale
+                # "running".
                 status.update({"status": "completed", "phase": "completed", "finished_at": utc_now(), "progress": 1.0})
                 write_status(run_dir, status)
+                append_event(run_dir, "info", "completed", "Run completed.", progress=1.0)
             except Exception as exc:  # noqa: BLE001 - job failures are persisted for the browser.
-                append_event(run_dir, "error", status.get("phase"), str(exc), progress=status.get("progress"))
                 status.update({"status": "failed", "finished_at": utc_now(), "error": str(exc)})
                 write_status(run_dir, status)
+                append_event(run_dir, "error", status.get("phase"), str(exc), progress=status.get("progress"))
 
     def _run_phase(self, run_dir: Path, draft: SimulationDraft, phase: str) -> None:
         command = build_cli_command(draft, phase)
@@ -119,8 +120,8 @@ class JobManager:
         for index, phase in enumerate(phases, start=1):
             progress = index / max(len(phases), 1)
             status.update({"phase": phase, "progress": progress})
-            append_event(run_dir, "info", phase, f"Fake {phase} completed.", progress=progress)
             write_status(run_dir, status)
+            append_event(run_dir, "info", phase, f"Fake {phase} completed.", progress=progress)
             if phase == "run":
                 write_json(
                     run_dir / "summary.json",
@@ -137,9 +138,9 @@ class JobManager:
             if phase == "report":
                 (run_dir / "report.md").write_text(f"# {draft.case_name}\n\nFake web report.\n", encoding="utf-8")
             time.sleep(0.01)
-        append_event(run_dir, "info", "completed", "Run completed.", progress=1.0)
         status.update({"status": "completed", "phase": "completed", "finished_at": utc_now(), "progress": 1.0})
         write_status(run_dir, status)
+        append_event(run_dir, "info", "completed", "Run completed.", progress=1.0)
 
 
 def normalize_phases(phases: list[str]) -> list[str]:
