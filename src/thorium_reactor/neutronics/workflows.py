@@ -442,6 +442,14 @@ def run_case(
             summary["metrics"]["non_active_salt_inventory_fraction"] = summary[
                 "msre_pump_transient_benchmark"
             ]["non_active_salt_inventory_fraction"]
+            lower_plenum_proxy = summary["msre_pump_transient_benchmark"].get(
+                "lower_plenum_radial_profile_proxy",
+                {},
+            )
+            if isinstance(lower_plenum_proxy, dict) and lower_plenum_proxy.get("status") == "available":
+                summary["metrics"]["msre_lower_plenum_central_velocity_ratio_proxy"] = lower_plenum_proxy[
+                    "proxy_central_velocity_ratio_to_mean"
+                ]
             summary["graphite_lifetime"] = build_graphite_lifetime_summary(
                 config,
                 reduced_order_flow=reduced_order_flow,

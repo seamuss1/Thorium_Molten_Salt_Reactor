@@ -87,6 +87,8 @@ def test_reduced_order_flow_uses_only_plenum_connected_salt_channels() -> None:
     assert control_channel["velocity_m_s"] > 12.0
     assert center_channel["residence_time_s"] < 0.02
     assert control_channel["residence_time_s"] < 0.02
+    assert center_channel["radial_position_cm"] == 0.0
+    assert control_channel["radial_position_cm"] > 0.0
 
 
 def test_immersed_pool_reference_primary_system_summary_is_engineering_useful() -> None:

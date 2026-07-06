@@ -90,6 +90,10 @@ def build_reduced_order_flow_summary(
             {
                 "name": channel["name"],
                 "variant": channel["variant"],
+                "x_cm": _round_float(float(channel.get("x_cm", 0.0))),
+                "y_cm": _round_float(float(channel.get("y_cm", 0.0))),
+                "radial_position_cm": _round_float(float(channel.get("radial_position_cm", 0.0))),
+                "ring_radius_cm": _round_float(float(channel.get("ring_radius_cm", channel.get("radial_position_cm", 0.0)))),
                 "salt_cross_section_area_cm2": _round_float(salt_area_cm2),
                 "salt_volume_cm3": _round_float(salt_volume_cm3),
                 "mass_flow_fraction": _round_float(mass_flow_fraction),

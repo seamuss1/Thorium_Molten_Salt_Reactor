@@ -117,3 +117,6 @@ def test_msre_pump_transient_screen_reports_1d_validation_bounds() -> None:
     assert summary["stagnant_salt_inventory_fraction"] == 0.029412
     assert summary["screening_status"] == "watch"
     assert "bypass_flow" in summary["sensitivity_drivers"]
+    lower_plenum_proxy = summary["lower_plenum_radial_profile_proxy"]
+    assert lower_plenum_proxy["status"] == "unavailable"
+    assert lower_plenum_proxy["reason"] == "active_channel_detail_missing"

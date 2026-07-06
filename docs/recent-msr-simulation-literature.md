@@ -54,6 +54,29 @@ public science, while the next material upgrades still require larger
 species-transport, chemistry, or depletion coupling work rather than an
 incremental patch.
 
+## July 6, 2026 Addendum
+
+This follow-up revisited recent primary or official sources from the last 24
+months and found one narrow reporting improvement worth implementing. The 2025
+DTU/INL validation paper again showed that flowing-fuel MSRE transients are
+sensitive to spatial delayed-neutron and thermal-hydraulic effects, while the
+official INL Virtual Test Bed MSRE lower-plenum nekRS page now provides a
+quantitative radial outlet-flow observation: the central outlet group was about
+58% above the mean outlet velocity. The repository's existing
+`msre_pump_transient_benchmark` screen already flagged bypass-like and stagnant
+inventory, but it did not carry any proxy for active-flow radial skew.
+
+Repository action: keep the reduced-order solver unchanged, but extend the
+validation/reporting screen to preserve channel radial positions in the
+reduced-order flow summary and compute a five-band area-weighted active-channel
+velocity proxy. Reports and summary metrics now compare the proxy central-band
+velocity ratio against the official MSRE lower-plenum CFD reference value of
+`1.58`, explicitly labeling it as a reduced-order radial-skew awareness metric
+rather than a solved lower-plenum CFD field.
+
+Sources: https://doi.org/10.3389/fnuen.2025.1617048 and
+https://virtualtestbed.inl.gov/msr/msre/lp_nekrs_model.html
+
 The May 2026 refresh prioritized primary or official-lab sources published since
 2024-05-17. It did not identify a reason to replace the repository's
 reduced-order architecture, but it did support focused implementation upgrades:

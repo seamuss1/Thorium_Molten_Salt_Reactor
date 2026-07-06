@@ -330,6 +330,10 @@ def _build_channel_flow_interfaces(
             {
                 "name": channel["name"],
                 "variant": channel["variant"],
+                "x_cm": _round_metric(float(channel["x"])),
+                "y_cm": _round_metric(float(channel["y"])),
+                "radial_position_cm": _round_metric(center_radius),
+                "ring_radius_cm": _round_metric(float(channel["ring_radius"])),
                 "lower_boundary_region": "lower_plenum" if plenum_connected else "lower_reflector",
                 "upper_boundary_region": "upper_plenum" if plenum_connected else "upper_reflector",
                 "interface_class": "plenum_connected" if plenum_connected else "reflector_backed",

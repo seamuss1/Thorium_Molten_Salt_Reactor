@@ -639,6 +639,21 @@ limited by radial distribution or bypass-like flow effects. It is a reporting
 and validation-context metric, not a replacement for a spatial
 thermal-hydraulic solve.
 
+When channel-resolved active-flow data are available, the same validation block
+also reports a lower-plenum radial outlet proxy inspired by the official INL
+nekRS MSRE lower-plenum CFD page. Active-channel velocities are grouped into
+five radial bands and normalized by the area-weighted mean active-channel
+velocity:
+
+$$
+R_j=\frac{\langle u \rangle_j}{\langle u \rangle_{\mathrm{mean}}}
+$$
+
+The repository compares the central-band proxy `R_1` against the official MSRE
+CFD reference that the central outlet group was about `1.58` times the mean
+outlet velocity. This is only a reduced-order proxy for radial skew awareness;
+it does not reconstruct the lower-plenum flow field.
+
 ## Coupled Depletion And Chemistry Terms In The Transient Proxy
 
 The transient model now also tracks:

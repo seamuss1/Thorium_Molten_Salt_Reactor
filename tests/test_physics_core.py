@@ -31,6 +31,11 @@ def test_run_case_writes_coupled_physics_core_artifact() -> None:
         assert pump_benchmark["benchmark_mean_error_startup_pcm"]["max"] == 21.0
         assert summary["metrics"]["msre_pump_transient_startup_error_max_pcm"] == 21.0
         assert "bypass_flow" in pump_benchmark["sensitivity_drivers"]
+        lower_plenum_proxy = pump_benchmark["lower_plenum_radial_profile_proxy"]
+        assert lower_plenum_proxy["status"] == "available"
+        assert lower_plenum_proxy["group_count"] == 5
+        assert lower_plenum_proxy["proxy_central_velocity_ratio_to_mean"] > 1.0
+        assert "msre_lower_plenum_central_velocity_ratio_proxy" in summary["metrics"]
         assert physics_core["status"] == "completed"
         assert physics_core["integrity_checks"]["status"] == "ok"
         assert physics_core["neutronics"]["group_count"] == 11

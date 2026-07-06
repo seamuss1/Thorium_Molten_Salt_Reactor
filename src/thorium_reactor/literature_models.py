@@ -15,6 +15,8 @@ DEFAULT_PROPERTY_UNCERTAINTIES_95: dict[str, float] = {
 DEFAULT_GRAPHITE_FAST_FLUENCE_LIMIT_N_CM2 = 3.0e22
 SECONDS_PER_YEAR = 365.25 * 24.0 * 3600.0
 MSRE_PUMP_TRANSIENT_BENCHMARK_SOURCE = "https://doi.org/10.1080/00295639.2025.2475650"
+MSRE_LOWER_PLENUM_CFD_SOURCE = "https://virtualtestbed.inl.gov/msr/msre/lp_nekrs_model.html"
+MSRE_LOWER_PLENUM_CENTRAL_OUTLET_VELOCITY_RATIO = 1.58
 
 
 def build_property_uncertainty_summary(
@@ -220,11 +222,13 @@ def build_msre_pump_transient_benchmark_screen(
     )
     channel_count = int(active_flow.get("channel_count", 0)) if active_flow else 0
     status = "watch" if non_active_fraction > 0.0 or stagnant_fraction > 0.0 else "nominal"
+    radial_proxy = _build_msre_lower_plenum_radial_proxy(reduced_order_flow)
     return {
         "model": "msre_pump_transient_benchmark_screen",
         "screening_status": status,
         "reference_reactor": "MSRE pump startup and coastdown tests",
         "source": MSRE_PUMP_TRANSIENT_BENCHMARK_SOURCE,
+        "lower_plenum_cfd_source": MSRE_LOWER_PLENUM_CFD_SOURCE,
         "applicability": "one_dimensional_reduced_order_transient_and_precursor_models",
         "benchmark_mean_error_startup_pcm": {"min": 11.0, "max": 21.0},
         "benchmark_mean_error_coastdown_pcm": {"min": 5.0, "max": 13.0},
@@ -241,6 +245,7 @@ def build_msre_pump_transient_benchmark_screen(
         "stagnant_salt_volume_cm3": _round_float(stagnant_volume_cm3),
         "non_active_salt_inventory_fraction": _round_float(non_active_fraction),
         "stagnant_salt_inventory_fraction": _round_float(stagnant_fraction),
+        "lower_plenum_radial_profile_proxy": radial_proxy,
         "interpretation": (
             "The 2025 MSRE pump-transient benchmark supports one-dimensional models "
             "as screening tools, but radial distribution and bypass-like inventory "
@@ -391,6 +396,137 @@ def _tritium_control_effect(environmental_release_fraction: float) -> str:
     if environmental_release_fraction <= 0.25:
         return "moderate"
     return "weak"
+
+
+def _build_msre_lower_plenum_radial_proxy(reduced_order_flow: Mapping[str, Any]) -> dict[str, Any]:
+    active_channels = reduced_order_flow.get("active_channels", [])
+    if not isinstance(active_channels, list) or not active_channels:
+        return {
+            "status": "unavailable",
+            "reason": "active_channel_detail_missing",
+            "reference_central_velocity_ratio_to_mean": _round_float(
+                MSRE_LOWER_PLENUM_CENTRAL_OUTLET_VELOCITY_RATIO
+            ),
+        }
+
+    radial_channels: list[dict[str, float]] = []
+    for channel in active_channels:
+        if not isinstance(channel, Mapping):
+            continue
+        try:
+            area = max(float(channel.get("salt_cross_section_area_cm2", 0.0)), 0.0)
+            velocity = max(float(channel.get("velocity_m_s", 0.0)), 0.0)
+            radius = max(float(channel.get("radial_position_cm", 0.0)), 0.0)
+        except (TypeError, ValueError):
+            continue
+        if area <= 0.0:
+            continue
+        radial_channels.append({"area_cm2": area, "velocity_m_s": velocity, "radius_cm": radius})
+
+    if not radial_channels:
+        return {
+            "status": "unavailable",
+            "reason": "active_channel_radii_missing",
+            "reference_central_velocity_ratio_to_mean": _round_float(
+                MSRE_LOWER_PLENUM_CENTRAL_OUTLET_VELOCITY_RATIO
+            ),
+        }
+
+    max_radius_cm = max(channel["radius_cm"] for channel in radial_channels)
+    if max_radius_cm <= 0.0:
+        return {
+            "status": "unavailable",
+            "reason": "homogenized_or_centerline_only_core_model",
+            "reference_central_velocity_ratio_to_mean": _round_float(
+                MSRE_LOWER_PLENUM_CENTRAL_OUTLET_VELOCITY_RATIO
+            ),
+        }
+
+    band_count = 5
+    band_records = [
+        {
+            "group": index + 1,
+            "radius_fraction_min": index / band_count,
+            "radius_fraction_max": (index + 1) / band_count,
+            "channel_count": 0,
+            "total_area_cm2": 0.0,
+            "weighted_velocity_sum": 0.0,
+        }
+        for index in range(band_count)
+    ]
+    total_area = 0.0
+    total_weighted_velocity = 0.0
+    for channel in radial_channels:
+        radius_fraction = channel["radius_cm"] / max_radius_cm
+        band_index = min(int(radius_fraction * band_count), band_count - 1)
+        band = band_records[band_index]
+        band["channel_count"] += 1
+        band["total_area_cm2"] += channel["area_cm2"]
+        band["weighted_velocity_sum"] += channel["area_cm2"] * channel["velocity_m_s"]
+        total_area += channel["area_cm2"]
+        total_weighted_velocity += channel["area_cm2"] * channel["velocity_m_s"]
+
+    if total_area <= 0.0 or total_weighted_velocity <= 0.0:
+        return {
+            "status": "unavailable",
+            "reason": "non_positive_channel_velocity_proxy",
+            "reference_central_velocity_ratio_to_mean": _round_float(
+                MSRE_LOWER_PLENUM_CENTRAL_OUTLET_VELOCITY_RATIO
+            ),
+        }
+
+    mean_velocity = total_weighted_velocity / total_area
+    band_summaries: list[dict[str, Any]] = []
+    for band in band_records:
+        area = band["total_area_cm2"]
+        group_velocity = band["weighted_velocity_sum"] / area if area > 0.0 else None
+        band_summaries.append(
+            {
+                "group": int(band["group"]),
+                "radius_fraction_min": _round_float(float(band["radius_fraction_min"])),
+                "radius_fraction_max": _round_float(float(band["radius_fraction_max"])),
+                "channel_count": int(band["channel_count"]),
+                "total_area_cm2": _round_float(area),
+                "mean_velocity_m_s": _round_float(group_velocity) if group_velocity is not None else None,
+                "velocity_ratio_to_mean": (
+                    _round_float(group_velocity / mean_velocity)
+                    if group_velocity is not None and mean_velocity > 0.0
+                    else None
+                ),
+            }
+        )
+
+    central_ratio = band_summaries[0].get("velocity_ratio_to_mean")
+    if central_ratio is None:
+        return {
+            "status": "unavailable",
+            "reason": "central_band_empty",
+            "reference_central_velocity_ratio_to_mean": _round_float(
+                MSRE_LOWER_PLENUM_CENTRAL_OUTLET_VELOCITY_RATIO
+            ),
+        }
+
+    return {
+        "status": "available",
+        "model": "active_channel_velocity_radial_group_proxy",
+        "reference_reactor": "MSRE lower plenum nekRS CFD radial outlet profile",
+        "reference_central_velocity_ratio_to_mean": _round_float(
+            MSRE_LOWER_PLENUM_CENTRAL_OUTLET_VELOCITY_RATIO
+        ),
+        "proxy_central_velocity_ratio_to_mean": _round_float(float(central_ratio)),
+        "proxy_minus_reference_fraction": _round_float(
+            (float(central_ratio) - MSRE_LOWER_PLENUM_CENTRAL_OUTLET_VELOCITY_RATIO)
+            / MSRE_LOWER_PLENUM_CENTRAL_OUTLET_VELOCITY_RATIO
+        ),
+        "group_count": band_count,
+        "mean_active_channel_velocity_m_s": _round_float(mean_velocity),
+        "radial_groups": band_summaries,
+        "basis": (
+            "Area-weighted active-channel velocity grouped into five radial bands as a "
+            "reduced-order proxy for lower-plenum outlet skew. The official INL MSRE CFD "
+            "reference reports the central band about 58% above the mean outlet velocity."
+        ),
+    }
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:

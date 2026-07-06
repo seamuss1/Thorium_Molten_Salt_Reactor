@@ -473,6 +473,20 @@ def generate_report(
             "- Stagnant salt inventory fraction: "
             f"`{msre_pump_transient.get('stagnant_salt_inventory_fraction', 'n/a')}`"
         )
+        lower_plenum_proxy = msre_pump_transient.get("lower_plenum_radial_profile_proxy", {})
+        if lower_plenum_proxy:
+            lines.append(
+                "- Lower-plenum radial proxy status: "
+                f"`{lower_plenum_proxy.get('status', 'n/a')}`"
+            )
+            if lower_plenum_proxy.get("status") == "available":
+                lines.append(
+                    "- Central-band velocity ratio to mean (proxy/reference): "
+                    f"`{lower_plenum_proxy.get('proxy_central_velocity_ratio_to_mean', 'n/a')} / "
+                    f"{lower_plenum_proxy.get('reference_central_velocity_ratio_to_mean', 'n/a')}`"
+                )
+            elif lower_plenum_proxy.get("reason"):
+                lines.append(f"- Lower-plenum radial proxy reason: `{lower_plenum_proxy.get('reason')}`")
         lines.append(f"- Interpretation: {msre_pump_transient.get('interpretation', 'n/a')}")
 
     physics_core = summary.get("physics_core", {})
