@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Database, ExternalLink, FileJson, Image, ScrollText } from "lucide-react";
 import { fetchText } from "../api";
-import { ExpandableText } from "./ExpandableText";
+import { Truncate } from "./Truncate";
 import { Markdown } from "./Markdown";
 import type { ArtifactRef } from "../types";
 import { formatSize, visualArtifacts } from "../runData";
@@ -29,7 +29,11 @@ export function RunArtifacts({ artifacts }: RunArtifactsProps) {
           <span>Report</span>
         </div>
         {report ? (
-          <Markdown content={reportQuery.data ?? "Loading report..."} />
+          reportQuery.isError ? (
+            <div className="empty-panel">Could not load report: {(reportQuery.error as Error)?.message ?? "unknown error"}</div>
+          ) : (
+            <Markdown content={reportQuery.data ?? "Loading report…"} />
+          )
         ) : (
           <div className="empty-panel">No report artifact yet.</div>
         )}
@@ -58,9 +62,7 @@ export function RunArtifacts({ artifacts }: RunArtifactsProps) {
           {files.map((artifact) => (
             <div className="file-item" key={artifact.path}>
               <FileJson aria-hidden="true" />
-              <ExpandableText className="file-name" lines={1}>
-                {artifact.label}
-              </ExpandableText>
+              <Truncate className="file-name">{artifact.label}</Truncate>
               <small>
                 {artifact.kind} / {formatSize(artifact.size)}
               </small>

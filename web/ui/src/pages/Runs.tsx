@@ -1,9 +1,12 @@
 import { useEffect, useMemo } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, CheckCircle2, Clock, XCircle } from "lucide-react";
+import { Activity, ArrowLeft, Atom, CheckCircle2, Clock, XCircle } from "lucide-react";
 import { api } from "../api";
-import { ExpandableText } from "../components/ExpandableText";
+import { Truncate } from "../components/Truncate";
+import { StatusBadge } from "../components/StatusBadge";
+import { ProgressBar } from "../components/ProgressBar";
+import { PanelError, PanelLoading, EmptyState } from "../components/StateBlock";
 import { RunDataExplorer } from "../components/RunDataExplorer";
 import { RunOutputSections } from "../components/RunOutputSections";
 import { RunArtifacts } from "../components/RunArtifacts";
@@ -35,6 +38,9 @@ export function Runs() {
     return () => source.close();
   }, [detail.data, queryClient]);
 
+  const active = detail.data && ["queued", "running"].includes(detail.data.status);
+  const progress = detail.data?.latest_event?.progress;
+
   return (
     <div className="page split-page">
       <section className="list-panel">
@@ -42,53 +48,88 @@ export function Runs() {
           <Activity aria-hidden="true" />
           <h1>Runs</h1>
         </div>
-        <div className="run-list">
-          {runs.data?.map((run) => (
-            <button
-              key={`${run.case_name}-${run.run_id}`}
-              type="button"
-              className={run.case_name === selected?.caseName && run.run_id === selected.runId ? "selected" : ""}
-              onClick={() => navigate(`/runs/${run.case_name}/${run.run_id}`)}
-            >
-              <ExpandableText className="list-title" insideInteractive lines={1}>
-                {run.case_name}
-              </ExpandableText>
-              <ExpandableText className="list-meta" insideInteractive lines={1}>
-                {run.run_id}
-              </ExpandableText>
-              <mark>{run.status}</mark>
-            </button>
-          ))}
-        </div>
+        {runs.isLoading ? (
+          <PanelLoading label="Loading runs" lines={6} />
+        ) : runs.isError ? (
+          <PanelError error={runs.error} onRetry={() => runs.refetch()} />
+        ) : runs.data?.length ? (
+          <div className="run-list">
+            {runs.data.map((run) => {
+              const isSelected = run.case_name === selected?.caseName && run.run_id === selected.runId;
+              return (
+                <button
+                  key={`${run.case_name}-${run.run_id}`}
+                  type="button"
+                  className={isSelected ? "selected" : ""}
+                  aria-pressed={isSelected}
+                  onClick={() => navigate(`/runs/${run.case_name}/${run.run_id}`)}
+                >
+                  <Truncate className="list-title">{run.case_name}</Truncate>
+                  <Truncate className="list-meta">{run.run_id}</Truncate>
+                  <StatusBadge status={run.status} />
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <EmptyState icon={Activity}>No runs yet. Start one from the Builder.</EmptyState>
+        )}
       </section>
       <section className="detail-panel">
-        {detail.data ? (
+        {detail.isLoading ? (
+          <PanelLoading label="Loading run" lines={8} tall />
+        ) : detail.isError ? (
+          <PanelError error={detail.error} onRetry={() => detail.refetch()} tall />
+        ) : detail.data ? (
           <>
             <header className="page-header compact">
               <div>
+                {params.runId && (
+                  <Link className="back-link" to="/runs">
+                    <ArrowLeft aria-hidden="true" />
+                    All runs
+                  </Link>
+                )}
                 <p className="eyebrow">{detail.data.case_name}</p>
                 <h1>
-                  <ExpandableText lines={2}>{detail.data.run_id}</ExpandableText>
+                  <Truncate lines={2}>{detail.data.run_id}</Truncate>
                 </h1>
               </div>
-              {hasViewableGeometry(detail.data) && (
-                <Link className="secondary-action" to={`/viewer/${detail.data.case_name}/${detail.data.run_id}`}>
-                  Open 3D
-                </Link>
-              )}
+              <div className="output-focus-title" style={{ flex: "0 0 auto" }}>
+                <StatusBadge status={detail.data.status} />
+                {hasViewableGeometry(detail.data) && (
+                  <Link className="secondary-action" to={`/viewer/${detail.data.case_name}/${detail.data.run_id}`}>
+                    Open 3D
+                  </Link>
+                )}
+              </div>
             </header>
-            <div className="timeline">
-              {(detail.data.command_plan.length ? detail.data.command_plan : ["build", "run", "validate", "report"]).map((phase) => (
-                <div key={phase} className={phase === detail.data?.phase ? "current" : ""}>
-                  {iconForPhase(detail.data!.status, phase === detail.data!.phase)}
-                  <span>{phase}</span>
-                </div>
-              ))}
-            </div>
-            {detail.data.latest_event && (
+            {detail.data.command_plan.length ? (
+              <div className="timeline">
+                {detail.data.command_plan.map((phase) => (
+                  <div key={phase} className={phaseClass(detail.data!.status, phase === detail.data!.phase)}>
+                    {iconForPhase(detail.data!.status, phase === detail.data!.phase)}
+                    <span>{phase}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState icon={Clock}>No phase plan recorded for this run.</EmptyState>
+            )}
+            {(active || detail.data.latest_event) && (
               <div className="event-banner">
                 <Clock aria-hidden="true" />
-                <ExpandableText lines={2}>{detail.data.latest_event.message}</ExpandableText>
+                <div className="event-body">
+                  {detail.data.latest_event && <Truncate lines={2}>{detail.data.latest_event.message}</Truncate>}
+                  {active && (
+                    <div className="progress-line">
+                      <ProgressBar value={progress} label="Run progress" />
+                      {progress != null && Number.isFinite(progress) && (
+                        <span className="progress-percent">{Math.round(progress * 100)}%</span>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
             <RunDataExplorer run={detail.data} />
@@ -96,11 +137,17 @@ export function Runs() {
             <RunArtifacts artifacts={detail.data.artifacts} />
           </>
         ) : (
-          <div className="empty-panel tall">No run selected.</div>
+          <EmptyState tall icon={Atom}>Select a run to view its details.</EmptyState>
         )}
       </section>
     </div>
   );
+}
+
+function phaseClass(status: string, current: boolean): string {
+  if (current) return "current";
+  if (status === "completed") return "done";
+  return "";
 }
 
 function iconForPhase(status: string, current: boolean) {

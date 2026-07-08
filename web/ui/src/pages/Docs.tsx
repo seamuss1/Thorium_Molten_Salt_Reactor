@@ -1,32 +1,30 @@
 import { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, ListTree, Sigma } from "lucide-react";
+import { BookOpen, ListTree } from "lucide-react";
 import { api } from "../api";
-import { ExpandableText } from "../components/ExpandableText";
-import { Markdown } from "../components/Markdown";
-
-const formulaCards = [
-  {
-    label: "Loop energy",
-    expression: "$$Q = \\dot m c_p \\Delta T$$"
-  },
-  {
-    label: "Hydraulic budget",
-    expression: "$$\\Delta p = f\\frac{L}{D}\\frac{\\rho u^2}{2}+\\sum_j K_j\\frac{\\rho u^2}{2}+\\rho g\\Delta z$$"
-  },
-  {
-    label: "Precursor transport",
-    expression: "$$\\frac{dC_i}{dt}+\\nabla\\cdot(uC_i)=\\nabla\\cdot(D_i\\nabla C_i)+S_{i,f}-\\lambda_i C_i$$"
-  }
-];
+import { Truncate } from "../components/Truncate";
+import { PanelError, PanelLoading, EmptyState } from "../components/StateBlock";
+import { Markdown, makeSlugger } from "../components/Markdown";
 
 export function Docs() {
   const params = useParams();
   const docs = useQuery({ queryKey: ["docs"], queryFn: api.docs });
   const slug = params.slug ?? docs.data?.[0]?.slug;
   const doc = useQuery({ queryKey: ["doc", slug], queryFn: () => api.doc(slug!), enabled: Boolean(slug) });
-  const headings = useMemo(() => doc.data?.headings.slice(1, 9) ?? [], [doc.data]);
+  const outline = useMemo(() => {
+    if (!doc.data) return [];
+    // Slug the full heading list in order (same algorithm the renderer uses) so
+    // ids line up, including de-duplication of repeated heading text; the first
+    // heading is the page title, shown in the header rather than the outline.
+    const slug = makeSlugger();
+    return doc.data.headings.map((heading) => ({ text: heading, id: slug(heading) })).slice(1, 12);
+  }, [doc.data]);
+  const readMeta = useMemo(() => {
+    if (!doc.data) return null;
+    const words = doc.data.content.trim().split(/\s+/).filter(Boolean).length;
+    return { words, minutes: Math.max(1, Math.round(words / 200)) };
+  }, [doc.data]);
   const docCount = docs.data?.length ?? 0;
 
   return (
@@ -36,65 +34,83 @@ export function Docs() {
           <BookOpen aria-hidden="true" />
           <div>
             <h1>Science</h1>
-            <span>{docCount} living notes</span>
+            <span>{docs.isLoading ? "Loading…" : `${docCount} reference notes`}</span>
           </div>
         </div>
-        <div className="doc-links">
-          {docs.data?.map((item) => (
-            <Link key={item.slug} className={item.slug === slug ? "selected" : ""} to={`/docs/${item.slug}`}>
-              <span className="list-title">{item.title}</span>
-              <small className="list-meta">{item.path}</small>
-            </Link>
-          ))}
-        </div>
+        {docs.isLoading ? (
+          <PanelLoading label="Loading documents" lines={6} />
+        ) : docs.isError ? (
+          <PanelError error={docs.error} onRetry={() => docs.refetch()} />
+        ) : docs.data?.length ? (
+          <div className="doc-links">
+            {docs.data.map((item) => {
+              const isSelected = item.slug === slug;
+              return (
+                <Link key={item.slug} className={isSelected ? "selected" : ""} aria-current={isSelected ? "page" : undefined} to={`/docs/${item.slug}`}>
+                  <Truncate className="list-title">{item.title}</Truncate>
+                  <Truncate className="list-meta">{item.path}</Truncate>
+                </Link>
+              );
+            })}
+          </div>
+        ) : (
+          <EmptyState icon={BookOpen}>No documents found.</EmptyState>
+        )}
       </section>
       <section className="detail-panel docs-panel">
-        {doc.data && (
+        {doc.isLoading ? (
+          <PanelLoading label="Loading document" lines={10} tall />
+        ) : doc.isError ? (
+          <PanelError error={doc.error} onRetry={() => doc.refetch()} tall />
+        ) : doc.data ? (
           <>
             <header className="page-header compact science-header">
               <div>
                 <p className="eyebrow">
-                  <ExpandableText lines={1}>{doc.data.path}</ExpandableText>
+                  <Truncate>{doc.data.path}</Truncate>
                 </p>
                 <h1>
-                  <ExpandableText lines={2}>{doc.data.title}</ExpandableText>
+                  <Truncate lines={2}>{doc.data.title}</Truncate>
                 </h1>
                 <div className="science-meta">
                   <span>{doc.data.headings.length} sections</span>
-                  <span>Repository note</span>
-                  <span>Equation notation</span>
+                  {readMeta && <span>{readMeta.words.toLocaleString()} words</span>}
+                  {readMeta && <span>{readMeta.minutes} min read</span>}
                 </div>
               </div>
             </header>
             <div className="docs-layout">
-              <Markdown className="markdown-body science-article" content={doc.data.content} />
-              <aside className="science-rail">
-                <section className="toc">
-                  <div className="section-title">
-                    <ListTree aria-hidden="true" />
-                    <h2>Outline</h2>
-                  </div>
-                  {headings.map((heading) => (
-                    <ExpandableText className="toc-item" key={heading} lines={1}>
-                      {heading}
-                    </ExpandableText>
-                  ))}
-                </section>
-                <section className="formula-stack">
-                  <div className="section-title">
-                    <Sigma aria-hidden="true" />
-                    <h2>Core Relations</h2>
-                  </div>
-                  {formulaCards.map((card) => (
-                    <div className="formula-card" key={card.label}>
-                      <span>{card.label}</span>
-                      <Markdown className="formula-math" content={card.expression} />
+              <Markdown className="markdown-body science-article" content={doc.data.content} anchors />
+              {outline.length > 0 && (
+                <aside className="science-rail">
+                  <nav className="toc" aria-label="Document outline">
+                    <div className="section-title">
+                      <ListTree aria-hidden="true" />
+                      <h2>Outline</h2>
                     </div>
-                  ))}
-                </section>
-              </aside>
+                    {outline.map((heading) => (
+                      <a
+                        key={heading.id}
+                        className="toc-item"
+                        href={`#${heading.id}`}
+                        onClick={(event) => {
+                          const target = document.getElementById(heading.id);
+                          if (target) {
+                            event.preventDefault();
+                            target.scrollIntoView({ behavior: "smooth", block: "start" });
+                          }
+                        }}
+                      >
+                        {heading.text}
+                      </a>
+                    ))}
+                  </nav>
+                </aside>
+              )}
             </div>
           </>
+        ) : (
+          <EmptyState tall icon={BookOpen}>Select a document to read.</EmptyState>
         )}
       </section>
     </div>

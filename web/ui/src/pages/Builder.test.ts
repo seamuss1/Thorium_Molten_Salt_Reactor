@@ -23,8 +23,13 @@ describe("buildPatch", () => {
     });
   });
 
-  it("uses browser-safe numeric steps for editable fields", () => {
-    expect(inputStepForParameter({ kind: "number", step: 1 })).toBe("any");
+  it("uses browser-safe numeric steps regardless of the backend step", () => {
+    // Non-integer fields must stay step="any" so backend defaults off the
+    // min+step grid don't trip HTML stepMismatch and block the run submit.
+    expect(inputStepForParameter({ kind: "number", step: 0.01 })).toBe("any");
+    expect(inputStepForParameter({ kind: "number", step: null })).toBe("any");
+    // Integers step by 1, which is always grid-safe.
     expect(inputStepForParameter({ kind: "integer", step: 1000 })).toBe(1);
+    expect(inputStepForParameter({ kind: "integer", step: null })).toBe(1);
   });
 });
