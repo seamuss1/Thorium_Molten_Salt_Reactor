@@ -23,8 +23,14 @@ describe("buildPatch", () => {
     });
   });
 
-  it("uses browser-safe numeric steps for editable fields", () => {
-    expect(inputStepForParameter({ kind: "number", step: 1 })).toBe("any");
-    expect(inputStepForParameter({ kind: "integer", step: 1000 })).toBe(1);
+  it("honors the backend-provided step for editable fields", () => {
+    expect(inputStepForParameter({ kind: "number", step: 0.01 })).toBe(0.01);
+    expect(inputStepForParameter({ kind: "integer", step: 1000 })).toBe(1000);
+  });
+
+  it("falls back to a kind-appropriate step when none is provided", () => {
+    expect(inputStepForParameter({ kind: "number", step: null })).toBe("any");
+    expect(inputStepForParameter({ kind: "integer", step: null })).toBe(1);
+    expect(inputStepForParameter({ kind: "number", step: 0 })).toBe("any");
   });
 });

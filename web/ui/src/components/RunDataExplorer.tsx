@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import ReactECharts from "echarts-for-react";
 import { BarChart3, ClipboardList, Database, FileJson, Gauge, Sigma, SlidersHorizontal, Table2, type LucideIcon } from "lucide-react";
 import { fetchText } from "../api";
+import { prefersReducedMotion, useChartTokens } from "../theme";
 import {
   artifactKindRows,
   displayValue,
@@ -16,6 +17,7 @@ import {
 import type { FlatDataRow, NumericRow, ParsedArtifact } from "../runData";
 import type { ArtifactRef, RunRecord } from "../types";
 import { MetricChart } from "./MetricChart";
+import { PanelError } from "./StateBlock";
 
 interface RunDataExplorerProps {
   run: RunRecord;
@@ -103,7 +105,14 @@ export function RunDataExplorer({ run }: RunDataExplorerProps) {
                 </button>
               ))}
             </div>
-            <ArtifactPreview artifact={selectedArtifact} isLoading={artifactText.isLoading} parsed={parsedArtifact} />
+            <ArtifactPreview
+              artifact={selectedArtifact}
+              isLoading={artifactText.isLoading}
+              isError={artifactText.isError}
+              error={artifactText.error}
+              onRetry={() => artifactText.refetch()}
+              parsed={parsedArtifact}
+            />
           </div>
         ) : (
           <div className="empty-panel">No structured artifacts were found for this run.</div>
@@ -124,15 +133,18 @@ function RunKpi({ icon: Icon, label, value }: { icon: LucideIcon; label: string;
 }
 
 function ArtifactDonut({ rows }: { rows: NumericRow[] }) {
+  const tokens = useChartTokens();
   if (!rows.length) return <div className="empty-panel">No artifacts counted.</div>;
   const option = {
-    color: ["#006d63", "#285f87", "#8a5a00", "#5a6c76", "#a33a2a", "#5b7d5b"],
-    legend: { bottom: 0, type: "scroll" },
+    animation: !prefersReducedMotion(),
+    color: tokens.series,
+    legend: { bottom: 0, type: "scroll", textStyle: { color: tokens.label } },
     series: [
       {
         avoidLabelOverlap: true,
         data: rows.map((row) => ({ name: row.label, value: row.value })),
-        label: { formatter: "{b}: {c}" },
+        label: { formatter: "{b}: {c}", color: tokens.label },
+        labelLine: { lineStyle: { color: tokens.axis } },
         radius: ["46%", "70%"],
         type: "pie"
       }
@@ -145,14 +157,23 @@ function ArtifactDonut({ rows }: { rows: NumericRow[] }) {
 function ArtifactPreview({
   artifact,
   isLoading,
+  isError,
+  error,
+  onRetry,
   parsed
 }: {
   artifact?: ArtifactRef;
   isLoading: boolean;
+  isError: boolean;
+  error: unknown;
+  onRetry: () => void;
   parsed: ParsedArtifact | null;
 }) {
   if (!artifact) return <div className="empty-panel">Select an artifact to preview.</div>;
-  if (isLoading || !parsed) return <div className="empty-panel">Loading {artifact.label}...</div>;
+  if (isError) {
+    return <PanelError error={error} label={`Could not load ${artifact.label}.`} onRetry={onRetry} />;
+  }
+  if (isLoading || !parsed) return <div className="empty-panel">Loading {artifact.label}…</div>;
   if (parsed.kind === "error") {
     return <div className="empty-panel">Could not parse {artifact.label}: {parsed.error}</div>;
   }

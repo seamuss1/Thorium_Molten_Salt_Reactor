@@ -1,15 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RotateCcw, ShieldCheck } from "lucide-react";
 import { api } from "../api";
-import { ExpandableText } from "../components/ExpandableText";
+import { Truncate } from "../components/Truncate";
+import { PanelError, PanelLoading, EmptyState } from "../components/StateBlock";
 
 export function Admin() {
   const queryClient = useQueryClient();
   const session = useQuery({ queryKey: ["me"], queryFn: api.me, retry: false });
+  const isAdmin = session.data?.is_admin === true;
   const limits = useQuery({
     queryKey: ["rate-limits"],
     queryFn: api.rateLimits,
-    enabled: session.data?.is_admin === true
+    enabled: isAdmin
   });
   const reset = useMutation({
     mutationFn: api.resetRateLimit,
@@ -19,28 +21,27 @@ export function Admin() {
     }
   });
 
-  if (session.data && !session.data.is_admin) {
+  if (session.isLoading) {
     return (
       <div className="page">
-        <header className="page-header">
-          <div>
-            <p className="eyebrow">Access control</p>
-            <h1>Admin console</h1>
-          </div>
-        </header>
-        <div className="empty-panel tall">Admin access required.</div>
+        <AdminHeader />
+        <PanelLoading label="Checking access" lines={3} tall />
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="page">
+        <AdminHeader />
+        <EmptyState tall icon={ShieldCheck}>Admin access required.</EmptyState>
       </div>
     );
   }
 
   return (
     <div className="page">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Access control</p>
-          <h1>Admin console</h1>
-        </div>
-      </header>
+      <AdminHeader />
 
       <section className="dashboard-grid">
         <div className="panel">
@@ -51,7 +52,7 @@ export function Admin() {
           <div className="tag-row">
             {session.data?.admin_emails.map((email) => (
               <span key={email}>
-                <ExpandableText lines={1}>{email}</ExpandableText>
+                <Truncate>{email}</Truncate>
               </span>
             ))}
           </div>
@@ -64,7 +65,9 @@ export function Admin() {
           <dl className="fact-list">
             <div>
               <dt>Current user</dt>
-              <dd>{session.data?.email ?? "Loading"}</dd>
+              <dd>
+                <Truncate>{session.data?.email ?? "Loading"}</Truncate>
+              </dd>
             </div>
             <div>
               <dt>Limit</dt>
@@ -79,7 +82,11 @@ export function Admin() {
           <RotateCcw aria-hidden="true" />
           <h2>Rate limits</h2>
         </div>
-        {limits.data?.length ? (
+        {limits.isLoading ? (
+          <PanelLoading label="Loading rate limits" lines={4} />
+        ) : limits.isError ? (
+          <PanelError error={limits.error} onRetry={() => limits.refetch()} />
+        ) : limits.data?.length ? (
           <div className="admin-table">
             <div className="admin-row header">
               <span>User</span>
@@ -92,29 +99,20 @@ export function Admin() {
             {limits.data.map((record) => (
               <div className="admin-row" key={record.email}>
                 <strong data-label="User">
-                  <ExpandableText lines={1}>{record.email}</ExpandableText>
+                  <Truncate>{record.email}</Truncate>
                 </strong>
                 <span data-label="Date">
-                  <ExpandableText lines={1}>{record.date}</ExpandableText>
+                  <Truncate>{record.date}</Truncate>
                 </span>
                 <span data-label="Starts">
-                  <ExpandableText lines={1}>
-                    {record.count} / {record.limit}
-                  </ExpandableText>
+                  {record.count} / {record.limit}
                 </span>
-                <span data-label="Remaining">
-                  <ExpandableText lines={1}>{record.remaining}</ExpandableText>
-                </span>
+                <span data-label="Remaining">{record.remaining}</span>
                 <span data-label="Last start">
-                  <ExpandableText lines={1}>{record.last_started_at ? formatDateTime(record.last_started_at) : "None"}</ExpandableText>
+                  <Truncate>{record.last_started_at ? formatDateTime(record.last_started_at) : "None"}</Truncate>
                 </span>
                 <div className="admin-action-cell" data-label="Reset">
-                  <button
-                    className="secondary-action"
-                    type="button"
-                    onClick={() => reset.mutate(record.email)}
-                    disabled={reset.isPending}
-                  >
+                  <button className="secondary-action" type="button" onClick={() => reset.mutate(record.email)} disabled={reset.isPending}>
                     <RotateCcw aria-hidden="true" />
                     <span>Reset</span>
                   </button>
@@ -123,11 +121,22 @@ export function Admin() {
             ))}
           </div>
         ) : (
-          <div className="empty-panel">No limited users recorded today.</div>
+          <EmptyState>No limited users recorded today.</EmptyState>
         )}
         {reset.error && <div className="error-box">{reset.error.message}</div>}
       </section>
     </div>
+  );
+}
+
+function AdminHeader() {
+  return (
+    <header className="page-header">
+      <div>
+        <p className="eyebrow">Access control</p>
+        <h1>Admin console</h1>
+      </div>
+    </header>
   );
 }
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import ReactECharts from "echarts-for-react";
+import { prefersReducedMotion, useChartTokens } from "../theme";
 import type { NumericRow } from "../runData";
 
 interface MetricChartProps {
@@ -12,6 +13,7 @@ interface MetricChartProps {
 
 export function MetricChart({ className, limit = 18, metrics, rows: explicitRows, title = "Metrics" }: MetricChartProps) {
   const compact = useCompactChart();
+  const tokens = useChartTokens();
   const fallbackRows: NumericRow[] = Object.entries(metrics ?? {})
     .filter(([, value]) => typeof value === "number" && Number.isFinite(value))
     .map(([label, value]) => ({ label, value: value as number }));
@@ -24,13 +26,20 @@ export function MetricChart({ className, limit = 18, metrics, rows: explicitRows
 
   const height = Math.max(240, Math.min(520, 72 + chartRows.length * (compact ? 24 : 28)));
   const option = {
-    title: { text: title, left: 0, textStyle: { fontSize: 13, fontWeight: 600 } },
+    animation: !prefersReducedMotion(),
+    title: { text: title, left: 0, textStyle: { fontSize: 13, fontWeight: 600, color: tokens.label } },
     grid: { left: compact ? 88 : 132, right: compact ? 8 : 18, top: 42, bottom: 24 },
-    xAxis: { type: "value", axisLabel: { color: "#51606f" }, splitLine: { lineStyle: { color: "#dfe5ea" } } },
+    xAxis: {
+      type: "value",
+      axisLabel: { color: tokens.axis },
+      axisLine: { lineStyle: { color: tokens.grid } },
+      splitLine: { lineStyle: { color: tokens.grid } }
+    },
     yAxis: {
       type: "category",
       data: chartRows.map((row) => row.label),
-      axisLabel: { color: "#303944", width: compact ? 78 : 122, overflow: "truncate" }
+      axisLine: { lineStyle: { color: tokens.grid } },
+      axisLabel: { color: tokens.label, width: compact ? 78 : 122, overflow: "truncate" }
     },
     tooltip: {
       trigger: "axis",
@@ -46,7 +55,7 @@ export function MetricChart({ className, limit = 18, metrics, rows: explicitRows
           unit: row.unit,
           value: row.value
         })),
-        itemStyle: { color: "#0f766e", borderRadius: [0, 3, 3, 0] }
+        itemStyle: { color: tokens.accent, borderRadius: [0, 3, 3, 0] }
       }
     ]
   };

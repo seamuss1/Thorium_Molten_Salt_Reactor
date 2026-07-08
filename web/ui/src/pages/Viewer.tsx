@@ -1,10 +1,12 @@
 import { useMemo } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Box, Cuboid } from "lucide-react";
+import { ArrowLeft, Box, Cuboid } from "lucide-react";
 import { api } from "../api";
-import { ExpandableText } from "../components/ExpandableText";
+import { Truncate } from "../components/Truncate";
 import { ModelViewer } from "../components/ModelViewer";
+import { ErrorBoundary } from "../components/ErrorBoundary";
+import { PanelError } from "../components/StateBlock";
 import { hasViewableGeometry } from "../geometryArtifacts";
 
 export function Viewer() {
@@ -32,19 +34,24 @@ export function Viewer() {
     enabled: Boolean(selected)
   });
   const selectedRun =
-    selected && run.data?.case_name === selected.caseName && run.data.run_id === selected.runId
-      ? run.data
-      : null;
-  const emptyMessage = runs.isLoading || (Boolean(selected) && run.isLoading)
-    ? "Loading geometry exports..."
-    : hasRequestedRun
-      ? "The selected run does not have a viewable glTF geometry export."
-      : "No runs with viewable glTF geometry exports are available. Run the render phase to create one.";
+    selected && run.data?.case_name === selected.caseName && run.data.run_id === selected.runId ? run.data : null;
+  const emptyMessage =
+    runs.isLoading || (Boolean(selected) && run.isLoading)
+      ? "Loading geometry exports…"
+      : hasRequestedRun
+        ? "The selected run does not have a viewable glTF geometry export."
+        : "No runs with viewable glTF geometry exports are available. Run the render phase to create one.";
 
   return (
     <div className="page">
       <header className="page-header">
         <div>
+          {hasRequestedRun && (
+            <Link className="back-link" to="/viewer">
+              <ArrowLeft aria-hidden="true" />
+              All 3D runs
+            </Link>
+          )}
           <p className="eyebrow">Geometry exports</p>
           <h1>3D viewer</h1>
         </div>
@@ -71,23 +78,29 @@ export function Viewer() {
           </select>
         </label>
       </header>
-      {selectedRun ? (
+      {runs.isError ? (
+        <PanelError error={runs.error} onRetry={() => runs.refetch()} tall />
+      ) : run.isError && hasRequestedRun ? (
+        <PanelError error={run.error} onRetry={() => run.refetch()} tall />
+      ) : selectedRun ? (
         <>
           <section className="viewer-meta">
             <div>
               <Cuboid aria-hidden="true" />
-              <ExpandableText className="viewer-case" lines={1}>
-                {selectedRun.case_name}
-              </ExpandableText>
-              <ExpandableText className="viewer-run" lines={1}>
-                {selectedRun.run_id}
-              </ExpandableText>
+              <Truncate className="viewer-case">{selectedRun.case_name}</Truncate>
+              <Truncate className="viewer-run">{selectedRun.run_id}</Truncate>
             </div>
             <Link className="secondary-action" to={`/runs/${selectedRun.case_name}/${selectedRun.run_id}`}>
               Open run
             </Link>
           </section>
-          <ModelViewer artifacts={selectedRun.artifacts} />
+          <ErrorBoundary
+            fallback={(error, reset) => (
+              <PanelError error={error} label="Could not render this geometry." onRetry={reset} tall />
+            )}
+          >
+            <ModelViewer artifacts={selectedRun.artifacts} />
+          </ErrorBoundary>
         </>
       ) : (
         <div className="empty-panel tall">
