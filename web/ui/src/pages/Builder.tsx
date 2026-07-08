@@ -325,8 +325,10 @@ export function buildPatch(values: Record<string, unknown>): Record<string, unkn
 }
 
 export function inputStepForParameter(parameter: Pick<EditableParameter, "kind" | "step">): number | "any" {
-  if (parameter.step != null && Number.isFinite(parameter.step) && parameter.step > 0) {
-    return parameter.step;
-  }
+  // Non-integer fields use step="any": the backend step (e.g. 0.01) combined
+  // with the input's min forms an HTML validation grid, and shipped defaults
+  // (e.g. primary_cp_kj_kgk: 4.2 against min 0.001 / step 0.01) don't lie on it,
+  // so the browser would flag an untouched field as stepMismatch and block the
+  // Start-run submit. Integers step by 1, which is always grid-safe.
   return parameter.kind === "integer" ? 1 : "any";
 }
