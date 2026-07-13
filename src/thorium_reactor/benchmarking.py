@@ -401,6 +401,7 @@ def _collect_benchmark_targets(benchmark: dict[str, Any]) -> list[dict[str, Any]
             normalized = _normalize_target(observable_id, observable)
             normalized["dataset_id"] = dataset_id
             normalized["dataset_status"] = str(dataset.get("status", "planned"))
+            normalized["source"] = observable.get("source") or dataset.get("source")
             targets.append(normalized)
     return targets
 
@@ -897,6 +898,153 @@ def build_benchmark_residuals(
     }
 
 
+def build_literature_operating_point_screen(
+    summary: dict[str, Any],
+    benchmark: dict[str, Any] | None,
+) -> dict[str, Any]:
+    benchmark_targets = _benchmark_target_map(benchmark or {})
+    comparisons: list[dict[str, Any]] = []
+
+    metrics = summary.get("metrics", {})
+    metrics = metrics if isinstance(metrics, dict) else {}
+    primary_system = summary.get("primary_system", {})
+    primary_system = primary_system if isinstance(primary_system, dict) else {}
+    thermal_profile = primary_system.get("thermal_profile", {})
+    thermal_profile = thermal_profile if isinstance(thermal_profile, dict) else {}
+    bop = summary.get("bop", {})
+    bop = bop if isinstance(bop, dict) else {}
+    flow = summary.get("flow", {})
+    flow = flow if isinstance(flow, dict) else {}
+    reduced_order = flow.get("reduced_order", {})
+    reduced_order = reduced_order if isinstance(reduced_order, dict) else {}
+    active_flow = reduced_order.get("active_flow", {})
+    active_flow = active_flow if isinstance(active_flow, dict) else {}
+    variant_counts = active_flow.get("variant_counts", {})
+    variant_counts = variant_counts if isinstance(variant_counts, dict) else {}
+    physics_core = summary.get("physics_core", {})
+    physics_core = physics_core if isinstance(physics_core, dict) else {}
+    precursor_transport = physics_core.get("precursor_transport", {})
+    precursor_transport = precursor_transport if isinstance(precursor_transport, dict) else {}
+
+    _append_operating_point_comparison(
+        comparisons,
+        benchmark_targets,
+        comparison_id="nominal_thermal_power_mwth",
+        label="Design thermal power",
+        actual=_coerce_float(metrics.get("design_power_mwth")),
+        actual_basis="summary.metrics.design_power_mwth",
+        units="MWth",
+        aligned_fraction=0.10,
+        watch_fraction=0.25,
+    )
+    _append_operating_point_comparison(
+        comparisons,
+        benchmark_targets,
+        comparison_id="nominal_hot_leg_temp_c",
+        label="Hot-leg temperature",
+        actual=_coerce_float(thermal_profile.get("estimated_hot_leg_temp_c")),
+        actual_basis="summary.primary_system.thermal_profile.estimated_hot_leg_temp_c",
+        units="C",
+        aligned_fraction=0.03,
+        watch_fraction=0.07,
+    )
+    _append_operating_point_comparison(
+        comparisons,
+        benchmark_targets,
+        comparison_id="nominal_cold_leg_temp_c",
+        label="Cold-leg temperature",
+        actual=_coerce_float(thermal_profile.get("estimated_cold_leg_temp_c")),
+        actual_basis="summary.primary_system.thermal_profile.estimated_cold_leg_temp_c",
+        units="C",
+        aligned_fraction=0.03,
+        watch_fraction=0.07,
+    )
+    _append_operating_point_comparison(
+        comparisons,
+        benchmark_targets,
+        comparison_id="primary_mass_flow_kg_s",
+        label="Primary mass flow",
+        actual=_coerce_float(bop.get("primary_mass_flow_kg_s")),
+        actual_basis="summary.bop.primary_mass_flow_kg_s",
+        units="kg/s",
+        aligned_fraction=0.10,
+        watch_fraction=0.25,
+    )
+    _append_operating_point_comparison(
+        comparisons,
+        benchmark_targets,
+        comparison_id="external_core_residence_time_s",
+        label="External-loop residence time",
+        actual=_coerce_float(precursor_transport.get("loop_residence_time_s")),
+        actual_basis="summary.physics_core.precursor_transport.loop_residence_time_s",
+        units="s",
+        aligned_fraction=0.10,
+        watch_fraction=0.25,
+        actual_notes=_string_or_none(precursor_transport.get("loop_residence_basis")),
+    )
+
+    active_fuel_channels = _coerce_float(variant_counts.get("fuel"))
+    if active_fuel_channels is not None:
+        _append_operating_point_comparison(
+            comparisons,
+            benchmark_targets,
+            comparison_id="active_fuel_channels",
+            label="Active fuel channels",
+            actual=active_fuel_channels,
+            actual_basis="summary.flow.reduced_order.active_flow.variant_counts.fuel",
+            units="count",
+            aligned_fraction=0.05,
+            watch_fraction=0.15,
+        )
+
+    aligned_count = sum(1 for item in comparisons if item["status"] == "aligned")
+    watch_count = sum(1 for item in comparisons if item["status"] == "watch")
+    mismatch_count = sum(1 for item in comparisons if item["status"] == "mismatch")
+    if not comparisons:
+        status = "not_assessed"
+    elif mismatch_count:
+        status = "mismatch"
+    elif watch_count:
+        status = "watch"
+    else:
+        status = "aligned"
+
+    interpretation = (
+        "Recent literature-backed operating-point values are surfaced here as a screening comparison, "
+        "not as same-scale validation unless power, temperatures, and transport are all aligned."
+    )
+    power_comparison = next(
+        (item for item in comparisons if item["id"] == "nominal_thermal_power_mwth"),
+        None,
+    )
+    if power_comparison and power_comparison["status"] == "mismatch":
+        interpretation = (
+            "The case is not at the same thermal-power scale as the cited literature operating point, "
+            "so the comparison should be treated as surrogate context for temperatures and transport."
+        )
+
+    sources = []
+    seen_sources: set[str] = set()
+    for item in comparisons:
+        source = item.get("source")
+        if not isinstance(source, str) or not source or source in seen_sources:
+            continue
+        seen_sources.add(source)
+        sources.append(source)
+
+    return {
+        "model": "literature_operating_point_screen",
+        "screening_status": status,
+        "comparison_count": len(comparisons),
+        "aligned_count": aligned_count,
+        "watch_count": watch_count,
+        "mismatch_count": mismatch_count,
+        "comparisons": comparisons,
+        "sources": sources,
+        "interpretation": interpretation,
+    }
+
+
 def evaluate_validation_target(
     name: str,
     target: dict[str, Any],
@@ -1150,3 +1298,56 @@ def _coerce_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _append_operating_point_comparison(
+    comparisons: list[dict[str, Any]],
+    benchmark_targets: dict[str, dict[str, Any]],
+    *,
+    comparison_id: str,
+    label: str,
+    actual: float | None,
+    actual_basis: str,
+    units: str,
+    aligned_fraction: float,
+    watch_fraction: float,
+    actual_notes: str | None = None,
+) -> None:
+    target = benchmark_targets.get(comparison_id)
+    if actual is None or not target:
+        return
+    reference = _coerce_float(target.get("value"))
+    if reference is None:
+        return
+    relative_difference = abs(actual - reference) / max(abs(reference), 1.0e-12)
+    if relative_difference <= aligned_fraction:
+        status = "aligned"
+    elif relative_difference <= watch_fraction:
+        status = "watch"
+    else:
+        status = "mismatch"
+    comparison = {
+        "id": comparison_id,
+        "label": label,
+        "status": status,
+        "actual": round(actual, 6),
+        "reference": round(reference, 6),
+        "units": units,
+        "relative_difference_fraction": round(relative_difference, 6),
+        "actual_basis": actual_basis,
+        "reference_basis": target.get("dataset_id") or comparison_id,
+        "source": target.get("source"),
+    }
+    if actual_notes:
+        comparison["actual_notes"] = actual_notes
+    note = target.get("note")
+    if note:
+        comparison["reference_note"] = note
+    comparisons.append(comparison)
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

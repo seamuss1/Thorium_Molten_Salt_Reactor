@@ -16,6 +16,7 @@ from thorium_reactor.capabilities import (
 )
 from thorium_reactor.benchmarking import assess_benchmark_traceability
 from thorium_reactor.benchmarking import build_benchmark_residuals
+from thorium_reactor.benchmarking import build_literature_operating_point_screen
 from thorium_reactor.benchmarking import evaluate_validation_target
 from thorium_reactor.benchmark_evidence import (
     materialize_benchmark_evidence,
@@ -490,6 +491,9 @@ def run_case(
         summary["physics_core"] = physics_core
         summary["metrics"]["physics_core_k_eff"] = physics_core["neutronics"]["k_eff"]
         summary["metrics"]["physics_core_beta_eff"] = physics_core["neutronics"]["beta_eff"]
+        summary["metrics"]["physics_core_loop_residence_time_s"] = physics_core["precursor_transport"][
+            "loop_residence_time_s"
+        ]
         summary["metrics"]["physics_core_fuel_temperature_feedback_pcm_per_c"] = physics_core["neutronics"][
             "feedback_coefficients"
         ]["fuel_temperature_pcm_per_c"]
@@ -512,6 +516,26 @@ def run_case(
         summary["metrics"]["physics_core_natural_circulation_fraction"] = physics_core["thermal_hydraulics"][
             "momentum_balance"
         ]["natural_circulation_fraction_of_nominal"]
+    if built.benchmark:
+        summary["literature_operating_point"] = build_literature_operating_point_screen(
+            summary,
+            built.benchmark,
+        )
+        summary["metrics"]["literature_operating_point_comparison_count"] = summary[
+            "literature_operating_point"
+        ]["comparison_count"]
+        summary["metrics"]["literature_operating_point_aligned_count"] = summary[
+            "literature_operating_point"
+        ]["aligned_count"]
+        summary["metrics"]["literature_operating_point_mismatch_count"] = summary[
+            "literature_operating_point"
+        ]["mismatch_count"]
+        summary["metrics"]["literature_operating_point_watch_count"] = summary[
+            "literature_operating_point"
+        ]["watch_count"]
+        summary["metrics"]["literature_operating_point_status"] = summary[
+            "literature_operating_point"
+        ]["screening_status"]
     if built.manifest.get("benchmark_traceability"):
         summary["benchmark_traceability"] = _json_copy(built.manifest["benchmark_traceability"])
         summary["benchmark_quality"] = _json_copy(

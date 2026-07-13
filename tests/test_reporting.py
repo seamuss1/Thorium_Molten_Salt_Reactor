@@ -603,6 +603,75 @@ def test_report_formats_numeric_ranges_inside_code_literals() -> None:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
 
+def test_report_includes_literature_operating_point_section() -> None:
+    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-literature-operating-point" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "dry-run"},
+                    "literature_operating_point": {
+                        "model": "literature_operating_point_screen",
+                        "screening_status": "mismatch",
+                        "aligned_count": 2,
+                        "watch_count": 1,
+                        "mismatch_count": 2,
+                        "comparisons": [
+                            {
+                                "id": "nominal_thermal_power_mwth",
+                                "label": "Design thermal power",
+                                "actual": 250.0,
+                                "reference": 2.0,
+                                "units": "MWth",
+                                "status": "mismatch",
+                                "relative_difference_fraction": 124.0,
+                            },
+                            {
+                                "id": "external_core_residence_time_s",
+                                "label": "External-loop residence time",
+                                "actual": 55.25,
+                                "reference": 55.25,
+                                "units": "s",
+                                "status": "aligned",
+                                "relative_difference_fraction": 0.0,
+                            },
+                        ],
+                        "sources": ["https://doi.org/10.3390/en19040964"],
+                        "interpretation": "The case should be treated as surrogate context for temperatures and transport.",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "tmsr_lf1_core",
+            {
+                "reactor": {
+                    "name": "TMSR-LF1-Inspired Core",
+                    "family": "TMSR-LF1-inspired MSR",
+                    "stage": "full-core",
+                    "design_power_mwth": 250.0,
+                    "benchmark": "n/a",
+                }
+            },
+            summary_path,
+            None,
+            None,
+        )
+
+        section = _section(report, "## Literature Operating Point")
+        assert "- Screening status: `mismatch`" in section
+        assert "Design thermal power: actual `250` vs reference `2` MWth (`mismatch`" in section
+        assert "External-loop residence time: actual `55.25` vs reference `55.25` s (`aligned`" in section
+        assert "10.3390/en19040964" in section
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
 def test_report_includes_reduced_order_flow_section() -> None:
     scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-flow" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)

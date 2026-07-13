@@ -14,6 +14,7 @@ The current workflow combines:
 - a deterministic finite-volume handoff for delayed-neutron and decay-heat precursor source partitioning,
 - a steady-state salt chemistry proxy and transient chemistry/depletion coupling terms,
 - and literature-backed screening models for molten-salt property uncertainty, tritium distribution, and graphite irradiation lifetime.
+- and a literature-backed operating-point alignment screen that compares summary outputs against curated benchmark observables.
 
 The relevant implementation lives in:
 
@@ -638,6 +639,35 @@ present, because one-dimensional early transient reactivity rates may then be
 limited by radial distribution or bypass-like flow effects. It is a reporting
 and validation-context metric, not a replacement for a spatial
 thermal-hydraulic solve.
+
+## Literature Operating-Point Alignment Screen
+
+The repository also reports a generic literature operating-point screen when the
+loaded benchmark metadata includes literature-backed observables. This is a
+reporting and validation-context comparison, not a physics closure.
+
+For each available observable `x`, the screen compares a summary value
+`x_model` against the benchmark value `x_ref` using the relative difference
+
+$$
+\delta_x = \frac{|x_{\mathrm{model}} - x_{\mathrm{ref}}|}{|x_{\mathrm{ref}}|}
+$$
+
+and classifies the comparison as:
+
+- `aligned` for small differences,
+- `watch` for moderate differences,
+- `mismatch` for large differences.
+
+The current implementation uses this for literature-backed thermal power,
+hot-leg temperature, cold-leg temperature, primary mass flow, and external-loop
+residence time when those observables exist in the benchmark metadata and the
+run summary. For TMSR-style cases, this makes the public 2 MWth operating-point
+data and the reduced-order loop-residence handoff visible in one place.
+
+When thermal-power mismatch is large, the report explicitly treats the
+comparison as surrogate context rather than same-scale validation, even if some
+temperature or transport quantities happen to align.
 
 ## Coupled Depletion And Chemistry Terms In The Transient Proxy
 

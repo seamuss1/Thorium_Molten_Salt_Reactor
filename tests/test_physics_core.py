@@ -27,10 +27,14 @@ def test_run_case_writes_coupled_physics_core_artifact() -> None:
 
         physics_core = summary["physics_core"]
         pump_benchmark = summary["msre_pump_transient_benchmark"]
+        operating_point = summary["literature_operating_point"]
         assert pump_benchmark["model"] == "msre_pump_transient_benchmark_screen"
         assert pump_benchmark["benchmark_mean_error_startup_pcm"]["max"] == 21.0
         assert summary["metrics"]["msre_pump_transient_startup_error_max_pcm"] == 21.0
         assert "bypass_flow" in pump_benchmark["sensitivity_drivers"]
+        assert operating_point["model"] == "literature_operating_point_screen"
+        assert operating_point["comparison_count"] >= 3
+        assert summary["metrics"]["literature_operating_point_status"] in {"aligned", "watch", "mismatch"}
         assert physics_core["status"] == "completed"
         assert physics_core["integrity_checks"]["status"] == "ok"
         assert physics_core["neutronics"]["group_count"] == 11
@@ -83,6 +87,9 @@ def test_run_case_writes_coupled_physics_core_artifact() -> None:
         ) == pytest.approx(1.0, abs=1.0e-5)
         assert (bundle.root / "physics_core.json").exists()
         assert summary["metrics"]["physics_core_k_eff"] == physics_core["neutronics"]["k_eff"]
+        assert summary["metrics"]["physics_core_loop_residence_time_s"] == physics_core["precursor_transport"][
+            "loop_residence_time_s"
+        ]
         assert summary["metrics"]["physics_core_loop_decay_heat_source_fraction"] == decay_heat[
             "loop_decay_heat_source_fraction"
         ]

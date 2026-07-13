@@ -4,6 +4,7 @@ from thorium_reactor.benchmarking import (
     assess_benchmark_traceability,
     build_benchmark_residuals,
     build_docker_openmc_command,
+    build_literature_operating_point_screen,
 )
 from thorium_reactor.config import load_case_config, load_yaml
 from thorium_reactor.neutronics.workflows import _build_validation_result
@@ -145,6 +146,67 @@ def test_dry_run_keff_value_is_quarantined_from_completed_physics_residuals() ->
     assert "dry-run/proxy value" in keff["message"]
     assert residuals["completed_physics_item_count"] == 0
     assert residuals["status"] == "blocked_missing_primary_physics"
+
+
+def test_literature_operating_point_screen_uses_recent_tmsr_reference_values() -> None:
+    benchmark = load_yaml(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml")
+
+    screen = build_literature_operating_point_screen(
+        {
+            "metrics": {"design_power_mwth": 2.0},
+            "bop": {"primary_mass_flow_kg_s": 55.0},
+            "primary_system": {
+                "thermal_profile": {
+                    "estimated_hot_leg_temp_c": 619.85,
+                    "estimated_cold_leg_temp_c": 599.85,
+                }
+            },
+            "physics_core": {
+                "precursor_transport": {
+                    "loop_residence_time_s": 55.25,
+                    "loop_residence_basis": "fuel_salt_inventory_minus_active_core_volume_over_primary_flow",
+                }
+            },
+        },
+        benchmark,
+    )
+
+    assert screen["screening_status"] == "aligned"
+    assert screen["comparison_count"] >= 5
+    assert screen["mismatch_count"] == 0
+    residence = next(
+        item for item in screen["comparisons"] if item["id"] == "external_core_residence_time_s"
+    )
+    assert residence["status"] == "aligned"
+    assert residence["reference"] == 55.25
+    assert "10.3390/en19040964" in residence["source"]
+
+
+def test_literature_operating_point_screen_flags_scale_up_surrogate_cases() -> None:
+    benchmark = load_yaml(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml")
+
+    screen = build_literature_operating_point_screen(
+        {
+            "metrics": {"design_power_mwth": 250.0},
+            "bop": {"primary_mass_flow_kg_s": 1100.0},
+            "primary_system": {
+                "thermal_profile": {
+                    "estimated_hot_leg_temp_c": 700.0,
+                    "estimated_cold_leg_temp_c": 560.0,
+                }
+            },
+            "physics_core": {
+                "precursor_transport": {
+                    "loop_residence_time_s": 4.0,
+                }
+            },
+        },
+        benchmark,
+    )
+
+    assert screen["screening_status"] == "mismatch"
+    assert screen["mismatch_count"] >= 2
+    assert "surrogate context" in screen["interpretation"]
 
 
 def test_validation_result_keeps_neutronics_status_when_evaluating_targets() -> None:

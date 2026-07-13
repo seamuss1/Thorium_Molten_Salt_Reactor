@@ -475,6 +475,32 @@ def generate_report(
         )
         lines.append(f"- Interpretation: {msre_pump_transient.get('interpretation', 'n/a')}")
 
+    literature_operating_point = summary.get("literature_operating_point", {})
+    if literature_operating_point:
+        lines.extend(["", "## Literature Operating Point", ""])
+        lines.append(f"- Model: `{literature_operating_point.get('model', 'n/a')}`")
+        lines.append(f"- Screening status: `{literature_operating_point.get('screening_status', 'n/a')}`")
+        lines.append(
+            "- Comparison counts: "
+            f"`aligned={literature_operating_point.get('aligned_count', 'n/a')}, "
+            f"watch={literature_operating_point.get('watch_count', 'n/a')}, "
+            f"mismatch={literature_operating_point.get('mismatch_count', 'n/a')}`"
+        )
+        for comparison in literature_operating_point.get("comparisons", []):
+            if not isinstance(comparison, dict):
+                continue
+            lines.append(
+                f"- {comparison.get('label', 'comparison')}: "
+                f"actual `{comparison.get('actual', 'n/a')}` vs reference "
+                f"`{comparison.get('reference', 'n/a')}` {comparison.get('units', '')}".rstrip()
+                + f" (`{comparison.get('status', 'n/a')}`, "
+                f"relative difference `{comparison.get('relative_difference_fraction', 'n/a')}`)"
+            )
+        sources = literature_operating_point.get("sources", [])
+        if isinstance(sources, list) and sources:
+            lines.append(f"- Sources: `{', '.join(str(source) for source in sources)}`")
+        lines.append(f"- Interpretation: {literature_operating_point.get('interpretation', 'n/a')}")
+
     physics_core = summary.get("physics_core", {})
     if physics_core:
         precursor_transport = physics_core.get("precursor_transport", {})

@@ -11,6 +11,39 @@ transport explicit in reports and metrics with core and external-loop segment
 source fractions. These implemented equations are documented in
 `docs/current-model-equations.md`.
 
+## July 13, 2026 Addendum
+
+This follow-up screened recent primary sources from the last 24 months with
+focus on liquid-fueled MSR operating-point data, flowing-fuel validation, and
+reduced-order transport relevance. The main checked items were Wang et al.'s
+2026 RESTA3D TMSR transient paper, the 2025 Frontiers Griffin/Squirrel/Pronghorn
+MSRE validation study, the 2026 multi-point depletion paper by Elhareef and Wu,
+and the official INL Virtual Test Bed MSRE model index and citation notes.
+
+Repository action: add a literature-backed operating-point alignment screen to
+the run summary and report. The repository already stored recent TMSR-LF1
+operating-point values in benchmark metadata, but users could not see whether a
+case's thermal power, temperatures, primary mass flow, or external-loop
+residence were actually aligned with those reference values. The new screen
+surfaces that comparison directly and makes the scale-mismatch caveat explicit
+when a case is only a TMSR-inspired surrogate.
+
+Why this change and not a larger one:
+
+- The 2026 depletion paper remains scientifically relevant, but still requires a
+  connected-cell isotope transport architecture rather than a narrow patch.
+- The 2025 MSRE validation paper continues to support adjoint-weighted
+  precursor-worth treatment and explicit loop-residence handling, which the
+  repository already implements.
+- The INL VTB material continues to strengthen future lower-plenum and
+  resolved-flow validation work, but does not by itself justify a new reduced-
+  order closure.
+
+Sources: https://doi.org/10.3390/en19040964,
+https://www.frontiersin.org/journals/nuclear-engineering/articles/10.3389/fnuen.2025.1617048/full,
+https://doi.org/10.3390/jne7010017, and
+https://virtualtestbed.inl.gov/msr/msre/index.html
+
 ## July 3, 2026 Addendum
 
 This follow-up screened recent primary sources from the last 24 months with
