@@ -1,5 +1,9 @@
 import json
+import os
 import shutil
+import subprocess
+import sys
+import textwrap
 import threading
 import time
 import uuid
@@ -10,6 +14,7 @@ from fastapi.testclient import TestClient
 from thorium_reactor.paths import create_result_bundle
 from thorium_reactor.web.app import create_app
 from thorium_reactor.web.jobs import append_event
+from thorium_reactor.web.repository import WebRepository
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -394,15 +399,180 @@ def test_web_requires_access_identity_when_configured(monkeypatch) -> None:
     assert response.status_code == 401
 
 
-def test_web_allows_localhost_dev_identity_when_access_is_required(monkeypatch) -> None:
+def test_web_allows_loopback_transport_dev_identity_when_access_is_required(monkeypatch) -> None:
     monkeypatch.setenv("THORIUM_REACTOR_ACCESS_REQUIRED", "1")
-    client = TestClient(create_app(REPO_ROOT), base_url="http://127.0.0.1:18488")
+    client = TestClient(create_app(REPO_ROOT), client=("127.0.0.1", 50123))
 
     response = client.get("/api/me")
 
     assert response.status_code == 200
     assert response.json()["email"] == "seamusdgallagher@gmail.com"
     assert response.json()["is_admin"] is True
+
+
+def test_web_rejects_spoofed_identity_headers_when_access_is_required(monkeypatch) -> None:
+    monkeypatch.setenv("THORIUM_REACTOR_ACCESS_REQUIRED", "1")
+    client = TestClient(create_app(REPO_ROOT), client=("203.0.113.10", 4242))
+
+    for header in ("x-user-email", "x-forwarded-email", "x-authenticated-user-email"):
+        response = client.get("/api/me", headers={header: "seamusdgallagher@gmail.com"})
+        assert response.status_code == 401, header
+
+    unverified = client.get(
+        "/api/me",
+        headers={"cf-access-authenticated-user-email": "seamusdgallagher@gmail.com"},
+    )
+    assert unverified.status_code == 401
+
+    admin_probe = client.get(
+        "/api/admin/rate-limits",
+        headers={"x-user-email": "seamusdgallagher@gmail.com"},
+    )
+    assert admin_probe.status_code == 401
+
+
+def test_web_rejects_host_header_localhost_spoof_when_access_is_required(monkeypatch) -> None:
+    monkeypatch.setenv("THORIUM_REACTOR_ACCESS_REQUIRED", "1")
+    client = TestClient(
+        create_app(REPO_ROOT),
+        base_url="http://localhost:18488",
+        client=("203.0.113.10", 4242),
+    )
+
+    response = client.get("/api/me")
+
+    assert response.status_code == 401
+
+
+def test_web_trusts_identity_header_only_with_proxy_shared_secret(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("THORIUM_REACTOR_ACCESS_REQUIRED", "1")
+    monkeypatch.setenv("THORIUM_REACTOR_PROXY_SHARED_SECRET", "tunnel-secret")
+    monkeypatch.setenv("THORIUM_REACTOR_RATE_LIMIT_PATH", str(tmp_path / "limits.json"))
+    client = TestClient(create_app(REPO_ROOT), client=("203.0.113.10", 4242))
+    identity = {"cf-access-authenticated-user-email": "guest@example.com"}
+
+    wrong_secret = client.get("/api/me", headers={**identity, "x-thorium-proxy-secret": "wrong"})
+    assert wrong_secret.status_code == 401
+
+    verified = client.get("/api/me", headers={**identity, "x-thorium-proxy-secret": "tunnel-secret"})
+    assert verified.status_code == 200
+    assert verified.json()["email"] == "guest@example.com"
+    assert verified.json()["is_admin"] is False
+
+
+def test_web_trusted_client_addrs_extend_local_fallback(monkeypatch) -> None:
+    monkeypatch.setenv("THORIUM_REACTOR_ACCESS_REQUIRED", "1")
+    monkeypatch.setenv("THORIUM_REACTOR_TRUSTED_CLIENT_ADDRS", "172.18.0.0/16")
+    client = TestClient(create_app(REPO_ROOT), client=("172.18.0.1", 39100))
+
+    response = client.get("/api/me")
+
+    assert response.status_code == 200
+    assert response.json()["email"] == "seamusdgallagher@gmail.com"
+
+
+def test_web_unknown_api_route_returns_json_404() -> None:
+    client = TestClient(create_app(REPO_ROOT))
+
+    response = client.get("/api/does-not-exist")
+
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/json")
+
+
+def test_web_spa_deep_links_serve_index_but_api_routes_404(tmp_path: Path) -> None:
+    repo_root = tmp_path
+    (repo_root / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    (repo_root / "configs" / "cases").mkdir(parents=True)
+    dist = repo_root / "web" / "ui" / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<html>spa-shell</html>", encoding="utf-8")
+    client = TestClient(create_app(repo_root))
+
+    deep_link = client.get("/runs/example_pin/some-run")
+    assert deep_link.status_code == 200
+    assert "spa-shell" in deep_link.text
+
+    api_missing = client.get("/api/runz")
+    assert api_missing.status_code == 404
+    assert api_missing.headers["content-type"].startswith("application/json")
+
+
+def test_rate_limit_store_is_safe_across_processes(tmp_path: Path) -> None:
+    store_path = tmp_path / "limits.json"
+    worker = tmp_path / "claim_worker.py"
+    worker.write_text(
+        textwrap.dedent(
+            f"""
+            import sys
+            from pathlib import Path
+
+            sys.path.insert(0, {str(REPO_ROOT / "src")!r})
+
+            from fastapi import HTTPException
+
+            from thorium_reactor.web.permissions import RateLimitStore
+
+            store = RateLimitStore(Path({str(REPO_ROOT)!r}), daily_limit=5)
+            successes = 0
+            for _ in range(25):
+                try:
+                    store.claim("guest@example.com")
+                    successes += 1
+                except HTTPException:
+                    pass
+            print(successes)
+            """
+        ),
+        encoding="utf-8",
+    )
+    env = dict(os.environ, THORIUM_REACTOR_RATE_LIMIT_PATH=str(store_path))
+    processes = [
+        subprocess.Popen([sys.executable, str(worker)], env=env, stdout=subprocess.PIPE, text=True)
+        for _ in range(4)
+    ]
+    totals = []
+    for process in processes:
+        out, _err = process.communicate(timeout=180)
+        assert process.returncode == 0
+        totals.append(int(out.strip()))
+
+    assert sum(totals) == 5
+    payload = json.loads(store_path.read_text(encoding="utf-8"))
+    assert payload["users"]["guest@example.com"]["count"] == 5
+
+
+def test_append_event_sequences_without_rereading_log(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    for expected in (1, 2, 3):
+        assert append_event(run_dir, "info", None, f"event {expected}").sequence == expected
+
+    # Truncate the log: the cached counter must keep the sequence monotonic,
+    # proving appends no longer re-read the file each time.
+    (run_dir / "job_events.ndjson").write_text("", encoding="utf-8")
+    assert append_event(run_dir, "info", None, "event 4").sequence == 4
+
+
+def test_read_events_from_returns_only_new_events(tmp_path: Path) -> None:
+    repo_root = tmp_path
+    (repo_root / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    (repo_root / "configs" / "cases").mkdir(parents=True)
+    run_dir = repo_root / "results" / "example_case" / "run-1"
+    run_dir.mkdir(parents=True)
+    repository = WebRepository(repo_root)
+
+    append_event(run_dir, "info", None, "first")
+    append_event(run_dir, "info", None, "second")
+    events, offset = repository.read_events_from("example_case", "run-1", 0)
+    assert [event.message for event in events] == ["first", "second"]
+
+    append_event(run_dir, "info", None, "third")
+    new_events, new_offset = repository.read_events_from("example_case", "run-1", offset)
+    assert [event.message for event in new_events] == ["third"]
+    assert new_offset > offset
+    assert [event.sequence for event in events + new_events] == [1, 2, 3]
 
 
 def test_web_rate_limits_non_admins_and_admin_can_reset(monkeypatch, tmp_path: Path) -> None:

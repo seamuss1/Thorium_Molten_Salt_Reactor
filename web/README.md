@@ -73,13 +73,23 @@ The deployed Docker service can require Cloudflare Access identity:
 
 | Variable | Meaning |
 | --- | --- |
-| `THORIUM_REACTOR_ACCESS_REQUIRED` | When `1`, run starts require an authenticated Access email header |
+| `THORIUM_REACTOR_ACCESS_REQUIRED` | When `1`, requests need a verified Access identity or a trusted local transport |
+| `THORIUM_REACTOR_PROXY_SHARED_SECRET` | Shared secret the access proxy must send as `x-thorium-proxy-secret` before the identity header is trusted |
+| `THORIUM_REACTOR_TRUSTED_CLIENT_ADDRS` | Extra transport peers (IPs/CIDRs) allowed to use the anonymous local-dev fallback; loopback is always trusted |
 | `THORIUM_REACTOR_ADMIN_EMAILS` | Comma-separated emails with unlimited starts and Admin view access |
 | `THORIUM_REACTOR_RATE_LIMIT_PER_DAY` | Non-admin daily run-start limit |
 | `THORIUM_REACTOR_RATE_LIMIT_TIMEZONE` | Day boundary for rate limits |
 | `THORIUM_REACTOR_RATE_LIMIT_PATH` | Optional path for the rate-limit state JSON |
 
-The local `Run-Web` wrapper disables the Access requirement for development unless `-RequireAccessIdentity` is supplied.
+Identity handling when `THORIUM_REACTOR_ACCESS_REQUIRED=1`:
+
+- Exactly one identity header is honored: `cf-access-authenticated-user-email`.
+- That header is trusted only when `THORIUM_REACTOR_PROXY_SHARED_SECRET` is configured and the request carries the matching `x-thorium-proxy-secret` header (configure the proxy/tunnel to attach it). Without a verified secret, identity headers are ignored and the request fails closed with `401`.
+- The anonymous owner/local-dev fallback is gated on the transport peer address (loopback, plus any `THORIUM_REACTOR_TRUSTED_CLIENT_ADDRS` entries) - never on the spoofable `Host` header.
+
+The local `Run-Web` wrapper disables the Access requirement for development unless `-RequireAccessIdentity` is supplied. When running the compose `web` service directly with access required, browser traffic forwarded from the host arrives from the Docker network gateway, so either use the wrapper for local development or add that gateway to `THORIUM_REACTOR_TRUSTED_CLIENT_ADDRS`.
+
+Rate-limit state is stored in a JSON file guarded by an OS-level file lock, so the daily limit stays correct across multiple workers/processes sharing the same `THORIUM_REACTOR_RATE_LIMIT_PATH`. The default deployment topology remains a single `uvicorn` process.
 
 ## Frontend Development
 

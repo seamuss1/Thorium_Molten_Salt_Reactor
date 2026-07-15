@@ -1,5 +1,7 @@
 import { Activity, AlertCircle, Atom, BadgeCheck, BarChart3, Box, Factory, FlaskConical, Gauge, Landmark, Waves } from "lucide-react";
 import { ExpandableText } from "./ExpandableText";
+import { Truncate } from "./Truncate";
+import { StatusBadge } from "./StatusBadge";
 import type { OutputMetric, OutputSection } from "../types";
 
 interface RunOutputSectionsProps {
@@ -34,13 +36,7 @@ export function RunOutputSections({ sections }: RunOutputSectionsProps) {
                 <Icon aria-hidden="true" />
                 <h2>{section.title}</h2>
               </div>
-              {section.status && (
-                <mark>
-                  <ExpandableText insideInteractive lines={1}>
-                    {section.status.replaceAll("_", " ")}
-                  </ExpandableText>
-                </mark>
-              )}
+              {section.status && <StatusBadge status={section.status} dot={false} />}
             </div>
 
             {section.summary && (
@@ -78,12 +74,10 @@ function MetricCell({ metric }: { metric: OutputMetric }) {
   return (
     <div className="output-metric">
       <dt>
-        <ExpandableText lines={1}>{metric.label}</ExpandableText>
+        <Truncate lines={2}>{metric.label}</Truncate>
       </dt>
       <dd>
-        <ExpandableText className="output-metric-value" lines={1}>
-          {formatMetricValue(metric)}
-        </ExpandableText>
+        <Truncate className="output-metric-value">{formatMetricValue(metric)}</Truncate>
       </dd>
     </div>
   );

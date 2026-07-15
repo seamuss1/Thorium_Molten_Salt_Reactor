@@ -109,26 +109,17 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     @app.get("/api/runs/{case_name}/{run_id}/events")
     async def stream_events(case_name: str, run_id: str) -> StreamingResponse:
         async def event_stream():
-            seen = 0
+            offset = 0
             while True:
                 try:
-                    events = repository.read_events(case_name, run_id)
-                    record = repository.get_run(case_name, run_id)
+                    events, offset = repository.read_events_from(case_name, run_id, offset)
+                    status = repository.run_status(case_name, run_id)
                 except FileNotFoundError:
                     yield "event: error\ndata: {\"message\":\"Run not found\"}\n\n"
                     return
-                for event in events[seen:]:
+                for event in events:
                     yield f"event: run\ndata: {json.dumps(model_to_dict(event))}\n\n"
-                seen = len(events)
-                if is_terminal(record.status):
-                    # The terminal status is persisted just before the closing
-                    # event is appended, so re-read once more to flush the
-                    # final "Run completed"/error line if it landed between the
-                    # reads above and the terminal-status check. The status is
-                    # already durable, so any client refetch driven by this
-                    # event sees the terminal status.
-                    for event in repository.read_events(case_name, run_id)[seen:]:
-                        yield f"event: run\ndata: {json.dumps(model_to_dict(event))}\n\n"
+                if is_terminal(status):
                     return
                 await asyncio.sleep(1.0)
 
@@ -178,6 +169,8 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         def serve_spa(full_path: str) -> FileResponse:
+            if full_path == "api" or full_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="API route not found.")
             candidate = (dist_dir / full_path).resolve()
             if candidate.is_file() and candidate.is_relative_to(dist_dir.resolve()):
                 return FileResponse(candidate)

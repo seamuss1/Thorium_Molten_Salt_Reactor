@@ -191,38 +191,22 @@ def write_status(run_dir: Path, payload: dict[str, Any]) -> None:
     write_json(run_dir / "job_status.json", payload)
 
 
-_event_state_guard = threading.Lock()
-_event_locks: dict[str, threading.Lock] = {}
-_event_sequences: dict[str, int] = {}
-
-
-def _event_lock(key: str) -> threading.Lock:
-    with _event_state_guard:
-        lock = _event_locks.get(key)
-        if lock is None:
-            lock = threading.Lock()
-            _event_locks[key] = lock
-        return lock
+_SEQUENCE_LOCK = threading.Lock()
+_SEQUENCE_CACHE: dict[Path, int] = {}
 
 
 def append_event(run_dir: Path, level: str, phase: str | None, message: str, *, progress: float | None = None) -> RunEvent:
     path = run_dir / "job_events.ndjson"
-    key = str(path)
-    # A per-file lock serializes the sequence assignment and the append, so the
-    # worker thread and the timeout Timer thread cannot mint duplicate sequence
-    # numbers or interleave partial writes. The sequence counter is cached in
-    # memory to avoid re-reading the whole event log on every line, which was
-    # quadratic for chatty phases; on the first append of the process it is
-    # recovered from disk so restarts keep numbering monotonic.
-    with _event_lock(key):
-        sequence = _event_sequences.get(key)
+    with _SEQUENCE_LOCK:
+        sequence = _SEQUENCE_CACHE.get(path)
         if sequence is None:
-            existing = 0
+            # First append for this run in this process: count once, then cache.
+            sequence = 0
             if path.exists():
-                existing = sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
-            sequence = existing
+                with path.open("rb") as handle:
+                    sequence = sum(1 for _ in handle)
         sequence += 1
-        _event_sequences[key] = sequence
+        _SEQUENCE_CACHE[path] = sequence
         event = RunEvent(sequence=sequence, timestamp=utc_now(), level=level, phase=phase, message=message, progress=progress)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(model_to_dict(event), sort_keys=True) + "\n")

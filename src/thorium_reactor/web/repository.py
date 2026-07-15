@@ -170,18 +170,47 @@ class WebRepository:
         return self._run_record(case_name, run_id, run_dir)
 
     def read_events(self, case_name: str, run_id: str) -> list[RunEvent]:
+        events, _offset = self.read_events_from(case_name, run_id, 0)
+        return events
+
+    def read_events_from(self, case_name: str, run_id: str, offset: int = 0) -> tuple[list[RunEvent], int]:
+        """Read events appended at or after the given byte offset.
+
+        Returns the newly parsed events and the byte offset to resume from, so
+        pollers only pay for new data instead of re-parsing the whole log.
+        """
         path = self._run_dir(case_name, run_id) / "job_events.ndjson"
         if not path.exists():
-            return []
+            return [], offset
         events: list[RunEvent] = []
-        for line in path.read_text(encoding="utf-8").splitlines():
+        with path.open("rb") as handle:
+            handle.seek(offset)
+            chunk = handle.read()
+            new_offset = offset + len(chunk)
+        text = chunk.decode("utf-8", errors="replace")
+        trailing = 0
+        if text and not text.endswith("\n"):
+            # A writer may be mid-append; leave the partial line for next poll.
+            partial = text.rsplit("\n", 1)[-1]
+            trailing = len(partial.encode("utf-8"))
+            text = text[: len(text) - len(partial)]
+        for line in text.splitlines():
             if not line.strip():
                 continue
             try:
                 events.append(RunEvent(**json.loads(line)))
             except json.JSONDecodeError:
                 continue
-        return events
+        return events, new_offset - trailing
+
+    def run_status(self, case_name: str, run_id: str) -> str:
+        """Resolve the run status without building a full RunRecord."""
+        run_dir = self._run_dir(case_name, run_id)
+        if not run_dir.exists():
+            raise FileNotFoundError(f"Run '{run_id}' for case '{case_name}' was not found.")
+        status_payload = read_json(run_dir / "job_status.json", {})
+        status = status_payload.get("status") if isinstance(status_payload, Mapping) else None
+        return str(status) if status else infer_status_from_files(run_dir)
 
     def list_docs(self) -> list[DocSummary]:
         docs: list[DocSummary] = []

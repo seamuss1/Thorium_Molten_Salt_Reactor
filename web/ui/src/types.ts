@@ -101,6 +101,13 @@ export interface SimulationDraft {
   prefer_gpu: boolean;
 }
 
+export interface DraftValidationResponse {
+  valid: boolean;
+  message: string;
+  normalized_yaml?: string | null;
+  editable_parameters: EditableParameter[];
+}
+
 export interface AuthSession {
   email: string;
   is_admin: boolean;

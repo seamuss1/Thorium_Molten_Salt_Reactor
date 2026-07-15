@@ -35,6 +35,12 @@ services:
       THORIUM_REACTOR_ADMIN_EMAILS: "${THORIUM_REACTOR_ADMIN_EMAILS:-seamusdgallagher@gmail.com}"
       THORIUM_REACTOR_RATE_LIMIT_PER_DAY: "${THORIUM_REACTOR_RATE_LIMIT_PER_DAY:-1}"
       THORIUM_REACTOR_RATE_LIMIT_TIMEZONE: "${THORIUM_REACTOR_RATE_LIMIT_TIMEZONE:-America/New_York}"
+      # Required to trust the Access identity header when access is required:
+      # the access proxy must attach the same value as x-thorium-proxy-secret.
+      THORIUM_REACTOR_PROXY_SHARED_SECRET: "${THORIUM_REACTOR_PROXY_SHARED_SECRET:-}"
+      # Transport peers (IPs/CIDRs) allowed to use the anonymous local-dev
+      # fallback when access is required. Loopback is always trusted.
+      THORIUM_REACTOR_TRUSTED_CLIENT_ADDRS: "${THORIUM_REACTOR_TRUSTED_CLIENT_ADDRS:-}"
     command: ["uvicorn", "thorium_reactor.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "18488"]
     networks:
       default:

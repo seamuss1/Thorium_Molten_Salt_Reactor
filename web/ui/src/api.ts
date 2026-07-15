@@ -1,4 +1,14 @@
-import type { AuthSession, CaseDetail, CaseSummary, DocRecord, DocSummary, RateLimitRecord, RunRecord, SimulationDraft } from "./types";
+import type {
+  AuthSession,
+  CaseDetail,
+  CaseSummary,
+  DocRecord,
+  DocSummary,
+  DraftValidationResponse,
+  RateLimitRecord,
+  RunRecord,
+  SimulationDraft
+} from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -26,6 +36,11 @@ export const api = {
   run: (caseName: string, runId: string) => request<RunRecord>(`/api/runs/${caseName}/${runId}`),
   createRun: (draft: SimulationDraft) =>
     request<RunRecord>("/api/runs", { method: "POST", body: JSON.stringify(draft) }),
+  validateDraft: (caseName: string, patch: Record<string, unknown>) =>
+    request<DraftValidationResponse>(`/api/cases/${caseName}/validate-draft`, {
+      method: "POST",
+      body: JSON.stringify({ patch })
+    }),
   rateLimits: () => request<RateLimitRecord[]>("/api/admin/rate-limits"),
   resetRateLimit: (email: string) =>
     request<RateLimitRecord>(`/api/admin/rate-limits/${encodeURIComponent(email)}/reset`, { method: "POST" }),

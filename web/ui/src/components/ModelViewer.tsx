@@ -5,6 +5,7 @@ import { Layers, Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import { Vector3 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { viewableGeometryArtifact } from "../geometryArtifacts";
+import { prefersReducedMotion, useTheme } from "../theme";
 import type { ArtifactRef } from "../types";
 
 interface ModelViewerProps {
@@ -13,8 +14,10 @@ interface ModelViewerProps {
 
 export function ModelViewer({ artifacts }: ModelViewerProps) {
   const gltf = viewableGeometryArtifact(artifacts);
+  const { scheme } = useTheme();
   const [showGrid, setShowGrid] = useState(true);
   const [zoomCommand, setZoomCommand] = useState(0);
+  const dark = scheme === "dark";
 
   if (!gltf) {
     return <div className="empty-panel tall">This run has no viewable glTF geometry export.</div>;
@@ -37,11 +40,11 @@ export function ModelViewer({ artifacts }: ModelViewerProps) {
         </a>
       </div>
       <Canvas camera={{ position: [4, 3, 5], fov: 42 }} dpr={[1, 1.75]} gl={{ antialias: true, preserveDrawingBuffer: true }}>
-        <color attach="background" args={["#f6f8fa"]} />
-        <ambientLight intensity={0.7} />
+        <color attach="background" args={[dark ? "#111b1e" : "#f6f8fa"]} />
+        <ambientLight intensity={dark ? 0.9 : 0.7} />
         <directionalLight position={[5, 8, 5]} intensity={1.6} />
-        {showGrid && <gridHelper args={[8, 16, "#7c8a97", "#d2dbe3"]} position={[0, -1.2, 0]} />}
-        <Suspense fallback={<Html center>Loading geometry...</Html>}>
+        {showGrid && <gridHelper args={[8, 16, dark ? "#3a4a4d" : "#7c8a97", dark ? "#243033" : "#d2dbe3"]} position={[0, -1.2, 0]} />}
+        <Suspense fallback={<Html center>Loading geometry…</Html>}>
           <Bounds fit clip observe margin={1.2}>
             <ReactorScene url={gltf.url} />
           </Bounds>
@@ -72,7 +75,7 @@ function ViewerOrbitControls({ zoomCommand }: { zoomCommand: number }) {
     lastZoomCommand.current = zoomCommand;
   }, [camera, zoomCommand]);
 
-  return <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={0.08} />;
+  return <OrbitControls ref={controls} makeDefault enableDamping={!prefersReducedMotion()} dampingFactor={0.08} />;
 }
 
 function ReactorScene({ url }: { url: string }) {

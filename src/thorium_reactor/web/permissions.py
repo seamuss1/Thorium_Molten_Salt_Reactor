@@ -1,28 +1,32 @@
 from __future__ import annotations
 
+import contextlib
+import hmac
+import ipaddress
 import json
 import os
 import threading
+import time as time_module
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException, Request
 
 from thorium_reactor.web.schemas import AuthSession, RateLimitRecord
 
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
+
 
 OWNER_EMAIL = "seamusdgallagher@gmail.com"
 LOCAL_DEV_EMAIL = OWNER_EMAIL
-LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
-ACCESS_EMAIL_HEADERS = (
-    "cf-access-authenticated-user-email",
-    "x-authenticated-user-email",
-    "x-forwarded-email",
-    "x-user-email",
-)
+ACCESS_IDENTITY_HEADER = "cf-access-authenticated-user-email"
+PROXY_SECRET_HEADER = "x-thorium-proxy-secret"
 
 
 @dataclass(frozen=True)
@@ -37,15 +41,49 @@ class AccessController:
         self.admin_emails = configured_admin_emails()
         self.daily_limit = configured_daily_limit()
         self.access_required = truthy(os.environ.get("THORIUM_REACTOR_ACCESS_REQUIRED"))
+        self.proxy_secret = configured_proxy_secret()
+        self.trusted_client_networks = configured_trusted_client_networks()
         self.store = RateLimitStore(repo_root, daily_limit=self.daily_limit)
 
     def user_from_request(self, request: Request) -> AccessUser:
-        email = email_from_headers(request)
+        email = self.verified_email_from_headers(request)
         if email is None:
-            if self.access_required and not is_localhost_request(request):
-                raise HTTPException(status_code=401, detail="Cloudflare Access identity is required to start simulations.")
+            if self.access_required and not self.is_trusted_local_transport(request):
+                raise HTTPException(
+                    status_code=401,
+                    detail="A verified access identity is required to use this deployment.",
+                )
             email = normalize_email(os.environ.get("THORIUM_REACTOR_LOCAL_DEV_EMAIL", LOCAL_DEV_EMAIL))
         return AccessUser(email=email, is_admin=email in self.admin_emails)
+
+    def verified_email_from_headers(self, request: Request) -> str | None:
+        raw = request.headers.get(ACCESS_IDENTITY_HEADER)
+        if not raw:
+            return None
+        if not self.access_required:
+            # Development convenience only: without the access requirement the
+            # deployment is already treated as a trusted local lab.
+            return normalize_email(raw)
+        if self.proxy_secret is None:
+            # Fail closed: without a proxy shared secret there is no way to
+            # prove the identity header came from the trusted access proxy.
+            return None
+        presented = request.headers.get(PROXY_SECRET_HEADER, "")
+        if not hmac.compare_digest(presented.encode("utf-8"), self.proxy_secret.encode("utf-8")):
+            return None
+        return normalize_email(raw)
+
+    def is_trusted_local_transport(self, request: Request) -> bool:
+        client = request.client
+        if client is None or not client.host:
+            return False
+        try:
+            address = ipaddress.ip_address(client.host)
+        except ValueError:
+            return False
+        if address.is_loopback:
+            return True
+        return any(address in network for network in self.trusted_client_networks)
 
     def session_for(self, user: AccessUser) -> AuthSession:
         record = self.store.record_for(user.email)
@@ -84,12 +122,12 @@ class RateLimitStore:
         self._lock = threading.Lock()
 
     def record_for(self, email: str) -> RateLimitRecord:
-        with self._lock:
+        with self._exclusive():
             data = self._read()
             return self._record_from_payload(email, data.get("users", {}).get(email, {}))
 
     def claim(self, email: str) -> RateLimitRecord:
-        with self._lock:
+        with self._exclusive():
             data = self._read()
             users = data.setdefault("users", {})
             record = self._record_from_payload(email, users.get(email, {}))
@@ -113,7 +151,7 @@ class RateLimitStore:
             return self._record_from_payload(email, payload)
 
     def release(self, email: str) -> None:
-        with self._lock:
+        with self._exclusive():
             data = self._read()
             users = data.setdefault("users", {})
             record = self._record_from_payload(email, users.get(email, {}))
@@ -124,7 +162,7 @@ class RateLimitStore:
 
     def reset(self, email: str, *, reset_by: str) -> RateLimitRecord:
         normalized = normalize_email(email)
-        with self._lock:
+        with self._exclusive():
             data = self._read()
             users = data.setdefault("users", {})
             payload = {
@@ -143,10 +181,23 @@ class RateLimitStore:
             return self._record_from_payload(normalized, payload)
 
     def list_records(self) -> list[RateLimitRecord]:
-        with self._lock:
+        with self._exclusive():
             data = self._read()
             records = [self._record_from_payload(email, payload) for email, payload in data.get("users", {}).items()]
         return sorted(records, key=lambda record: record.email)
+
+    @contextlib.contextmanager
+    def _exclusive(self) -> Iterator[None]:
+        """Serialize read-modify-write cycles across threads and processes."""
+        with self._lock:
+            lock_path = self.path.with_suffix(f"{self.path.suffix}.lock")
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            with lock_path.open("a+b") as handle:
+                _lock_file_exclusive(handle)
+                try:
+                    yield
+                finally:
+                    _unlock_file(handle)
 
     def _record_from_payload(self, email: str, payload: dict[str, Any]) -> RateLimitRecord:
         date_key = self._date_key()
@@ -187,18 +238,25 @@ class RateLimitStore:
         temp_path.replace(self.path)
 
 
-def email_from_headers(request: Request) -> str | None:
-    for header in ACCESS_EMAIL_HEADERS:
-        value = request.headers.get(header)
-        if value:
-            return normalize_email(value)
-    return None
+def _lock_file_exclusive(handle: Any) -> None:
+    if os.name == "nt":
+        while True:
+            try:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                time_module.sleep(0.01)
+    else:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
 
 
-def is_localhost_request(request: Request) -> bool:
-    host = request.headers.get("host", "")
-    hostname = host.rsplit(":", 1)[0].strip("[]").lower()
-    return hostname in LOCAL_HOSTNAMES
+def _unlock_file(handle: Any) -> None:
+    if os.name == "nt":
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def configured_admin_emails() -> set[str]:
@@ -217,6 +275,27 @@ def configured_daily_limit() -> int:
         return max(int(raw), 1)
     except ValueError:
         return 1
+
+
+def configured_proxy_secret() -> str | None:
+    raw = os.environ.get("THORIUM_REACTOR_PROXY_SHARED_SECRET", "").strip()
+    return raw or None
+
+
+def configured_trusted_client_networks() -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    raw = os.environ.get("THORIUM_REACTOR_TRUSTED_CLIENT_ADDRS", "")
+    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for value in raw.replace(";", ",").split(","):
+        value = value.strip()
+        if not value:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(value, strict=False))
+        except ValueError as exc:
+            raise ValueError(
+                f"THORIUM_REACTOR_TRUSTED_CLIENT_ADDRS entry '{value}' is not a valid IP address or CIDR network."
+            ) from exc
+    return networks
 
 
 def configured_store_path(repo_root: Path) -> Path:
