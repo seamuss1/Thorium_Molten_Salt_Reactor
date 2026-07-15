@@ -41,9 +41,11 @@ from thorium_reactor.paths import (
     refresh_bundle_artifact_statuses,
     snapshot_bundle_artifacts,
 )
+from thorium_reactor.evidence import build_evidence_status, load_canonical_artifact_status
 from thorium_reactor.qa import build_requirements_summary
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot, load_plot_manifest
-from thorium_reactor.reporting.reports import generate_report
+from thorium_reactor.reporting.reports import build_presentation_qa, generate_report
+from thorium_reactor.sidecar_schemas import validate_bundle_sidecars
 from thorium_reactor.transient_sweep import DEFAULT_TRANSIENT_SWEEP_SAMPLES
 from thorium_reactor.uncertainty import DEFAULT_UNCERTAINTY_SWEEP_SAMPLES
 
@@ -77,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
         "report",
         "render",
         "benchmark",
+        "verify-bundle",
         "transient",
         "transient-sweep",
         *UNCERTAINTY_COMMANDS,
@@ -212,577 +215,610 @@ def main(argv: list[str] | None = None) -> int:
     stage_artifacts_before = snapshot_bundle_artifacts(bundle)
     stage_command = _stage_command_from_argv(effective_argv, args.command)
 
-    if args.command == "build":
-        built = build_case(config, bundle.openmc_dir, benchmark=benchmark)
-        bundle.write_json("geometry_description.json", built.geometry_description)
-        build_manifest = dict(built.manifest)
-        build_manifest["workflow_capabilities"] = sorted(get_case_capabilities(config))
-        build_manifest["visualization_state"] = _build_visualization_state(bundle)
-        build_manifest["input_provenance"] = provenance
-        bundle.write_json("build_manifest.json", build_manifest)
-        if built.model is not None:
-            built.model.export_to_xml(directory=str(bundle.openmc_dir))
-        artifact_status = refresh_bundle_artifact_statuses(bundle, summary={"neutronics": {"status": "dry-run"}})
-        build_manifest["artifact_status"] = artifact_status
-        bundle.write_json("build_manifest.json", build_manifest)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=build_manifest)
-        print(bundle.root)
-        return 0
+    try:
+        if args.command == "build":
+            built = build_case(config, bundle.openmc_dir, benchmark=benchmark)
+            bundle.write_json("geometry_description.json", built.geometry_description)
+            build_manifest = dict(built.manifest)
+            build_manifest["workflow_capabilities"] = sorted(get_case_capabilities(config))
+            build_manifest["visualization_state"] = _build_visualization_state(bundle)
+            build_manifest["input_provenance"] = provenance
+            bundle.write_json("build_manifest.json", build_manifest)
+            if built.model is not None:
+                built.model.export_to_xml(directory=str(bundle.openmc_dir))
+            artifact_status = refresh_bundle_artifact_statuses(bundle, summary={"neutronics": {"status": "dry-run"}})
+            build_manifest["artifact_status"] = artifact_status
+            bundle.write_json("build_manifest.json", build_manifest)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=build_manifest)
+            print(bundle.root)
+            return 0
 
-    if args.command == "run":
-        summary = run_case(
-            config,
-            bundle,
-            benchmark=benchmark,
-            solver_enabled=not args.no_solver,
-            provenance=provenance,
-            repo_root=repo_root,
-        )
-        print(bundle.root)
-        print(summary["neutronics"]["status"])
-        if summary["neutronics"].get("message"):
-            print(summary["neutronics"]["message"])
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
-        return 0
-
-    if args.command == "transient":
-        from thorium_reactor.transient import run_transient_case
-
-        summary_path = bundle.root / "summary.json"
-        if summary_path.exists():
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        else:
+        if args.command == "run":
             summary = run_case(
                 config,
                 bundle,
                 benchmark=benchmark,
-                solver_enabled=False,
+                solver_enabled=not args.no_solver,
                 provenance=provenance,
                 repo_root=repo_root,
             )
-        transient = run_transient_case(
-            config,
-            bundle,
-            summary,
-            scenario_name=args.scenario,
-            provenance=provenance,
-        )
-        bundle.write_json("summary.json", summary)
-        generate_summary_plots(bundle, summary)
-        refresh_bundle_artifact_statuses(bundle, summary=summary)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
-        print(bundle.root)
-        print(transient["metrics"]["peak_power_fraction"])
-        return 0
+            print(bundle.root)
+            print(summary["neutronics"]["status"])
+            if summary["neutronics"].get("message"):
+                print(summary["neutronics"]["message"])
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
+            return 0
 
-    if args.command == "transient-sweep":
-        from thorium_reactor.transient_sweep import run_transient_sweep_case
+        if args.command == "transient":
+            from thorium_reactor.transient import run_transient_case
 
-        summary_path = bundle.root / "summary.json"
-        if summary_path.exists():
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        else:
-            summary = run_case(
-                config,
-                bundle,
-                benchmark=benchmark,
-                solver_enabled=False,
-                provenance=provenance,
-                repo_root=repo_root,
-            )
-        transient_sweep = run_transient_sweep_case(
-            config,
-            bundle,
-            summary,
-            scenario_name=args.scenario,
-            samples=args.samples,
-            seed=args.seed,
-            prefer_gpu=args.prefer_gpu,
-            backend=args.backend,
-            dtype=args.dtype,
-            provenance=provenance,
-        )
-        bundle.write_json("summary.json", summary)
-        generate_summary_plots(bundle, summary)
-        refresh_bundle_artifact_statuses(bundle, summary=summary)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
-        print(bundle.root)
-        print(transient_sweep["backend"])
-        print(transient_sweep["metrics"]["peak_power_fraction_p95"])
-        return 0
-
-    if args.command == "uncertainty-sweep":
-        from thorium_reactor.uncertainty import run_docker_uncertainty_sweep, run_uncertainty_sweep_case
-
-        if args.docker_openmc and os.environ.get("THORIUM_REACTOR_RUNTIME_SERVICE") != "openmc":
-            execution = run_docker_uncertainty_sweep(
-                repo_root,
-                config.name,
-                bundle.run_id,
-                samples=args.samples,
-                seed=args.seed,
-                sampler=args.sampler,
-                max_parallel=args.max_parallel,
-                resume=args.resume,
-                require_source_backed=args.require_source_backed,
-            )
-            bundle.write_json("uncertainty_execution.json", execution)
-            if execution["returncode"] != 0:
-                raise RuntimeError(execution.get("stderr") or "Docker OpenMC uncertainty sweep failed.")
             summary_path = bundle.root / "summary.json"
-            if not summary_path.exists():
-                raise FileNotFoundError(
-                    f"No summary found for uncertainty sweep case '{config.name}' in {bundle.root}."
+            if summary_path.exists():
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            else:
+                summary = run_case(
+                    config,
+                    bundle,
+                    benchmark=benchmark,
+                    solver_enabled=False,
+                    provenance=provenance,
+                    repo_root=repo_root,
                 )
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        else:
-            summary = run_uncertainty_sweep_case(
-                repo_root,
+            transient = run_transient_case(
                 config,
                 bundle,
-                benchmark,
+                summary,
+                scenario_name=args.scenario,
+                provenance=provenance,
+            )
+            bundle.write_json("summary.json", summary)
+            generate_summary_plots(bundle, summary)
+            refresh_bundle_artifact_statuses(bundle, summary=summary)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
+            print(bundle.root)
+            print(transient["metrics"]["peak_power_fraction"])
+            return 0
+
+        if args.command == "transient-sweep":
+            from thorium_reactor.transient_sweep import run_transient_sweep_case
+
+            summary_path = bundle.root / "summary.json"
+            if summary_path.exists():
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            else:
+                summary = run_case(
+                    config,
+                    bundle,
+                    benchmark=benchmark,
+                    solver_enabled=False,
+                    provenance=provenance,
+                    repo_root=repo_root,
+                )
+            transient_sweep = run_transient_sweep_case(
+                config,
+                bundle,
+                summary,
+                scenario_name=args.scenario,
                 samples=args.samples,
                 seed=args.seed,
-                sampler=args.sampler,
-                max_parallel=args.max_parallel,
-                resume=args.resume,
-                require_source_backed=args.require_source_backed,
+                prefer_gpu=args.prefer_gpu,
+                backend=args.backend,
+                dtype=args.dtype,
                 provenance=provenance,
             )
-        validation = validate_case(config, bundle, summary=summary, benchmark=benchmark, provenance=provenance)
-        generate_validation_plot(bundle, validation)
-        plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
-        geometry_assets = None
-        summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
-        bundle.write_json("summary.json", summary)
-        report = generate_report(
-            config.name,
-            config.data,
-            bundle.root / "summary.json",
-            bundle.root / "validation.json",
-            None,
-            benchmark,
-            plot_assets,
-            provenance=provenance,
-        )
-        bundle.write_text("report.md", report)
-        summary = _refresh_benchmark_evidence(bundle, config.data, benchmark, provenance)
-        report = generate_report(
-            config.name,
-            config.data,
-            bundle.root / "summary.json",
-            bundle.root / "validation.json",
-            geometry_assets,
-            benchmark,
-            plot_assets,
-            provenance=provenance,
-        )
-        bundle.write_text("report.md", report)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
-        print(bundle.root)
-        print(summary.get("uncertainty_sweep", {}).get("coverage_status", "missing"))
-        return 0
+            bundle.write_json("summary.json", summary)
+            generate_summary_plots(bundle, summary)
+            refresh_bundle_artifact_statuses(bundle, summary=summary)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
+            print(bundle.root)
+            print(transient_sweep["backend"])
+            print(transient_sweep["metrics"]["peak_power_fraction_p95"])
+            return 0
 
-    if args.command == "runtime-benchmark":
-        from thorium_reactor.runtime_benchmark import parse_backend_list, run_runtime_benchmark_case
+        if args.command == "uncertainty-sweep":
+            from thorium_reactor.uncertainty import run_docker_uncertainty_sweep, run_uncertainty_sweep_case
 
-        summary_path = bundle.root / "summary.json"
-        if summary_path.exists():
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        else:
-            summary = run_case(
-                config,
-                bundle,
-                benchmark=benchmark,
-                solver_enabled=False,
-                provenance=provenance,
-                repo_root=repo_root,
-            )
-        runtime_benchmark = run_runtime_benchmark_case(
-            config,
-            bundle,
-            summary,
-            scenario_name=args.scenario,
-            samples=args.samples,
-            seed=args.seed,
-            backends=parse_backend_list(args.backends),
-            dtype=args.dtype,
-            fail_on_gpu_fallback=args.fail_on_gpu_fallback,
-            provenance=provenance,
-        )
-        refresh_bundle_artifact_statuses(bundle, summary=summary)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
-        print(bundle.root)
-        print(runtime_benchmark["recommendation"].get("backend"))
-        print(runtime_benchmark["recommendation"].get("speedup_vs_reference"))
-        return 0
-
-    if args.command == "transport":
-        from thorium_reactor.transport import run_transport_case
-
-        summary_path = bundle.root / "summary.json"
-        if summary_path.exists():
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        else:
-            summary = run_case(
-                config,
-                bundle,
-                benchmark=benchmark,
-                solver_enabled=False,
-                provenance=provenance,
-                repo_root=repo_root,
-            )
-        transport = run_transport_case(config, bundle, summary)
-        generate_summary_plots(bundle, summary)
-        refresh_bundle_artifact_statuses(bundle, summary=summary)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
-        print(bundle.root)
-        print(transport["status"])
-        print(transport["conservation_residual"])
-        return 0
-
-    if args.command == "deplete":
-        from thorium_reactor.depletion import run_depletion_case
-
-        summary_path = bundle.root / "summary.json"
-        if summary_path.exists():
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        else:
-            summary = run_case(
-                config,
-                bundle,
-                benchmark=benchmark,
-                solver_enabled=False,
-                provenance=provenance,
-                repo_root=repo_root,
-            )
-        depletion = run_depletion_case(config, bundle, summary)
-        generate_summary_plots(bundle, summary)
-        refresh_bundle_artifact_statuses(bundle, summary=summary)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
-        print(bundle.root)
-        print(depletion["status"])
-        print(depletion["atom_balance_residual"])
-        return 0
-
-    if args.command == "economics":
-        plan = run_economics_case(
-            config,
-            bundle,
-            scenario_name=args.scenario,
-            project_start=args.project_start,
-            force=args.force,
-        )
-        summary = json.loads((bundle.root / "summary.json").read_text(encoding="utf-8"))
-        generate_summary_plots(bundle, summary)
-        report_path = bundle.root / "report.md"
-        if report_path.exists():
-            validation_path = bundle.root / "validation.json"
-            geometry_assets = None
-            render_assets_path = bundle.root / "render_assets.json"
-            if render_assets_path.exists():
-                geometry_assets = json.loads(render_assets_path.read_text(encoding="utf-8"))
+            if args.docker_openmc and os.environ.get("THORIUM_REACTOR_RUNTIME_SERVICE") != "openmc":
+                execution = run_docker_uncertainty_sweep(
+                    repo_root,
+                    config.name,
+                    bundle.run_id,
+                    samples=args.samples,
+                    seed=args.seed,
+                    sampler=args.sampler,
+                    max_parallel=args.max_parallel,
+                    resume=args.resume,
+                    require_source_backed=args.require_source_backed,
+                )
+                bundle.write_json("uncertainty_execution.json", execution)
+                if execution["returncode"] != 0:
+                    raise RuntimeError(execution.get("stderr") or "Docker OpenMC uncertainty sweep failed.")
+                summary_path = bundle.root / "summary.json"
+                if not summary_path.exists():
+                    raise FileNotFoundError(
+                        f"No summary found for uncertainty sweep case '{config.name}' in {bundle.root}."
+                    )
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            else:
+                summary = run_uncertainty_sweep_case(
+                    repo_root,
+                    config,
+                    bundle,
+                    benchmark,
+                    samples=args.samples,
+                    seed=args.seed,
+                    sampler=args.sampler,
+                    max_parallel=args.max_parallel,
+                    resume=args.resume,
+                    require_source_backed=args.require_source_backed,
+                    provenance=provenance,
+                )
+            validation = validate_case(config, bundle, summary=summary, benchmark=benchmark, provenance=provenance)
+            generate_validation_plot(bundle, validation)
             plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
+            geometry_assets = None
             summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
             bundle.write_json("summary.json", summary)
             report = generate_report(
                 config.name,
                 config.data,
                 bundle.root / "summary.json",
-                validation_path if validation_path.exists() else None,
+                bundle.root / "validation.json",
+                None,
+                benchmark,
+                plot_assets,
+                provenance=provenance,
+            )
+            bundle.write_text("report.md", report)
+            summary = _refresh_benchmark_evidence(bundle, config.data, benchmark, provenance)
+            report = generate_report(
+                config.name,
+                config.data,
+                bundle.root / "summary.json",
+                bundle.root / "validation.json",
                 geometry_assets,
                 benchmark,
                 plot_assets,
                 provenance=provenance,
             )
             bundle.write_text("report.md", report)
-        else:
-            summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
-            bundle.write_json("summary.json", summary)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
-        print(bundle.root)
-        print(plan["status"])
-        if plan["finance"].get("status") == "completed":
-            print(plan["finance"]["outputs"]["lcoe_usd_per_mwh"])
-            print(plan["schedule"]["commercial_operation_date"])
-        return 0
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
+            print(bundle.root)
+            print(summary.get("uncertainty_sweep", {}).get("coverage_status", "missing"))
+            return 0
 
-    if args.command == "moose":
-        result = run_moose_integration(
-            config,
-            bundle,
-            benchmark=benchmark,
-            provenance=provenance,
-            execute=args.run_external,
-        )
-        summary_path = bundle.root / "summary.json"
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        persist_integration_result(bundle, summary, "moose", result)
-        refresh_bundle_artifact_statuses(bundle, summary=summary)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
-        print(bundle.root)
-        print(result["status"])
-        return 0
+        if args.command == "runtime-benchmark":
+            from thorium_reactor.runtime_benchmark import parse_backend_list, run_runtime_benchmark_case
 
-    if args.command == "scale":
-        result = run_scale_integration(
-            config,
-            bundle,
-            benchmark=benchmark,
-            provenance=provenance,
-            execute=args.run_external,
-        )
-        summary_path = bundle.root / "summary.json"
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        persist_integration_result(bundle, summary, "scale", result)
-        refresh_bundle_artifact_statuses(bundle, summary=summary)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
-        print(bundle.root)
-        print(result["status"])
-        return 0
-
-    if args.command == "thermochimica":
-        result = run_thermochimica_integration(
-            config,
-            bundle,
-            benchmark=benchmark,
-            provenance=provenance,
-            execute=args.run_external,
-        )
-        summary_path = bundle.root / "summary.json"
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        persist_integration_result(bundle, summary, "thermochimica", result)
-        refresh_bundle_artifact_statuses(bundle, summary=summary)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
-        print(bundle.root)
-        print(result["status"])
-        return 0
-
-    if args.command == "saltproc":
-        result = run_saltproc_integration(
-            config,
-            bundle,
-            benchmark=benchmark,
-            provenance=provenance,
-            execute=args.run_external,
-        )
-        summary_path = bundle.root / "summary.json"
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        persist_integration_result(bundle, summary, "saltproc", result)
-        refresh_bundle_artifact_statuses(bundle, summary=summary)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
-        print(bundle.root)
-        print(result["status"])
-        return 0
-
-    if args.command == "moltres":
-        result = run_moltres_integration(
-            config,
-            bundle,
-            benchmark=benchmark,
-            provenance=provenance,
-            execute=args.run_external,
-        )
-        summary_path = bundle.root / "summary.json"
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        persist_integration_result(bundle, summary, "moltres", result)
-        refresh_bundle_artifact_statuses(bundle, summary=summary)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
-        print(bundle.root)
-        print(result["status"])
-        return 0
-
-    if args.command == "validate":
-        result = validate_case(config, bundle, benchmark=benchmark, provenance=provenance)
-        summary_path = bundle.root / "summary.json"
-        summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {}
-        refresh_bundle_artifact_statuses(bundle, summary=summary)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status="completed" if result.get("passed") else "failed")
-        print(result["passed"])
-        return 0
-
-    if args.command == "render":
-        summary_path = bundle.root / "summary.json"
-        if not summary_path.exists():
-            raise FileNotFoundError(
-                f"No summary found for case '{config.name}' in {bundle.root}. "
-                "Run `reactor run <case>` first or specify an existing run id."
+            summary_path = bundle.root / "summary.json"
+            if summary_path.exists():
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            else:
+                summary = run_case(
+                    config,
+                    bundle,
+                    benchmark=benchmark,
+                    solver_enabled=False,
+                    provenance=provenance,
+                    repo_root=repo_root,
+                )
+            runtime_benchmark = run_runtime_benchmark_case(
+                config,
+                bundle,
+                summary,
+                scenario_name=args.scenario,
+                samples=args.samples,
+                seed=args.seed,
+                backends=parse_backend_list(args.backends),
+                dtype=args.dtype,
+                fail_on_gpu_fallback=args.fail_on_gpu_fallback,
+                provenance=provenance,
             )
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        validation_path = bundle.root / "validation.json"
-        if validation_path.exists():
-            validation = json.loads(validation_path.read_text(encoding="utf-8"))
-        else:
-            validation = validate_case(config, bundle, summary=summary, benchmark=benchmark, provenance=provenance)
-
-        geometry_description_path = bundle.root / "geometry_description.json"
-        if geometry_description_path.exists():
-            geometry_description = json.loads(geometry_description_path.read_text(encoding="utf-8"))
-        else:
-            built = build_case(config, bundle.openmc_dir, benchmark=benchmark)
-            geometry_description = built.geometry_description
-            bundle.write_json("geometry_description.json", geometry_description)
-
-        assets = export_geometry(
-            geometry_description,
-            bundle.geometry_exports_dir,
-            summary=summary,
-            validation=validation,
-        )
-        bundle.write_json("render_assets.json", assets)
-        summary["visualization_state"] = _build_visualization_state(bundle, assets=assets)
-        bundle.write_json("summary.json", summary)
-        build_manifest_path = bundle.root / "build_manifest.json"
-        if build_manifest_path.exists():
-            build_manifest = json.loads(build_manifest_path.read_text(encoding="utf-8"))
-            build_manifest["geometry_assets"] = assets
-            build_manifest["visualization_state"] = _build_visualization_state(bundle, assets=assets)
-            build_manifest["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
-            bundle.write_json("build_manifest.json", build_manifest)
-        else:
             refresh_bundle_artifact_statuses(bundle, summary=summary)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
-        print(json.dumps(assets, indent=2))
-        return 0
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
+            print(bundle.root)
+            print(runtime_benchmark["recommendation"].get("backend"))
+            print(runtime_benchmark["recommendation"].get("speedup_vs_reference"))
+            return 0
 
-    if args.command == "report":
-        summary_path = bundle.root / "summary.json"
-        if not summary_path.exists():
-            raise FileNotFoundError(
-                f"No summary found for case '{config.name}' in {bundle.root}. "
-                "Run `reactor run <case>` first or specify an existing run id."
+        if args.command == "transport":
+            from thorium_reactor.transport import run_transport_case
+
+            summary_path = bundle.root / "summary.json"
+            if summary_path.exists():
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            else:
+                summary = run_case(
+                    config,
+                    bundle,
+                    benchmark=benchmark,
+                    solver_enabled=False,
+                    provenance=provenance,
+                    repo_root=repo_root,
+                )
+            transport = run_transport_case(config, bundle, summary)
+            generate_summary_plots(bundle, summary)
+            refresh_bundle_artifact_statuses(bundle, summary=summary)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
+            print(bundle.root)
+            print(transport["status"])
+            print(transport["conservation_residual"])
+            return 0
+
+        if args.command == "deplete":
+            from thorium_reactor.depletion import run_depletion_case
+
+            summary_path = bundle.root / "summary.json"
+            if summary_path.exists():
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            else:
+                summary = run_case(
+                    config,
+                    bundle,
+                    benchmark=benchmark,
+                    solver_enabled=False,
+                    provenance=provenance,
+                    repo_root=repo_root,
+                )
+            depletion = run_depletion_case(config, bundle, summary)
+            generate_summary_plots(bundle, summary)
+            refresh_bundle_artifact_statuses(bundle, summary=summary)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
+            print(bundle.root)
+            print(depletion["status"])
+            print(depletion["atom_balance_residual"])
+            return 0
+
+        if args.command == "economics":
+            plan = run_economics_case(
+                config,
+                bundle,
+                scenario_name=args.scenario,
+                project_start=args.project_start,
+                force=args.force,
             )
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        generate_summary_plots(bundle, summary)
-        validation_path = bundle.root / "validation.json"
-        needs_validation = not validation_path.exists()
-        if validation_path.exists():
-            try:
-                json.loads(validation_path.read_text(encoding="utf-8"))
-            except JSONDecodeError:
-                needs_validation = True
-        if needs_validation:
-            validate_case(config, bundle, summary=summary, benchmark=benchmark, provenance=provenance)
-        validation = json.loads(validation_path.read_text(encoding="utf-8"))
-        generate_validation_plot(bundle, validation)
-        geometry_assets = None
-        render_assets_path = bundle.root / "render_assets.json"
-        if render_assets_path.exists():
-            geometry_assets = json.loads(render_assets_path.read_text(encoding="utf-8"))
-        else:
-            build_manifest_path = bundle.root / "build_manifest.json"
-            if build_manifest_path.exists():
-                build_manifest = json.loads(build_manifest_path.read_text(encoding="utf-8"))
-                geometry_assets = build_manifest.get("geometry_assets")
-        plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
-        summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
-        bundle.write_json("summary.json", summary)
-        report = generate_report(
-            config.name,
-            config.data,
-            summary_path,
-            validation_path,
-            geometry_assets,
-            benchmark,
-            plot_assets,
-            provenance=provenance,
-        )
-        report_path = bundle.write_text("report.md", report)
-        summary = _refresh_benchmark_evidence(bundle, config.data, benchmark, provenance)
-        report = generate_report(
-            config.name,
-            config.data,
-            summary_path,
-            validation_path,
-            geometry_assets,
-            benchmark,
-            plot_assets,
-            provenance=provenance,
-        )
-        report_path = bundle.write_text("report.md", report)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
-        print(report_path)
-        return 0
+            summary = json.loads((bundle.root / "summary.json").read_text(encoding="utf-8"))
+            generate_summary_plots(bundle, summary)
+            report_path = bundle.root / "report.md"
+            if report_path.exists():
+                validation_path = bundle.root / "validation.json"
+                geometry_assets = None
+                render_assets_path = bundle.root / "render_assets.json"
+                if render_assets_path.exists():
+                    geometry_assets = json.loads(render_assets_path.read_text(encoding="utf-8"))
+                plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
+                summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
+                bundle.write_json("summary.json", summary)
+                report = generate_report(
+                    config.name,
+                    config.data,
+                    bundle.root / "summary.json",
+                    validation_path if validation_path.exists() else None,
+                    geometry_assets,
+                    benchmark,
+                    plot_assets,
+                    provenance=provenance,
+                )
+                bundle.write_text("report.md", report)
+            else:
+                summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
+                bundle.write_json("summary.json", summary)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
+            print(bundle.root)
+            print(plan["status"])
+            if plan["finance"].get("status") == "completed":
+                print(plan["finance"]["outputs"]["lcoe_usd_per_mwh"])
+                print(plan["schedule"]["commercial_operation_date"])
+            return 0
 
-    if args.command == "benchmark":
-        docker_status = get_docker_runtime_status() if (args.docker_openmc or openmc is None) else None
-        runtime, error_message = resolve_benchmark_runtime(
-            docker_requested=args.docker_openmc,
-            local_openmc_available=openmc is not None,
-            docker_status=docker_status,
-        )
-        if runtime == "docker":
-            execution = run_solver_backed_benchmark(repo_root, config.name, bundle.run_id)
-            bundle.write_json("benchmark_execution.json", execution)
-        elif runtime == "local":
-            summary = run_case(
+        if args.command == "moose":
+            result = run_moose_integration(
                 config,
                 bundle,
                 benchmark=benchmark,
-                solver_enabled=True,
                 provenance=provenance,
+                execute=args.run_external,
                 repo_root=repo_root,
             )
-            bundle.write_json(
-                "benchmark_execution.json",
-                {
-                    "runtime": "local-openmc",
-                    "summary_status": summary.get("neutronics", {}).get("status"),
-                },
-            )
-        else:
-            raise RuntimeError(error_message or missing_openmc_runtime_message(command_name="benchmark"))
+            summary_path = bundle.root / "summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            persist_integration_result(bundle, summary, "moose", result)
+            refresh_bundle_artifact_statuses(bundle, summary=summary)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
+            print(bundle.root)
+            print(result["status"])
+            return 0
 
-        summary_path = bundle.root / "summary.json"
-        if not summary_path.exists():
-            raise FileNotFoundError(
-                f"No summary found for benchmark case '{config.name}' in {bundle.root}. "
-                "The solver-backed benchmark run did not produce a summary bundle."
+        if args.command == "scale":
+            result = run_scale_integration(
+                config,
+                bundle,
+                benchmark=benchmark,
+                provenance=provenance,
+                execute=args.run_external,
+                repo_root=repo_root,
             )
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        generate_summary_plots(bundle, summary)
-        validation = validate_case(config, bundle, summary=summary, benchmark=benchmark, provenance=provenance)
-        generate_validation_plot(bundle, validation)
-        geometry_assets = None
-        render_assets_path = bundle.root / "render_assets.json"
-        if render_assets_path.exists():
-            geometry_assets = json.loads(render_assets_path.read_text(encoding="utf-8"))
-        else:
+            summary_path = bundle.root / "summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            persist_integration_result(bundle, summary, "scale", result)
+            refresh_bundle_artifact_statuses(bundle, summary=summary)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
+            print(bundle.root)
+            print(result["status"])
+            return 0
+
+        if args.command == "thermochimica":
+            result = run_thermochimica_integration(
+                config,
+                bundle,
+                benchmark=benchmark,
+                provenance=provenance,
+                execute=args.run_external,
+                repo_root=repo_root,
+            )
+            summary_path = bundle.root / "summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            persist_integration_result(bundle, summary, "thermochimica", result)
+            refresh_bundle_artifact_statuses(bundle, summary=summary)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
+            print(bundle.root)
+            print(result["status"])
+            return 0
+
+        if args.command == "saltproc":
+            result = run_saltproc_integration(
+                config,
+                bundle,
+                benchmark=benchmark,
+                provenance=provenance,
+                execute=args.run_external,
+                repo_root=repo_root,
+            )
+            summary_path = bundle.root / "summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            persist_integration_result(bundle, summary, "saltproc", result)
+            refresh_bundle_artifact_statuses(bundle, summary=summary)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
+            print(bundle.root)
+            print(result["status"])
+            return 0
+
+        if args.command == "moltres":
+            result = run_moltres_integration(
+                config,
+                bundle,
+                benchmark=benchmark,
+                provenance=provenance,
+                execute=args.run_external,
+                repo_root=repo_root,
+            )
+            summary_path = bundle.root / "summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            persist_integration_result(bundle, summary, "moltres", result)
+            refresh_bundle_artifact_statuses(bundle, summary=summary)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
+            print(bundle.root)
+            print(result["status"])
+            return 0
+
+        if args.command == "validate":
+            result = validate_case(config, bundle, benchmark=benchmark, provenance=provenance)
+            summary_path = bundle.root / "summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {}
+            refresh_bundle_artifact_statuses(bundle, summary=summary)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status="completed" if result.get("passed") else "failed")
+            print(result["passed"])
+            return 0
+
+        if args.command == "render":
+            summary_path = bundle.root / "summary.json"
+            if not summary_path.exists():
+                raise FileNotFoundError(
+                    f"No summary found for case '{config.name}' in {bundle.root}. "
+                    "Run `reactor run <case>` first or specify an existing run id."
+                )
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            validation_path = bundle.root / "validation.json"
+            if validation_path.exists():
+                validation = json.loads(validation_path.read_text(encoding="utf-8"))
+            else:
+                validation = validate_case(config, bundle, summary=summary, benchmark=benchmark, provenance=provenance)
+
+            geometry_description_path = bundle.root / "geometry_description.json"
+            if geometry_description_path.exists():
+                geometry_description = json.loads(geometry_description_path.read_text(encoding="utf-8"))
+            else:
+                built = build_case(config, bundle.openmc_dir, benchmark=benchmark)
+                geometry_description = built.geometry_description
+                bundle.write_json("geometry_description.json", geometry_description)
+
+            assets = export_geometry(
+                geometry_description,
+                bundle.geometry_exports_dir,
+                summary=summary,
+                validation=validation,
+            )
+            bundle.write_json("render_assets.json", assets)
+            summary["visualization_state"] = _build_visualization_state(bundle, assets=assets)
+            bundle.write_json("summary.json", summary)
             build_manifest_path = bundle.root / "build_manifest.json"
             if build_manifest_path.exists():
                 build_manifest = json.loads(build_manifest_path.read_text(encoding="utf-8"))
-                geometry_assets = build_manifest.get("geometry_assets")
-        plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
-        summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
-        bundle.write_json("summary.json", summary)
-        report = generate_report(
-            config.name,
-            config.data,
-            summary_path,
-            bundle.root / "validation.json",
-            geometry_assets,
-            benchmark,
-            plot_assets,
-            provenance=provenance,
-        )
-        bundle.write_text("report.md", report)
-        summary = _refresh_benchmark_evidence(bundle, config.data, benchmark, provenance)
-        report = generate_report(
-            config.name,
-            config.data,
-            bundle.root / "summary.json",
-            bundle.root / "validation.json",
-            geometry_assets,
-            benchmark,
-            plot_assets,
-            provenance=provenance,
-        )
-        bundle.write_text("report.md", report)
-        _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
-        print(bundle.root)
-        return 0
+                build_manifest["geometry_assets"] = assets
+                build_manifest["visualization_state"] = _build_visualization_state(bundle, assets=assets)
+                build_manifest["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
+                bundle.write_json("build_manifest.json", build_manifest)
+            else:
+                refresh_bundle_artifact_statuses(bundle, summary=summary)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
+            print(json.dumps(assets, indent=2))
+            return 0
 
-    return 1
+        if args.command == "report":
+            summary_path = bundle.root / "summary.json"
+            if not summary_path.exists():
+                raise FileNotFoundError(
+                    f"No summary found for case '{config.name}' in {bundle.root}. "
+                    "Run `reactor run <case>` first or specify an existing run id."
+                )
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            generate_summary_plots(bundle, summary)
+            validation_path = bundle.root / "validation.json"
+            needs_validation = not validation_path.exists()
+            if validation_path.exists():
+                try:
+                    json.loads(validation_path.read_text(encoding="utf-8"))
+                except JSONDecodeError:
+                    needs_validation = True
+            if needs_validation:
+                validate_case(config, bundle, summary=summary, benchmark=benchmark, provenance=provenance)
+            validation = json.loads(validation_path.read_text(encoding="utf-8"))
+            generate_validation_plot(bundle, validation)
+            geometry_assets = None
+            render_assets_path = bundle.root / "render_assets.json"
+            if render_assets_path.exists():
+                geometry_assets = json.loads(render_assets_path.read_text(encoding="utf-8"))
+            else:
+                build_manifest_path = bundle.root / "build_manifest.json"
+                if build_manifest_path.exists():
+                    build_manifest = json.loads(build_manifest_path.read_text(encoding="utf-8"))
+                    geometry_assets = build_manifest.get("geometry_assets")
+            plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
+            summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
+            bundle.write_json("summary.json", summary)
+            report = generate_report(
+                config.name,
+                config.data,
+                summary_path,
+                validation_path,
+                geometry_assets,
+                benchmark,
+                plot_assets,
+                provenance=provenance,
+            )
+            report_path = bundle.write_text("report.md", report)
+            summary = _refresh_benchmark_evidence(bundle, config.data, benchmark, provenance)
+            report = generate_report(
+                config.name,
+                config.data,
+                summary_path,
+                validation_path,
+                geometry_assets,
+                benchmark,
+                plot_assets,
+                provenance=provenance,
+            )
+            report_path = bundle.write_text("report.md", report)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
+            print(report_path)
+            return 0
+
+        if args.command == "benchmark":
+            docker_status = get_docker_runtime_status() if (args.docker_openmc or openmc is None) else None
+            runtime, error_message = resolve_benchmark_runtime(
+                docker_requested=args.docker_openmc,
+                local_openmc_available=openmc is not None,
+                docker_status=docker_status,
+            )
+            if runtime == "docker":
+                execution = run_solver_backed_benchmark(repo_root, config.name, bundle.run_id)
+                bundle.write_json("benchmark_execution.json", execution)
+            elif runtime == "local":
+                summary = run_case(
+                    config,
+                    bundle,
+                    benchmark=benchmark,
+                    solver_enabled=True,
+                    provenance=provenance,
+                    repo_root=repo_root,
+                )
+                bundle.write_json(
+                    "benchmark_execution.json",
+                    {
+                        "runtime": "local-openmc",
+                        "summary_status": summary.get("neutronics", {}).get("status"),
+                    },
+                )
+            else:
+                raise RuntimeError(error_message or missing_openmc_runtime_message(command_name="benchmark"))
+
+            summary_path = bundle.root / "summary.json"
+            if not summary_path.exists():
+                raise FileNotFoundError(
+                    f"No summary found for benchmark case '{config.name}' in {bundle.root}. "
+                    "The solver-backed benchmark run did not produce a summary bundle."
+                )
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            generate_summary_plots(bundle, summary)
+            validation = validate_case(config, bundle, summary=summary, benchmark=benchmark, provenance=provenance)
+            generate_validation_plot(bundle, validation)
+            geometry_assets = None
+            render_assets_path = bundle.root / "render_assets.json"
+            if render_assets_path.exists():
+                geometry_assets = json.loads(render_assets_path.read_text(encoding="utf-8"))
+            else:
+                build_manifest_path = bundle.root / "build_manifest.json"
+                if build_manifest_path.exists():
+                    build_manifest = json.loads(build_manifest_path.read_text(encoding="utf-8"))
+                    geometry_assets = build_manifest.get("geometry_assets")
+            plot_assets = load_plot_manifest(bundle.root / "plots_manifest.json")
+            summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
+            bundle.write_json("summary.json", summary)
+            report = generate_report(
+                config.name,
+                config.data,
+                summary_path,
+                bundle.root / "validation.json",
+                geometry_assets,
+                benchmark,
+                plot_assets,
+                provenance=provenance,
+            )
+            bundle.write_text("report.md", report)
+            summary = _refresh_benchmark_evidence(bundle, config.data, benchmark, provenance)
+            report = generate_report(
+                config.name,
+                config.data,
+                bundle.root / "summary.json",
+                bundle.root / "validation.json",
+                geometry_assets,
+                benchmark,
+                plot_assets,
+                provenance=provenance,
+            )
+            bundle.write_text("report.md", report)
+            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
+            print(bundle.root)
+            return 0
+
+        if args.command == "verify-bundle":
+            failures = _verify_bundle_evidence_contract(bundle)
+            if failures:
+                for failure in failures:
+                    print(f"FAIL: {failure}", file=sys.stderr)
+                raise SystemExit(1)
+            print(f"Bundle evidence contract OK: {bundle.root}")
+            return 0
+
+        return 1
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001 - record a failed stage then re-raise.
+        try:
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                status="failed",
+                repo_root=repo_root,
+                message=str(exc),
+            )
+        except Exception:  # noqa: BLE001 - never mask the original failure.
+            pass
+        raise
 
 
 def _refresh_benchmark_evidence(
@@ -888,6 +924,43 @@ def _replace_validation_benchmark_quality_checks(
     validation["passed"] = all(check.get("status") == "pass" for check in checks)
     bundle.write_json("validation.json", validation)
 
+def _verify_bundle_evidence_contract(bundle: ResultBundle) -> list[str]:
+    """Return trust-contract failures for a generated bundle (empty means OK).
+
+    Fails closed when sidecars are invalid, presentation QA fails, the summary's
+    embedded artifact status is stale relative to the canonical sidecar, or the
+    report overclaims solver-backed/benchmark-ready/build-candidate status.
+    """
+    failures: list[str] = []
+    failures.extend(validate_bundle_sidecars(bundle.root))
+
+    summary_path = bundle.root / "summary.json"
+    summary: dict[str, object] = {}
+    if summary_path.exists():
+        try:
+            loaded = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary = loaded if isinstance(loaded, dict) else {}
+        except JSONDecodeError:
+            failures.append("summary.json is not valid JSON.")
+
+    embedded = summary.get("artifact_status")
+    canonical = load_canonical_artifact_status(bundle.root, {})
+    if isinstance(embedded, dict) and canonical and embedded != canonical:
+        failures.append("summary.json artifact_status is stale relative to artifact_status.json.")
+
+    report_path = bundle.root / "report.md"
+    if report_path.exists():
+        qa = build_presentation_qa(bundle.root, report_text=report_path.read_text(encoding="utf-8"))
+        for check in qa.get("checks", []):
+            if check.get("status") != "pass":
+                failures.append(f"presentation QA check failed: {check.get('name')} ({check.get('detail', '')})")
+
+    evidence = build_evidence_status(bundle.root, summary)
+    if evidence["blockers"] and evidence["claim_tier"] == "solver_backed":
+        failures.append("evidence gate reports solver-backed claim tier while blockers remain.")
+    return failures
+
+
 def _load_or_create_bundle(repo_root: Path, case_name: str, run_id: str | None, *, allow_existing: bool = False) -> ResultBundle:
     if run_id is None:
         return create_result_bundle(repo_root, case_name)
@@ -931,9 +1004,11 @@ def _finish_cli_stage(
     summary: dict[str, object] | None = None,
     status: str | None = None,
     repo_root: Path | None = None,
+    message: str | None = None,
 ) -> None:
+    summary = summary if isinstance(summary, dict) else {}
+    _persist_refreshed_artifact_status(bundle, summary)
     after = snapshot_bundle_artifacts(bundle)
-    summary = summary or {}
     stage_repo_root = repo_root or _repo_root_from_bundle(bundle)
     append_stage_manifest(
         bundle,
@@ -946,7 +1021,36 @@ def _finish_cli_stage(
         output_artifacts=sorted(changed_bundle_artifacts(artifacts_before, after)),
         method_tier=_method_tier_from_summary(summary),
         repo_root=stage_repo_root,
+        message=message,
     )
+
+
+def _persist_refreshed_artifact_status(bundle: ResultBundle, summary: dict[str, object]) -> dict[str, object]:
+    """Refresh the canonical artifact-status sidecar and keep summary.json in sync.
+
+    Every CLI stage funnels through here so no branch can leave a stale
+    ``summary["artifact_status"]`` behind a fresher ``artifact_status.json``.
+    """
+    summary_path = bundle.root / "summary.json"
+    status_summary = summary
+    if not status_summary and summary_path.exists():
+        try:
+            loaded = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, JSONDecodeError):
+            loaded = None
+        if isinstance(loaded, dict):
+            status_summary = loaded
+    artifact_status = refresh_bundle_artifact_statuses(bundle, summary=status_summary)
+    summary["artifact_status"] = artifact_status
+    if summary_path.exists():
+        try:
+            persisted = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, JSONDecodeError):
+            persisted = None
+        if isinstance(persisted, dict) and persisted.get("artifact_status") != artifact_status:
+            persisted["artifact_status"] = artifact_status
+            bundle.write_json("summary.json", persisted)
+    return artifact_status
 
 
 def _repo_root_from_bundle(bundle: ResultBundle) -> Path | None:

@@ -1,6 +1,8 @@
 name: MSRE OpenMC benchmark
 
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -38,6 +40,15 @@ jobs:
         shell: bash
         run: docker compose run --rm app python -m thorium_reactor.cli qa --format json
 
+      - name: Run readiness and provenance trust-contract tests
+        shell: bash
+        run: |
+          docker compose run --rm app python -m pytest \
+            tests/test_evidence_contract.py \
+            tests/test_reporting.py \
+            tests/test_paths.py \
+            tests/test_runtime_context.py -q
+
       - name: Generate dry-run MSRE report bundle
         shell: bash
         run: |
@@ -45,6 +56,12 @@ jobs:
             --run-id "${PREFLIGHT_RUN_ID}" --no-solver
           docker compose run --rm app python -m thorium_reactor.cli report "${CASE_NAME}" \
             --run-id "${PREFLIGHT_RUN_ID}"
+
+      - name: Verify generated bundle evidence contract agrees
+        shell: bash
+        run: |
+          docker compose run --rm app python -m thorium_reactor.cli verify-bundle \
+            "${CASE_NAME}" --run-id "${PREFLIGHT_RUN_ID}"
 
       - name: Upload dry-run preflight bundle
         if: always()

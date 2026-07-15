@@ -1,5 +1,7 @@
 from pathlib import Path
 import json
+import os
+import time
 
 import pytest
 
@@ -7,9 +9,25 @@ from thorium_reactor.paths import (
     append_stage_manifest,
     changed_bundle_artifacts,
     create_result_bundle,
+    latest_result_bundle,
     refresh_bundle_artifact_statuses,
     snapshot_bundle_artifacts,
 )
+
+
+def test_latest_result_bundle_prefers_newest_run_regardless_of_run_id_format(tmp_path: Path) -> None:
+    old = create_result_bundle(tmp_path, "layout_case", "20260101-000000-000001-aaaaaaaa")
+    web = create_result_bundle(tmp_path, "layout_case", "web-demo")
+    newest = create_result_bundle(tmp_path, "layout_case", "20260102-000000-000001-bbbbbbbb")
+
+    base = time.time()
+    os.utime(old.root, (base - 300, base - 300))
+    os.utime(web.root, (base - 200, base - 200))
+    os.utime(newest.root, (base - 100, base - 100))
+    assert latest_result_bundle(tmp_path, "layout_case").run_id == newest.run_id
+
+    os.utime(web.root, (base, base))
+    assert latest_result_bundle(tmp_path, "layout_case").run_id == "web-demo"
 
 def test_result_bundle_creates_dedicated_geometry_exports_dir(tmp_path: Path) -> None:
     repo_root = tmp_path / "bundle-layout-test"
