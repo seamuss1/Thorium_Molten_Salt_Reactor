@@ -348,6 +348,37 @@ def test_external_integration_commands_export_inputs_and_update_summary() -> Non
         shutil.rmtree(scratch_root, ignore_errors=True)
 
 
+def test_integration_runtime_provenance_uses_explicit_repo_root(monkeypatch) -> None:
+    import thorium_reactor.integrations as integrations
+
+    scratch_root = REPO_ROOT / ".tmp" / "test-integration-repo-root" / uuid.uuid4().hex
+    case_dir = scratch_root / "configs" / "cases" / "immersed_pool_reference"
+    benchmark_dir = scratch_root / "benchmarks" / "tmsr_lf1"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    benchmark_dir.mkdir(parents=True, exist_ok=True)
+    captured: list[Path | None] = []
+
+    real_build_runtime_context = integrations.build_runtime_context
+
+    def _spy(*, command=None, cwd=None):
+        captured.append(cwd)
+        return real_build_runtime_context(command=command, cwd=cwd)
+
+    monkeypatch.setattr(integrations, "build_runtime_context", _spy)
+    try:
+        shutil.copy2(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml", case_dir / "case.yaml")
+        shutil.copy2(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", benchmark_dir / "benchmark.yaml")
+
+        exit_code = main(["--repo-root", str(scratch_root), "thermochimica", "immersed_pool_reference", "--run-id", "repo-root"])
+        assert exit_code == 0
+
+        # The integration must describe the target repo, not the process cwd.
+        assert captured, "build_runtime_context was never called"
+        assert all(cwd == scratch_root.resolve() for cwd in captured), captured
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
 def test_render_command_uses_existing_run_state_and_emits_visual_assets() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-render-command" / uuid.uuid4().hex
     case_dir = scratch_root / "configs" / "cases" / "immersed_pool_reference"

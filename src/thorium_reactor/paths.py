@@ -224,10 +224,12 @@ def latest_result_bundle(repo_root: Path, case_name: str) -> ResultBundle:
     case_root = repo_root / "results" / resolved_case_name
     if not case_root.exists():
         raise FileNotFoundError(f"No results found for case '{resolved_case_name}'.")
-    candidates = sorted([path for path in case_root.iterdir() if path.is_dir()])
+    candidates = [path for path in case_root.iterdir() if path.is_dir()]
     if not candidates:
         raise FileNotFoundError(f"No runs found for case '{resolved_case_name}'.")
-    latest = candidates[-1]
+    # Newest by modification time so arbitrary run-id formats (web-*, CI ids)
+    # never outrank a newer timestamped run; ties fall back to the name.
+    latest = max(candidates, key=lambda path: (path.stat().st_mtime, path.name))
     return ResultBundle(
         case_name=resolved_case_name,
         run_id=latest.name,

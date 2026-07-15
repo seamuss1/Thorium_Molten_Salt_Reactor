@@ -57,12 +57,13 @@ def run_named_integration(
     benchmark: dict[str, Any] | None = None,
     provenance: dict[str, Any] | None = None,
     execute: bool = False,
+    repo_root: Path | None = None,
 ) -> dict[str, Any]:
     definition = _integration_definition(name)
     built = build_case(config, bundle.openmc_dir, benchmark=benchmark)
-    summary = _ensure_summary(config, bundle, benchmark=benchmark, provenance=provenance)
+    summary = _ensure_summary(config, bundle, benchmark=benchmark, provenance=provenance, repo_root=repo_root)
     settings = _integration_settings(config, name)
-    runtime_context = build_runtime_context(command=[name, config.name])
+    runtime_context = build_runtime_context(command=[name, config.name], cwd=repo_root)
     input_path = bundle.root / definition["input_name"]
     handoff_path = bundle.root / definition["handoff_name"]
     rendered_input = _render_integration_input(name, config, summary, built.manifest, built.geometry_description, settings)
@@ -121,6 +122,7 @@ def run_moose_integration(
     benchmark: dict[str, Any] | None = None,
     provenance: dict[str, Any] | None = None,
     execute: bool = False,
+    repo_root: Path | None = None,
 ) -> dict[str, Any]:
     return run_named_integration(
         "moose",
@@ -129,6 +131,7 @@ def run_moose_integration(
         benchmark=benchmark,
         provenance=provenance,
         execute=execute,
+        repo_root=repo_root,
     )
 
 
@@ -139,6 +142,7 @@ def run_scale_integration(
     benchmark: dict[str, Any] | None = None,
     provenance: dict[str, Any] | None = None,
     execute: bool = False,
+    repo_root: Path | None = None,
 ) -> dict[str, Any]:
     return run_named_integration(
         "scale",
@@ -147,6 +151,7 @@ def run_scale_integration(
         benchmark=benchmark,
         provenance=provenance,
         execute=execute,
+        repo_root=repo_root,
     )
 
 
@@ -157,6 +162,7 @@ def run_thermochimica_integration(
     benchmark: dict[str, Any] | None = None,
     provenance: dict[str, Any] | None = None,
     execute: bool = False,
+    repo_root: Path | None = None,
 ) -> dict[str, Any]:
     return run_named_integration(
         "thermochimica",
@@ -165,6 +171,7 @@ def run_thermochimica_integration(
         benchmark=benchmark,
         provenance=provenance,
         execute=execute,
+        repo_root=repo_root,
     )
 
 
@@ -175,6 +182,7 @@ def run_saltproc_integration(
     benchmark: dict[str, Any] | None = None,
     provenance: dict[str, Any] | None = None,
     execute: bool = False,
+    repo_root: Path | None = None,
 ) -> dict[str, Any]:
     return run_named_integration(
         "saltproc",
@@ -183,6 +191,7 @@ def run_saltproc_integration(
         benchmark=benchmark,
         provenance=provenance,
         execute=execute,
+        repo_root=repo_root,
     )
 
 
@@ -193,6 +202,7 @@ def run_moltres_integration(
     benchmark: dict[str, Any] | None = None,
     provenance: dict[str, Any] | None = None,
     execute: bool = False,
+    repo_root: Path | None = None,
 ) -> dict[str, Any]:
     return run_named_integration(
         "moltres",
@@ -201,6 +211,7 @@ def run_moltres_integration(
         benchmark=benchmark,
         provenance=provenance,
         execute=execute,
+        repo_root=repo_root,
     )
 
 
@@ -217,6 +228,7 @@ def _ensure_summary(
     *,
     benchmark: dict[str, Any] | None,
     provenance: dict[str, Any] | None,
+    repo_root: Path | None = None,
 ) -> dict[str, Any]:
     summary_path = bundle.root / "summary.json"
     if summary_path.exists():
@@ -227,6 +239,7 @@ def _ensure_summary(
         benchmark=benchmark,
         solver_enabled=False,
         provenance=provenance,
+        repo_root=repo_root,
     )
 
 

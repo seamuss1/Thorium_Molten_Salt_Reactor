@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from thorium_reactor.benchmarking import assess_benchmark_traceability
+from thorium_reactor.evidence import build_evidence_status
 from thorium_reactor.reporting.plots import load_figure_catalog
+from thorium_reactor.sidecar_schemas import validate_bundle_sidecars
 
 
 def generate_report(
@@ -25,7 +27,9 @@ def generate_report(
 ) -> str:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     artifact_status_path = summary_path.parent / "artifact_status.json"
-    if "artifact_status" not in summary and artifact_status_path.exists():
+    if artifact_status_path.exists():
+        # The sidecar is canonical: later commands refresh it without always
+        # rewriting summary.json, so an embedded copy may be stale.
         try:
             summary["artifact_status"] = json.loads(artifact_status_path.read_text(encoding="utf-8"))
         except JSONDecodeError:
@@ -1623,6 +1627,7 @@ def build_presentation_qa(bundle_dir: Path, report_text: str | None = None) -> d
     _qa_figure_manifest(checks, bundle_dir)
     _qa_dry_run_warning(checks, bundle_dir, report_text)
     _qa_status_contradictions(checks, bundle_dir, report_text)
+    _qa_sidecar_schemas(checks, bundle_dir)
     passed = all(check["status"] == "pass" for check in checks)
     return {"passed": passed, "checks": checks}
 
@@ -1710,16 +1715,32 @@ def _qa_dry_run_warning(checks: list[dict[str, Any]], bundle_dir: Path, report_t
 
 def _qa_status_contradictions(checks: list[dict[str, Any]], bundle_dir: Path, report_text: str) -> None:
     summary = _read_json(bundle_dir / "summary.json")
-    status = str(summary.get("neutronics", {}).get("status", "")).lower() if isinstance(summary, dict) else ""
+    evidence = build_evidence_status(bundle_dir, summary)
     contradictions = []
-    if status and status != "completed" and "solver-backed OpenMC result" in report_text and "not a solver-backed OpenMC physics result" not in report_text:
-        contradictions.append("dry-run report claims solver-backed evidence")
-    artifact_status = summary.get("artifact_status", {}) if isinstance(summary, dict) else {}
-    groups = artifact_status.get("groups", {}) if isinstance(artifact_status, dict) else {}
-    openmc = groups.get("openmc", {}) if isinstance(groups, dict) else {}
-    if isinstance(openmc, dict) and openmc.get("state") in {"missing", "dry_run"} and "Build candidate: `true`" in report_text:
-        contradictions.append("build candidate true with missing/dry-run OpenMC artifacts")
+    claims_solver_backed = (
+        "solver-backed OpenMC result" in report_text
+        and "not a solver-backed OpenMC physics result" not in report_text
+        and "no solver-backed OpenMC result" not in report_text
+    )
+    claims_build_candidate = "Build candidate: `true`" in report_text or "Build candidate: `True`" in report_text
+    claims_benchmark_ready = "Benchmark ready: `true`" in report_text or "Benchmark ready: `True`" in report_text
+    if claims_solver_backed and not evidence["can_use_solver_backed_language"]:
+        contradictions.append("report claims solver-backed evidence without a completed statepoint-backed OpenMC artifact state")
+    if claims_build_candidate and not evidence["can_use_build_candidate_language"]:
+        contradictions.append("build candidate true while evidence gates block build-candidate language")
+    if claims_benchmark_ready and not evidence["can_use_benchmark_ready_language"]:
+        contradictions.append("benchmark-ready true while benchmark evidence gates are blocked")
+    if evidence["failed_stages"] and (claims_build_candidate or claims_benchmark_ready):
+        contradictions.append(
+            "failed stage(s) recorded in stage_manifest.json contradict completed-result claims: "
+            + ", ".join(evidence["failed_stages"])
+        )
     checks.append(_qa_check("report::status_contradictions", not contradictions, "; ".join(contradictions)))
+
+
+def _qa_sidecar_schemas(checks: list[dict[str, Any]], bundle_dir: Path) -> None:
+    errors = validate_bundle_sidecars(bundle_dir)
+    checks.append(_qa_check("sidecars::schema_valid", not errors, "; ".join(errors[:5])))
 
 
 def _qa_check(name: str, passed: bool, detail: str = "") -> dict[str, Any]:
@@ -2233,7 +2254,10 @@ def _neutronics_status(summary: dict[str, Any]) -> str:
 
 
 def _is_solver_backed_neutronics(summary: dict[str, Any]) -> bool:
-    return _neutronics_status(summary).lower() == "completed"
+    # Fail closed through the shared evidence gate: a completed neutronics
+    # status alone is not solver-backed evidence without a statepoint-backed
+    # OpenMC artifact state.
+    return bool(build_evidence_status(None, summary)["can_use_solver_backed_language"])
 
 
 def _humanize_label(name: str) -> str:
@@ -2384,11 +2408,11 @@ def _classify_reactor_case(
     stage = str(reactor.get("stage", "")).lower()
     summary = summary or {}
     benchmark_quality = benchmark_quality or {}
-    solver_backed = _is_solver_backed_neutronics(summary)
-    benchmark_ready = benchmark_quality.get("benchmark_ready") is True if benchmark_quality else False
+    evidence = build_evidence_status(None, summary)
+    solver_backed = evidence["can_use_solver_backed_language"]
+    benchmark_ready = evidence["can_use_benchmark_ready_language"] and benchmark_quality.get("benchmark_ready") is True
     evidence_limited = not solver_backed or not benchmark_ready
-    design_readiness = summary.get("design_readiness", {}) if isinstance(summary.get("design_readiness"), dict) else {}
-    severe_screening = int(design_readiness.get("severe_finding_count", 0) or 0) > 0
+    severe_screening = evidence["severe_finding_count"] > 0
     if case_name == "example_pin":
         return {
             "role": "smoke/regression pin",

@@ -234,6 +234,88 @@ def test_cli_stage_manifest_records_modified_existing_artifact(tmp_path: Path) -
     assert "summary.json" in manifest["stages"][0]["output_artifacts"]
 
 
+def test_finish_cli_stage_syncs_summary_with_refreshed_sidecar(tmp_path: Path) -> None:
+    bundle = create_result_bundle(tmp_path, "example_pin", "stale-summary")
+    # Summary embeds a stale artifact_status claiming the folder was never generated.
+    bundle.write_json(
+        "summary.json",
+        {
+            "neutronics": {"status": "completed"},
+            "artifact_status": {"groups": {"openmc": {"state": "not_generated", "artifacts": []}}},
+        },
+    )
+    (bundle.openmc_dir / "statepoint.42.h5").write_bytes(b"\x89HDF\r\n\x1a\n")
+    before = snapshot_bundle_artifacts(bundle)
+
+    _finish_cli_stage(
+        bundle,
+        "render",
+        ["render", "example_pin"],
+        "2026-07-14T00:00:00Z",
+        before,
+        {"input_snapshots": {}},
+        summary={"neutronics": {"status": "completed"}},
+        repo_root=tmp_path,
+    )
+
+    sidecar = json.loads((bundle.root / "artifact_status.json").read_text(encoding="utf-8"))
+    summary = json.loads((bundle.root / "summary.json").read_text(encoding="utf-8"))
+    assert sidecar["groups"]["openmc"]["state"] == "completed"
+    # summary.json must be re-synced with the fresh sidecar, not left stale.
+    assert summary["artifact_status"]["groups"]["openmc"]["state"] == "completed"
+
+
+def test_cli_records_failed_stage_when_command_raises(tmp_path: Path) -> None:
+    scratch = tmp_path / "repo"
+    (scratch / "configs" / "cases" / "example_pin").mkdir(parents=True)
+    (scratch / "benchmarks" / "tmsr_lf1").mkdir(parents=True)
+    shutil.copy2(REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml", scratch / "configs" / "cases" / "example_pin" / "case.yaml")
+    shutil.copy2(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", scratch / "benchmarks" / "tmsr_lf1" / "benchmark.yaml")
+
+    # report on a bundle with no summary.json raises FileNotFoundError.
+    create_result_bundle(scratch, "example_pin", "no-summary")
+    with pytest.raises(FileNotFoundError):
+        main(["--repo-root", str(scratch), "report", "example_pin", "--run-id", "no-summary"])
+
+    manifest = json.loads((scratch / "results" / "example_pin" / "no-summary" / "stage_manifest.json").read_text(encoding="utf-8"))
+    failed = [stage for stage in manifest["stages"] if stage["status"] == "failed"]
+    assert failed and failed[-1]["stage"] == "report"
+    assert failed[-1].get("message")
+
+
+def test_cli_verify_bundle_passes_for_dry_run_report(tmp_path: Path) -> None:
+    scratch = tmp_path / "repo"
+    (scratch / "configs" / "cases" / "example_pin").mkdir(parents=True)
+    (scratch / "benchmarks" / "tmsr_lf1").mkdir(parents=True)
+    shutil.copy2(REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml", scratch / "configs" / "cases" / "example_pin" / "case.yaml")
+    shutil.copy2(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", scratch / "benchmarks" / "tmsr_lf1" / "benchmark.yaml")
+
+    assert main(["--repo-root", str(scratch), "run", "example_pin", "--run-id", "vb", "--no-solver"]) == 0
+    assert main(["--repo-root", str(scratch), "report", "example_pin", "--run-id", "vb"]) == 0
+    assert main(["--repo-root", str(scratch), "verify-bundle", "example_pin", "--run-id", "vb"]) == 0
+
+
+def test_cli_verify_bundle_fails_on_stale_summary_status(tmp_path: Path) -> None:
+    scratch = tmp_path / "repo"
+    (scratch / "configs" / "cases" / "example_pin").mkdir(parents=True)
+    (scratch / "benchmarks" / "tmsr_lf1").mkdir(parents=True)
+    shutil.copy2(REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml", scratch / "configs" / "cases" / "example_pin" / "case.yaml")
+    shutil.copy2(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", scratch / "benchmarks" / "tmsr_lf1" / "benchmark.yaml")
+
+    assert main(["--repo-root", str(scratch), "run", "example_pin", "--run-id", "vb", "--no-solver"]) == 0
+    assert main(["--repo-root", str(scratch), "report", "example_pin", "--run-id", "vb"]) == 0
+
+    # Corrupt summary.json's embedded artifact_status so it disagrees with the sidecar.
+    bundle_root = scratch / "results" / "example_pin" / "vb"
+    summary = json.loads((bundle_root / "summary.json").read_text(encoding="utf-8"))
+    summary["artifact_status"] = {"groups": {"openmc": {"state": "completed", "artifacts": ["statepoint.fake.h5"]}}}
+    (bundle_root / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        main(["--repo-root", str(scratch), "verify-bundle", "example_pin", "--run-id", "vb"])
+    assert exc.value.code == 1
+
+
 def test_stage_command_from_sys_argv_preserves_subcommand_options(monkeypatch) -> None:
     monkeypatch.setattr(
         sys,

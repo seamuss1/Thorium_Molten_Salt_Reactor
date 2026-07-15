@@ -187,14 +187,25 @@ def write_status(run_dir: Path, payload: dict[str, Any]) -> None:
     write_json(run_dir / "job_status.json", payload)
 
 
+_SEQUENCE_LOCK = threading.Lock()
+_SEQUENCE_CACHE: dict[Path, int] = {}
+
+
 def append_event(run_dir: Path, level: str, phase: str | None, message: str, *, progress: float | None = None) -> RunEvent:
     path = run_dir / "job_events.ndjson"
-    sequence = 1
-    if path.exists():
-        sequence = len(path.read_text(encoding="utf-8").splitlines()) + 1
-    event = RunEvent(sequence=sequence, timestamp=utc_now(), level=level, phase=phase, message=message, progress=progress)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(model_to_dict(event), sort_keys=True) + "\n")
+    with _SEQUENCE_LOCK:
+        sequence = _SEQUENCE_CACHE.get(path)
+        if sequence is None:
+            # First append for this run in this process: count once, then cache.
+            sequence = 0
+            if path.exists():
+                with path.open("rb") as handle:
+                    sequence = sum(1 for _ in handle)
+        sequence += 1
+        _SEQUENCE_CACHE[path] = sequence
+        event = RunEvent(sequence=sequence, timestamp=utc_now(), level=level, phase=phase, message=message, progress=progress)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(model_to_dict(event), sort_keys=True) + "\n")
     return event
 
 
