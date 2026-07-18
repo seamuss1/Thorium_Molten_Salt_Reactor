@@ -115,6 +115,12 @@ def run_transient_case(
         "minimum_core_delayed_neutron_source_fraction": metrics["minimum_core_delayed_neutron_source_fraction"],
         "final_core_delayed_neutron_source_fraction": metrics["final_core_delayed_neutron_source_fraction"],
         "final_precursor_transport_loss_fraction": metrics["final_precursor_transport_loss_fraction"],
+        "initial_yield_weighted_external_loop_survival_fraction": baseline.get(
+            "initial_yield_weighted_external_loop_survival_fraction"
+        ),
+        "initial_yield_weighted_loop_decay_damkohler_number": baseline.get(
+            "initial_yield_weighted_loop_decay_damkohler_number"
+        ),
         "final_total_reactivity_pcm": metrics["final_total_reactivity_pcm"],
         "depletion_chain": depletion["chain"],
         "cleanup_scenario": depletion["cleanup_scenario"],
@@ -342,6 +348,12 @@ def _integrate_transient(
     ]
     baseline["initial_precursor_transport_loss_fraction"] = precursor_summary[
         "precursor_transport_loss_fraction"
+    ]
+    baseline["initial_yield_weighted_external_loop_survival_fraction"] = precursor_summary[
+        "yield_weighted_external_loop_survival_fraction"
+    ]
+    baseline["initial_yield_weighted_loop_decay_damkohler_number"] = precursor_summary[
+        "yield_weighted_loop_decay_damkohler_number"
     ]
     baseline["delayed_neutron_precursor_groups"] = precursor_group_summary(
         precursor_state,

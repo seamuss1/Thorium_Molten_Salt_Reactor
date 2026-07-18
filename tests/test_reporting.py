@@ -1506,6 +1506,63 @@ def test_report_includes_flagship_finance_schedule_and_taxonomy() -> None:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
 
+def test_report_surfaces_precursor_transport_screening_metrics() -> None:
+    scratch_root = REPO_ROOT / ".tmp" / "test-reporting-transient-precursors" / uuid.uuid4().hex
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = scratch_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "case": "immersed_pool_reference",
+                    "result_dir": str(scratch_root),
+                    "neutronics": {"status": "dry-run"},
+                    "transient": {
+                        "status": "completed",
+                        "model": "reduced_order_transient_proxy",
+                        "scenario_name": "pump_coastdown",
+                        "duration_s": 120.0,
+                        "time_step_s": 1.0,
+                        "event_count": 2,
+                        "peak_power_fraction": 1.1,
+                        "final_power_fraction": 0.95,
+                        "peak_fuel_temperature_c": 705.0,
+                        "peak_graphite_temperature_c": 680.0,
+                        "peak_coolant_temperature_c": 650.0,
+                        "minimum_precursor_core_fraction": 0.61,
+                        "minimum_core_delayed_neutron_source_fraction": 0.78,
+                        "final_precursor_transport_loss_fraction": 0.22,
+                        "initial_yield_weighted_external_loop_survival_fraction": 0.44,
+                        "initial_yield_weighted_loop_decay_damkohler_number": 1.07,
+                        "final_total_reactivity_pcm": -18.0,
+                        "history_path": "transient.json",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = generate_report(
+            "immersed_pool_reference",
+            {
+                "reactor": {
+                    "name": "Immersed Pool Reference",
+                    "family": "immersed_pool_msr",
+                    "stage": "reference",
+                }
+            },
+            summary_path,
+            None,
+            None,
+        )
+
+        transient_section = _section(report, "## Transient Scenario")
+        assert "Initial yield-weighted external-loop survival fraction" in transient_section
+        assert "Initial yield-weighted loop decay Damkohler number" in transient_section
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
 def test_flagship_report_caveats_commercial_planning_against_dry_run_surrogate_evidence() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-reporting-flagship-evidence" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)

@@ -423,6 +423,42 @@ The older unweighted core delayed-neutron source fraction remains in the JSON as
 `unweighted_beta_eff` and `core_delayed_neutron_source_absolute_fraction` for
 comparison.
 
+Recent 2025 liquid-fueled kinetics work also reinforces that precursor groups
+with different decay constants can sit in materially different transport
+regimes even when a run-level transport-loss fraction looks similar. The
+repository therefore now reports group-resolved transport screening metrics. For
+group `i`:
+
+$$
+\mathrm{Da}_{\mathrm{core},i} = \lambda_i \tau_{\mathrm{core}},
+\qquad
+\mathrm{Da}_{\mathrm{loop},i} = \lambda_i \tau_{\mathrm{loop}}
+$$
+
+$$
+S_{\mathrm{loop},i}^{\mathrm{decay}} = \exp(-\lambda_i\tau_{\mathrm{loop}})
+$$
+
+$$
+S_{\mathrm{loop},i}^{\mathrm{total}}
+=
+\exp\left[-\left(\lambda_i + k_{\mathrm{cleanup,eff}}\right)\tau_{\mathrm{loop}}\right]
+$$
+
+where the effective cleanup rate is the residence-weighted loop average:
+
+$$
+k_{\mathrm{cleanup,eff}}
+=
+k_{\mathrm{cleanup}}
+\left(\sum_j f_{\mathrm{res},j} w_{\mathrm{cleanup},j}\right)
+$$
+
+implemented as `cleanup_rate_s * sum(residence_fraction_j * cleanup_weight_j)`.
+The transient summary also reports yield-weighted loop survival and a
+yield-weighted loop decay Damkohler number as compact screening metrics for how
+transport-sensitive the configured flowing-fuel kinetics are.
+
 The same finite-volume ring is also used to screen decay-heat precursor
 transport. Recent 2025-2026 liquid-fueled MSR work emphasizes that decay heat
 is not released only in the core when fuel circulates through the primary loop.

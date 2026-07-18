@@ -671,6 +671,14 @@ def generate_report(
             "- Final precursor transport loss fraction: "
             f"`{transient.get('final_precursor_transport_loss_fraction', 'n/a')}`"
         )
+        lines.append(
+            "- Initial yield-weighted external-loop survival fraction: "
+            f"`{transient.get('initial_yield_weighted_external_loop_survival_fraction', 'n/a')}`"
+        )
+        lines.append(
+            "- Initial yield-weighted loop decay Damkohler number: "
+            f"`{transient.get('initial_yield_weighted_loop_decay_damkohler_number', 'n/a')}`"
+        )
         lines.append(f"- Final total reactivity (pcm): `{transient.get('final_total_reactivity_pcm', 'n/a')}`")
         lines.append(f"- Depletion chain: `{transient.get('depletion_chain', 'n/a')}`")
         lines.append(f"- Cleanup scenario: `{transient.get('cleanup_scenario', 'n/a')}`")

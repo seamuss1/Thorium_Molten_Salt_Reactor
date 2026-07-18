@@ -54,6 +54,36 @@ public science, while the next material upgrades still require larger
 species-transport, chemistry, or depletion coupling work rather than an
 incremental patch.
 
+## July 17, 2026 Addendum
+
+This follow-up screened additional 2025-2026 primary sources with emphasis on
+whether recent liquid-fueled kinetics work changes what this repository should
+report from its existing reduced-order precursor transport model. The most
+useful peer-reviewed item remained Chen et al.'s January 31, 2025 paper on the
+dynamic effect of delayed-neutron precursor distribution in liquid-fueled MSR
+safety analysis. The repository already had multi-group precursor transport, but
+the literature makes a sharper point than the previous implementation exposed:
+group-specific decay constants materially change how much precursor source
+survives an external-loop transit, so a single bulk transport-loss number can
+hide whether a case is dominated by slow groups that recirculate or fast groups
+that decay before re-entering the core.
+
+Repository action: add group-resolved precursor transport screening metrics to
+the transient baseline and report path. Each delayed-neutron group summary now
+carries core and external-loop decay Damkohler numbers plus external-loop
+survival fractions, and the run summary now exposes yield-weighted loop survival
+and yield-weighted loop decay Damkohler numbers. This is still a reduced-order
+screen, not a spatial kinetics closure or a replacement for the existing
+adjoint-weighted `physics_core` handoff.
+
+Why this was implemented instead of a larger feature: the latest official-lab
+and peer-reviewed sources still support richer species tracking, chemistry, and
+depletion coupling, but those remain architecture-scale changes. By contrast,
+groupwise precursor transport severity is directly implementable inside the
+current six-group model and improves validation/reporting fidelity immediately.
+
+Sources: https://doi.org/10.3390/en18030670, https://gain.inl.gov/doe-molten-salt-reactor-program/doe-molten-salt-reactor-campaign-review-2025/, and https://www.nrc.gov/docs/ML2512/ML25128A289.pdf
+
 The May 2026 refresh prioritized primary or official-lab sources published since
 2024-05-17. It did not identify a reason to replace the repository's
 reduced-order architecture, but it did support focused implementation upgrades:

@@ -23,6 +23,7 @@ from thorium_reactor.literature_models import build_property_uncertainty_summary
 from thorium_reactor.precursors import (
     build_initial_precursor_state,
     normalize_loop_segments,
+    precursor_group_transport_metrics,
     precursor_group_summary,
     precursor_loop_segment_summary,
     step_precursor_state,
@@ -432,6 +433,12 @@ def _integrate_transient_ensemble_reference(
     )
     baseline["initial_precursor_transport_loss_fraction"] = _round_float(
         sum(item["precursor_transport_loss_fraction"] for item in initial_precursor_summaries) / samples
+    )
+    baseline["initial_yield_weighted_external_loop_survival_fraction"] = _round_float(
+        sum(item["yield_weighted_external_loop_survival_fraction"] for item in initial_precursor_summaries) / samples
+    )
+    baseline["initial_yield_weighted_loop_decay_damkohler_number"] = _round_float(
+        sum(item["yield_weighted_loop_decay_damkohler_number"] for item in initial_precursor_summaries) / samples
     )
     baseline["delayed_neutron_precursor_groups"] = precursor_group_summary(
         precursor_states[0],
@@ -872,6 +879,8 @@ def _integrate_transient_ensemble_vectorized(
         backend=backend,
         groups=groups,
         loop_segments=loop_segments,
+        flow_fraction=initial_flow_fraction,
+        cleanup_rate_s=initial_cleanup_rate_s,
         core_inventory=core_inventory,
         segment_inventory=segment_inventory,
         decay_vector=decay_vector,
@@ -1230,6 +1239,8 @@ def _annotate_vectorized_precursor_baseline(
     backend: ArrayBackend,
     groups: list[dict[str, float | str]],
     loop_segments: list[dict[str, float | str]],
+    flow_fraction: Any,
+    cleanup_rate_s: Any,
     core_inventory: Any,
     segment_inventory: Any,
     decay_vector: Any,
@@ -1249,12 +1260,34 @@ def _annotate_vectorized_precursor_baseline(
     baseline["initial_precursor_transport_loss_fraction"] = _round_float(
         backend.scalar(backend.sum(loop_source / backend.maximum(total_source, 1.0e-12))) / sample_count
     )
+    mean_flow_fraction = backend.scalar(backend.sum(flow_fraction)) / sample_count
+    mean_cleanup_rate_s = backend.scalar(backend.sum(cleanup_rate_s)) / sample_count
+    transport_metrics = precursor_group_transport_metrics(
+        groups,
+        core_residence_time_s=float(baseline["core_residence_time_s"]) / max(mean_flow_fraction, 1.0e-12),
+        loop_residence_time_s=float(baseline["loop_residence_time_s"]) / max(mean_flow_fraction, 1.0e-12),
+        cleanup_rate_s=mean_cleanup_rate_s,
+        loop_segments=loop_segments,
+    )
+    baseline["initial_yield_weighted_external_loop_survival_fraction"] = _round_float(
+        sum(
+            float(group["relative_yield_fraction"]) * float(metrics["external_loop_total_survival_fraction"])
+            for group, metrics in zip(groups, transport_metrics, strict=False)
+        )
+    )
+    baseline["initial_yield_weighted_loop_decay_damkohler_number"] = _round_float(
+        sum(
+            float(group["relative_yield_fraction"]) * float(metrics["external_loop_decay_damkohler_number"])
+            for group, metrics in zip(groups, transport_metrics, strict=False)
+        )
+    )
     group_summaries = []
     for group_index, group in enumerate(groups):
         core_mean = backend.scalar(backend.sum(core_inventory[:, group_index])) / sample_count
         loop_group = backend.sum(segment_inventory[:, group_index, :], axis=1)
         loop_mean = backend.scalar(backend.sum(loop_group)) / sample_count
         group_total = core_mean + loop_mean
+        group_transport = transport_metrics[group_index]
         group_summaries.append(
             {
                 "name": str(group["name"]),
@@ -1264,6 +1297,18 @@ def _annotate_vectorized_precursor_baseline(
                 "core_inventory": _round_float(core_mean),
                 "loop_inventory": _round_float(loop_mean),
                 "core_inventory_fraction": _round_float(core_mean / max(group_total, 1.0e-12)),
+                "core_decay_damkohler_number": _round_float(
+                    float(group_transport["core_decay_damkohler_number"])
+                ),
+                "external_loop_decay_damkohler_number": _round_float(
+                    float(group_transport["external_loop_decay_damkohler_number"])
+                ),
+                "external_loop_decay_survival_fraction": _round_float(
+                    float(group_transport["external_loop_decay_survival_fraction"])
+                ),
+                "external_loop_total_survival_fraction": _round_float(
+                    float(group_transport["external_loop_total_survival_fraction"])
+                ),
             }
         )
     baseline["delayed_neutron_precursor_groups"] = group_summaries

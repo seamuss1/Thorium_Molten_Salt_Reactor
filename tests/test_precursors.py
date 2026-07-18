@@ -4,6 +4,7 @@ from thorium_reactor.precursors import (
     TWO_REGION_PRECURSOR_TRANSPORT_MODEL,
     build_initial_precursor_state,
     normalize_precursor_groups,
+    precursor_group_summary,
     precursor_loop_segment_summary,
     step_precursor_state,
     summarize_precursor_state,
@@ -20,6 +21,36 @@ def test_precursor_groups_normalize_to_relative_yields() -> None:
 
     assert groups[0]["relative_yield_fraction"] == 0.25
     assert groups[1]["relative_yield_fraction"] == 0.75
+
+
+def test_group_summary_reports_groupwise_loop_survival_and_damkohler() -> None:
+    groups = normalize_precursor_groups(
+        [
+            {"name": "slow", "decay_constant_s": 0.02, "yield_fraction": 0.25},
+            {"name": "fast", "decay_constant_s": 1.2, "yield_fraction": 0.75},
+        ]
+    )
+    state = build_initial_precursor_state(
+        groups=groups,
+        core_residence_time_s=1.0,
+        loop_residence_time_s=8.0,
+        cleanup_rate_s=2.0e-3,
+    )
+
+    summary = summarize_precursor_state(state, groups, steady_state=state["steady_state"])
+    group_summary = {item["name"]: item for item in precursor_group_summary(state, groups)}
+
+    assert group_summary["slow"]["external_loop_decay_damkohler_number"] < group_summary["fast"][
+        "external_loop_decay_damkohler_number"
+    ]
+    assert group_summary["slow"]["external_loop_total_survival_fraction"] > group_summary["fast"][
+        "external_loop_total_survival_fraction"
+    ]
+    assert summary["yield_weighted_external_loop_survival_fraction"] < summary[
+        "slowest_group_external_loop_survival_fraction"
+    ]
+    assert 0.0 < summary["yield_weighted_external_loop_survival_fraction"] < 1.0
+    assert summary["yield_weighted_loop_decay_damkohler_number"] > 0.0
 
 
 def test_two_region_precursor_state_tracks_core_source_and_loop_loss() -> None:

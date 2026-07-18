@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -120,6 +121,9 @@ def build_initial_precursor_state(
         "loop_segment_inventories": loop_segment_inventories,
         "loop_segments": segment_specs,
         "transport_model": transport_model,
+        "core_residence_time_s": core_tau_s,
+        "loop_residence_time_s": loop_tau_s,
+        "cleanup_rate_s": cleanup_rate,
     }
     core_inventory = sum(core_inventories)
     loop_inventory = sum(loop_inventories)
@@ -144,6 +148,9 @@ def build_initial_precursor_state(
         ),
         "precursor_transport_loss_fraction": loop_delayed_source / max(total_delayed_source, 1.0e-12),
         "loop_segment_count": len(segment_specs) if transport_model == LOOP_SEGMENT_PRECURSOR_TRANSPORT_MODEL else 1,
+        "core_residence_time_s": core_tau_s,
+        "loop_residence_time_s": loop_tau_s,
+        "cleanup_rate_s": cleanup_rate,
     }
     return state
 
@@ -215,6 +222,9 @@ def step_precursor_state(
         "loop_segment_inventories": new_segments,
         "loop_segments": segment_specs,
         "transport_model": model,
+        "core_residence_time_s": core_tau_s,
+        "loop_residence_time_s": loop_tau_s,
+        "cleanup_rate_s": cleanup_rate,
         "steady_state": state["steady_state"],
     }
 
@@ -242,6 +252,13 @@ def summarize_precursor_state(
     )
     total_delayed_source = core_delayed_source + loop_delayed_source
     segment_sources = _segment_delayed_sources(state, groups)
+    transport_metrics = precursor_group_transport_metrics(
+        groups,
+        core_residence_time_s=float(state.get("core_residence_time_s", 0.0)),
+        loop_residence_time_s=float(state.get("loop_residence_time_s", 0.0)),
+        cleanup_rate_s=float(state.get("cleanup_rate_s", 0.0)),
+        loop_segments=state.get("loop_segments"),
+    )
 
     if reference:
         steady_total_inventory = max(float(reference["total_inventory"]), 1.0e-12)
@@ -249,6 +266,23 @@ def summarize_precursor_state(
     else:
         steady_total_inventory = max(total_inventory, 1.0e-12)
         steady_core_source = max(core_delayed_source, 1.0e-12)
+
+    weighted_loop_survival = sum(
+        float(group["relative_yield_fraction"]) * float(metrics["external_loop_total_survival_fraction"])
+        for group, metrics in zip(groups, transport_metrics, strict=False)
+    )
+    weighted_loop_damkohler = sum(
+        float(group["relative_yield_fraction"]) * float(metrics["external_loop_decay_damkohler_number"])
+        for group, metrics in zip(groups, transport_metrics, strict=False)
+    )
+    dominant_group = max(
+        zip(groups, transport_metrics, strict=False),
+        key=lambda item: float(item[0]["relative_yield_fraction"]),
+    )
+    slowest_group = min(
+        zip(groups, transport_metrics, strict=False),
+        key=lambda item: float(item[0]["decay_constant_s"]),
+    )
 
     return {
         "core_inventory": _round_float(core_inventory),
@@ -270,6 +304,14 @@ def summarize_precursor_state(
         "peak_loop_segment_delayed_neutron_source_fraction": _round_float(
             max(segment_sources) / max(total_delayed_source, 1.0e-12) if segment_sources else 0.0
         ),
+        "yield_weighted_external_loop_survival_fraction": _round_float(weighted_loop_survival),
+        "yield_weighted_loop_decay_damkohler_number": _round_float(weighted_loop_damkohler),
+        "dominant_group_external_loop_survival_fraction": _round_float(
+            float(dominant_group[1]["external_loop_total_survival_fraction"])
+        ),
+        "slowest_group_external_loop_survival_fraction": _round_float(
+            float(slowest_group[1]["external_loop_total_survival_fraction"])
+        ),
     }
 
 
@@ -277,11 +319,19 @@ def precursor_group_summary(
     state: dict[str, Any],
     groups: list[dict[str, float | str]],
 ) -> list[dict[str, float | str]]:
+    transport_metrics = precursor_group_transport_metrics(
+        groups,
+        core_residence_time_s=float(state.get("core_residence_time_s", 0.0)),
+        loop_residence_time_s=float(state.get("loop_residence_time_s", 0.0)),
+        cleanup_rate_s=float(state.get("cleanup_rate_s", 0.0)),
+        loop_segments=state.get("loop_segments"),
+    )
     summary: list[dict[str, float | str]] = []
     for index, group in enumerate(groups):
         core_inventory = float(state["core_inventories"][index])
         loop_inventory = float(state["loop_inventories"][index])
         total_inventory = core_inventory + loop_inventory
+        group_transport = transport_metrics[index]
         summary.append(
             {
                 "name": str(group["name"]),
@@ -291,9 +341,50 @@ def precursor_group_summary(
                 "core_inventory": _round_float(core_inventory),
                 "loop_inventory": _round_float(loop_inventory),
                 "core_inventory_fraction": _round_float(core_inventory / max(total_inventory, 1.0e-12)),
+                "core_decay_damkohler_number": _round_float(
+                    float(group_transport["core_decay_damkohler_number"])
+                ),
+                "external_loop_decay_damkohler_number": _round_float(
+                    float(group_transport["external_loop_decay_damkohler_number"])
+                ),
+                "external_loop_decay_survival_fraction": _round_float(
+                    float(group_transport["external_loop_decay_survival_fraction"])
+                ),
+                "external_loop_total_survival_fraction": _round_float(
+                    float(group_transport["external_loop_total_survival_fraction"])
+                ),
             }
         )
     return summary
+
+
+def precursor_group_transport_metrics(
+    groups: list[dict[str, float | str]],
+    *,
+    core_residence_time_s: float,
+    loop_residence_time_s: float,
+    cleanup_rate_s: float,
+    loop_segments: list[dict[str, Any]] | None = None,
+) -> list[dict[str, float]]:
+    core_tau_s = max(float(core_residence_time_s), 0.0)
+    loop_tau_s = max(float(loop_residence_time_s), 0.0)
+    cleanup_rate = max(float(cleanup_rate_s), 0.0)
+    effective_cleanup_weight = _effective_cleanup_weight(loop_segments)
+    effective_cleanup_rate_s = cleanup_rate * effective_cleanup_weight
+    metrics: list[dict[str, float]] = []
+    for group in groups:
+        decay = max(float(group["decay_constant_s"]), 0.0)
+        metrics.append(
+            {
+                "core_decay_damkohler_number": decay * core_tau_s,
+                "external_loop_decay_damkohler_number": decay * loop_tau_s,
+                "external_loop_decay_survival_fraction": math.exp(-decay * loop_tau_s),
+                "external_loop_total_survival_fraction": math.exp(
+                    -(decay + effective_cleanup_rate_s) * loop_tau_s
+                ),
+            }
+        )
+    return metrics
 
 
 def precursor_loop_segment_summary(
@@ -359,6 +450,14 @@ def normalize_loop_segments(loop_segments: Any | None) -> list[dict[str, float |
             }
         )
     return normalized
+
+
+def _effective_cleanup_weight(loop_segments: list[dict[str, Any]] | None) -> float:
+    segments = normalize_loop_segments(loop_segments)
+    return sum(
+        float(segment["residence_fraction"]) * float(segment["cleanup_weight"])
+        for segment in segments
+    )
 
 
 def _steady_state_group_inventory(
