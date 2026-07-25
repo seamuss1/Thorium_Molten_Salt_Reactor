@@ -7,7 +7,6 @@ from typing import Any
 
 import yaml
 
-
 QA_DIR = "qa"
 DOCS_DIR = "docs"
 REQUIREMENTS_FILE = "requirements.yaml"
@@ -202,7 +201,9 @@ def validate_requirements_traceability(repo_root: Path) -> dict[str, Any]:
         },
         {
             "name": "qa::traceability_matrix_links",
-            "status": "pass" if not any(error.startswith("Traceability matrix") for error in errors) and not uncovered else "fail",
+            "status": "pass"
+            if not any(error.startswith("Traceability matrix") for error in errors) and not uncovered
+            else "fail",
             "message": f"{len(matrix_rows)} matrix row(s) inspected.",
         },
         {
@@ -277,9 +278,7 @@ def validate_nonconformance_log(repo_root: Path) -> dict[str, Any]:
             missing_fields = [field for field in REQUIRED_NONCONFORMANCE_FIELDS if field not in declared_fields]
             if missing_fields:
                 errors.append(
-                    "Nonconformance log record format is missing required field(s): "
-                    + ", ".join(missing_fields)
-                    + "."
+                    "Nonconformance log record format is missing required field(s): " + ", ".join(missing_fields) + "."
                 )
 
     try:
@@ -289,9 +288,7 @@ def validate_nonconformance_log(repo_root: Path) -> dict[str, Any]:
     else:
         missing_columns = [field for field in REQUIRED_NONCONFORMANCE_FIELDS if field not in open_log_columns]
         if missing_columns:
-            errors.append(
-                f"Nonconformance open log table is missing required columns: {', '.join(missing_columns)}."
-            )
+            errors.append(f"Nonconformance open log table is missing required columns: {', '.join(missing_columns)}.")
         _validate_nonconformance_records(records, errors)
 
     return {
@@ -419,9 +416,7 @@ def _validate_nonconformance_records(records: list[dict[str, str]], errors: list
             )
         if record_id:
             if not NONCONFORMANCE_ID_PATTERN.fullmatch(record_id):
-                errors.append(
-                    f"Nonconformance record {record_id} must use documented NCA-YYYY-NNN format."
-                )
+                errors.append(f"Nonconformance record {record_id} must use documented NCA-YYYY-NNN format.")
             if record_id in record_ids:
                 duplicate_ids.add(record_id)
             record_ids.add(record_id)

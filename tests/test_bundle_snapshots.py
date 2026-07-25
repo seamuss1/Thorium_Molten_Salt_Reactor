@@ -11,7 +11,6 @@ from thorium_reactor.neutronics.workflows import validate_case
 from thorium_reactor.paths import create_result_bundle
 from thorium_reactor.reporting.reports import generate_report
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_CASE = REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml"
 SOURCE_BENCHMARK = REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml"

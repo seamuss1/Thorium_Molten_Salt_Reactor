@@ -8,14 +8,13 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-
 GAS_CONSTANT_J_MOL_K = 8.31446261815324
 DIRECT_DATA_FILE = "Molten_Salt_Thermophysical_Properties.csv"
 RK_DENSITY_FILE = "Molten_Salt_Thermophysical_Properties_rho_RK.csv"
 RK_VISCOSITY_FILE = "Molten_Salt_Thermophysical_Properties_mu_RK.csv"
 DATA_PACKAGE = "thorium_reactor.data.msd_tp"
 DATA_DIR_ENV_VAR = "THORIUM_REACTOR_MSD_TP_DATA_DIR"
-_DATABASE_CACHE: dict[str, "MsdTpDatabase"] = {}
+_DATABASE_CACHE: dict[str, MsdTpDatabase] = {}
 
 
 @dataclass(frozen=True)
@@ -59,7 +58,9 @@ class MsdTpDatabase:
     def __init__(self, base_path: Path | None = None) -> None:
         self.base_path = base_path
         self.records = self._load_direct_records()
-        self._records_by_key = {_record_key(record.components, record.mole_fractions): record for record in self.records}
+        self._records_by_key = {
+            _record_key(record.components, record.mole_fractions): record for record in self.records
+        }
         self.rk_density = self._load_rk_models("density")
         self.rk_viscosity = self._load_rk_models("dynamic_viscosity")
 
@@ -163,7 +164,9 @@ class MsdTpDatabase:
         models = self.rk_density if property_name == "density" else self.rk_viscosity
         rk_model = models.get(sorted_components)
         if rk_model is None:
-            raise ValueError(f"MSD-TP Redlich-Kister {property_name} model is missing for {'-'.join(sorted_components)}.")
+            raise ValueError(
+                f"MSD-TP Redlich-Kister {property_name} model is missing for {'-'.join(sorted_components)}."
+            )
         range_status = _range_status(rk_model.valid_temperature_range_k, temperature_k)
         if range_status == "out_of_range" and not bool(spec.get("allow_extrapolation", False)):
             lo, hi = rk_model.valid_temperature_range_k
@@ -338,16 +341,36 @@ class MsdTpDatabase:
             sort_factor = 1.0 if c1 < c2 else -1.0
             components = tuple(sorted((c1, c2)))
             if property_name == "density":
-                a = (_parse_required_number(row[2], "RK density A1"), sort_factor * _parse_required_number(row[4], "RK density A2"), _parse_required_number(row[6], "RK density A3"))
-                b = (_parse_required_number(row[3], "RK density B1"), sort_factor * _parse_required_number(row[5], "RK density B2"), _parse_required_number(row[7], "RK density B3"))
+                a = (
+                    _parse_required_number(row[2], "RK density A1"),
+                    sort_factor * _parse_required_number(row[4], "RK density A2"),
+                    _parse_required_number(row[6], "RK density A3"),
+                )
+                b = (
+                    _parse_required_number(row[3], "RK density B1"),
+                    sort_factor * _parse_required_number(row[5], "RK density B2"),
+                    _parse_required_number(row[7], "RK density B3"),
+                )
                 c = (0.0, 0.0, 0.0)
                 t_min = _parse_required_number(row[8], "RK density T min")
                 t_max = _parse_required_number(row[9], "RK density T max")
                 reference = ",".join(row[10:]).strip().strip('"')
             else:
-                a = (_parse_required_number(row[2], "RK viscosity A1"), sort_factor * _parse_required_number(row[5], "RK viscosity A2"), _parse_required_number(row[8], "RK viscosity A3"))
-                b = (_parse_required_number(row[3], "RK viscosity B1"), sort_factor * _parse_required_number(row[6], "RK viscosity B2"), _parse_required_number(row[9], "RK viscosity B3"))
-                c = (_parse_required_number(row[4], "RK viscosity C1"), sort_factor * _parse_required_number(row[7], "RK viscosity C2"), _parse_required_number(row[10], "RK viscosity C3"))
+                a = (
+                    _parse_required_number(row[2], "RK viscosity A1"),
+                    sort_factor * _parse_required_number(row[5], "RK viscosity A2"),
+                    _parse_required_number(row[8], "RK viscosity A3"),
+                )
+                b = (
+                    _parse_required_number(row[3], "RK viscosity B1"),
+                    sort_factor * _parse_required_number(row[6], "RK viscosity B2"),
+                    _parse_required_number(row[9], "RK viscosity B3"),
+                )
+                c = (
+                    _parse_required_number(row[4], "RK viscosity C1"),
+                    sort_factor * _parse_required_number(row[7], "RK viscosity C2"),
+                    _parse_required_number(row[10], "RK viscosity C3"),
+                )
                 t_min = _parse_required_number(row[11], "RK viscosity T min")
                 t_max = _parse_required_number(row[12], "RK viscosity T max")
                 reference = ",".join(row[13:]).strip().strip('"')
@@ -420,7 +443,9 @@ def describe_msd_tp_property(
     temperature_c: float | None = None,
     expected_quantity: str | None = None,
 ) -> dict[str, Any]:
-    return database_for_spec(spec).describe_record(spec, temperature_c=temperature_c, expected_quantity=expected_quantity)
+    return database_for_spec(spec).describe_record(
+        spec, temperature_c=temperature_c, expected_quantity=expected_quantity
+    )
 
 
 def components_from_spec(spec: dict[str, Any]) -> tuple[tuple[str, ...], tuple[float, ...]]:

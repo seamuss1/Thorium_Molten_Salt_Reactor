@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import math
 from typing import Any
 
@@ -11,7 +12,6 @@ from thorium_reactor.flow.properties import (
     evaluate_secondary_coolant_properties,
 )
 from thorium_reactor.transient import build_depletion_assumptions
-
 
 GRAVITY_M_S2 = 9.80665
 FISSION_ENERGY_J = 3.204e-11
@@ -53,9 +53,7 @@ def build_primary_system_summary(
     terminal_loss_coefficient = float(config.reactor.get("primary_terminal_loss_coefficient", 1.6))
 
     design_basis_primary_mass_flow_kg_s = float(bop["primary_mass_flow_kg_s"])
-    volumetric_flow_m3_s = (
-        design_basis_primary_mass_flow_kg_s / salt_density_kg_m3 if salt_density_kg_m3 > 0.0 else 0.0
-    )
+    volumetric_flow_m3_s = design_basis_primary_mass_flow_kg_s / salt_density_kg_m3 if salt_density_kg_m3 > 0.0 else 0.0
 
     segment_summary = _build_pipe_segment_summary(
         pipe_runs,
@@ -260,9 +258,13 @@ def _build_plant_schematic_system_summary(
         "design_basis": {
             "thermal_power_mw": _round_float(thermal_power_mw),
             "gross_electric_power_mw": _round_float(electric_power_mw),
-            "net_electric_power_mwe": _round_float(float(characteristics.get("net_electric_power_mwe", electric_power_mw))),
+            "net_electric_power_mwe": _round_float(
+                float(characteristics.get("net_electric_power_mwe", electric_power_mw))
+            ),
             "steam_generator_duty_mw": _round_float(steam_generator_duty_mw),
-            "overall_thermal_efficiency": _round_float(electric_power_mw / thermal_power_mw) if thermal_power_mw > 0.0 else 0.0,
+            "overall_thermal_efficiency": _round_float(electric_power_mw / thermal_power_mw)
+            if thermal_power_mw > 0.0
+            else 0.0,
             "hot_leg_temp_c": _round_float(float(config.reactor.get("hot_leg_temp_c", 0.0))),
             "cold_leg_temp_c": _round_float(float(config.reactor.get("cold_leg_temp_c", 0.0))),
         },
@@ -336,7 +338,7 @@ def _build_pipe_segment_summary(
         vertical_drop_m = 0.0
         min_elevation_m = 0.0
         max_elevation_m = 0.0
-        for start, stop in zip(points, points[1:]):
+        for start, stop in itertools.pairwise(points):
             length_m = math.dist(start, stop) / 100.0
             if length_m <= 0.0:
                 continue
@@ -356,7 +358,11 @@ def _build_pipe_segment_summary(
             min_elevation_m = min(elevations_m)
             max_elevation_m = max(elevations_m)
 
-        friction_drop_pa = friction_factor * (run_length_m / inner_diameter_m) * (salt_density_kg_m3 * velocity_m_s * velocity_m_s / 2.0)
+        friction_drop_pa = (
+            friction_factor
+            * (run_length_m / inner_diameter_m)
+            * (salt_density_kg_m3 * velocity_m_s * velocity_m_s / 2.0)
+        )
         bend_count = max(0, len(points) - 2)
         local_k = terminal_loss_coefficient + bend_count * elbow_loss_coefficient
         local_drop_pa = local_k * (salt_density_kg_m3 * velocity_m_s * velocity_m_s / 2.0)
@@ -422,10 +428,7 @@ def _build_primary_loop_graph(
         for spec in component_specs
         if spec.get("id")
     }
-    segment_lookup = {
-        str(segment.get("id") or segment["name"]): dict(segment)
-        for segment in segments
-    }
+    segment_lookup = {str(segment.get("id") or segment["name"]): dict(segment) for segment in segments}
     connection_specs = primary_loop.get("connections") or []
     edges = []
     outgoing: dict[str, list[dict[str, Any]]] = {}
@@ -502,9 +505,7 @@ def _traverse_single_loop_cycle(
     visited_edge_ids: set[str] = set()
     for _ in range(max(len(outgoing) * 2, 1) + 8):
         candidate_edges = [
-            edge
-            for edge in outgoing.get(current_component_id, [])
-            if str(edge["id"]) not in visited_edge_ids
+            edge for edge in outgoing.get(current_component_id, []) if str(edge["id"]) not in visited_edge_ids
         ]
         if len(candidate_edges) != 1:
             break
@@ -621,19 +622,12 @@ def _build_pressure_budget(
     local_pressure_drop_pa = float(segment_summary["local_pressure_drop_pa"])
     hydrostatic_pressure_change_pa = float(segment_summary["hydrostatic_pressure_change_pa"])
     segments = segment_summary.get("segments", [])
-    edge_lookup = {
-        str(edge.get("id") or edge.get("name")): edge
-        for edge in loop_graph.get("edges", [])
-    }
+    edge_lookup = {str(edge.get("id") or edge.get("name")): edge for edge in loop_graph.get("edges", [])}
     hot_leg_segments = [
-        edge_lookup[edge_id]
-        for edge_id in loop_graph.get("hot_leg_edge_ids", [])
-        if edge_id in edge_lookup
+        edge_lookup[edge_id] for edge_id in loop_graph.get("hot_leg_edge_ids", []) if edge_id in edge_lookup
     ]
     cold_leg_segments = [
-        edge_lookup[edge_id]
-        for edge_id in loop_graph.get("cold_leg_edge_ids", [])
-        if edge_id in edge_lookup
+        edge_lookup[edge_id] for edge_id in loop_graph.get("cold_leg_edge_ids", []) if edge_id in edge_lookup
     ]
     hot_leg_rise_m = sum(float(segment.get("vertical_rise_m", 0.0)) for segment in hot_leg_segments)
     cold_leg_drop_m = sum(float(segment.get("vertical_drop_m", 0.0)) for segment in cold_leg_segments)
@@ -650,17 +644,13 @@ def _build_pressure_budget(
         representative_elevation_span_m = max(highest_elevation_m - lowest_elevation_m, 0.0)
     density_difference_kg_m3 = max(cold_leg_density_kg_m3 - hot_leg_density_kg_m3, 0.0)
     buoyancy_driving_pressure_pa = (
-        density_difference_kg_m3 * GRAVITY_M_S2 * representative_elevation_span_m
-        if buoyancy_geometry_complete
-        else 0.0
+        density_difference_kg_m3 * GRAVITY_M_S2 * representative_elevation_span_m if buoyancy_geometry_complete else 0.0
     )
     net_resistive_pressure_pa = frictional_pressure_drop_pa + local_pressure_drop_pa + hydrostatic_pressure_change_pa
     required_pump_pressure_pa = net_resistive_pressure_pa - buoyancy_driving_pressure_pa
     average_density_kg_m3 = 0.5 * (hot_leg_density_kg_m3 + cold_leg_density_kg_m3)
     thermal_expansion_head_m = (
-        buoyancy_driving_pressure_pa / (average_density_kg_m3 * GRAVITY_M_S2)
-        if average_density_kg_m3 > 0.0
-        else 0.0
+        buoyancy_driving_pressure_pa / (average_density_kg_m3 * GRAVITY_M_S2) if average_density_kg_m3 > 0.0 else 0.0
     )
 
     return {
@@ -687,11 +677,7 @@ def _build_pump_demand_summary(
 ) -> dict[str, float]:
     pump_demand_pressure_pa = max(float(net_required_pressure_pa), 0.0)
     natural_circulation_margin_pa = max(-float(net_required_pressure_pa), 0.0)
-    pump_head_m = (
-        pump_demand_pressure_pa / (salt_density_kg_m3 * GRAVITY_M_S2)
-        if salt_density_kg_m3 > 0.0
-        else 0.0
-    )
+    pump_head_m = pump_demand_pressure_pa / (salt_density_kg_m3 * GRAVITY_M_S2) if salt_density_kg_m3 > 0.0 else 0.0
     hydraulic_power_kw = pump_demand_pressure_pa * max(volumetric_flow_m3_s, 0.0) / 1000.0
     shaft_power_kw = hydraulic_power_kw / pump_efficiency if pump_efficiency > 0.0 else 0.0
     return {
@@ -732,7 +718,9 @@ def _build_heat_exchanger_summary(
         target_cold_leg_temp_c=(
             config.reactor.get("cold_leg_temp_c", 560.0) if primary_cold_leg_c is None else primary_cold_leg_c
         ),
-        required_duty_mw=float(required_duty_mw if required_duty_mw is not None else bop.get("steam_generator_duty_mw", 0.0)),
+        required_duty_mw=float(
+            required_duty_mw if required_duty_mw is not None else bop.get("steam_generator_duty_mw", 0.0)
+        ),
         hx_primary_hydraulic_diameter_m=hx_geometry["primary_hydraulic_diameter_m"],
         hx_primary_flow_area_m2=hx_geometry["primary_flow_area_m2"],
         dynamic_viscosity_pa_s=primary_dynamic_viscosity_pa_s,
@@ -742,7 +730,9 @@ def _build_heat_exchanger_summary(
     primary_hot_leg_c = float(
         primary_inlet_summary.get("mixed_inlet_temp_c")
         if primary_inlet_summary.get("mixed_inlet_temp_c") is not None
-        else config.reactor.get("hot_leg_temp_c", 700.0) if primary_hot_leg_c is None else primary_hot_leg_c
+        else config.reactor.get("hot_leg_temp_c", 700.0)
+        if primary_hot_leg_c is None
+        else primary_hot_leg_c
     )
     primary_cold_leg_c = float(
         config.reactor.get("cold_leg_temp_c", 560.0) if primary_cold_leg_c is None else primary_cold_leg_c
@@ -865,14 +855,9 @@ def _solve_branch_flow_distribution(
     terminal_loss_coefficient: float,
 ) -> dict[str, Any]:
     pipe_runs = {
-        str(pipe_run.get("id")): pipe_run
-        for pipe_run in (primary_loop.get("pipes") or [])
-        if pipe_run.get("id")
+        str(pipe_run.get("id")): pipe_run for pipe_run in (primary_loop.get("pipes") or []) if pipe_run.get("id")
     }
-    edge_flow_m3_s = {
-        str(edge["id"]): float(total_volumetric_flow_m3_s)
-        for edge in loop_graph.get("edges", [])
-    }
+    edge_flow_m3_s = {str(edge["id"]): float(total_volumetric_flow_m3_s) for edge in loop_graph.get("edges", [])}
     branch_groups_summary: list[dict[str, Any]] = []
 
     for group in loop_graph.get("branch_groups", []):
@@ -995,10 +980,7 @@ def _solve_parallel_branch_group_flows(
     solved_total_flow_m3_s = sum(solved_flows.values())
     if solved_total_flow_m3_s > 0.0:
         flow_scale = total_volumetric_flow_m3_s / solved_total_flow_m3_s
-        solved_flows = {
-            branch_id: flow_m3_s * flow_scale
-            for branch_id, flow_m3_s in solved_flows.items()
-        }
+        solved_flows = {branch_id: flow_m3_s * flow_scale for branch_id, flow_m3_s in solved_flows.items()}
     return solved_flows
 
 
@@ -1063,14 +1045,9 @@ def _build_primary_hx_inlet_summary(
     cp_j_kgk: float,
     thermal_conductivity_w_mk: float,
 ) -> dict[str, Any]:
-    edge_lookup = {
-        str(edge.get("id") or edge.get("name")): edge
-        for edge in loop_graph.get("edges", [])
-    }
+    edge_lookup = {str(edge.get("id") or edge.get("name")): edge for edge in loop_graph.get("edges", [])}
     segment_lookup = {
-        str(segment.get("name")): segment
-        for segment in thermal_profile.get("segments", [])
-        if segment.get("name")
+        str(segment.get("name")): segment for segment in thermal_profile.get("segments", []) if segment.get("name")
     }
     hydraulic_segment_lookup = {
         str(segment.get("id") or segment.get("name")): segment
@@ -1078,11 +1055,7 @@ def _build_primary_hx_inlet_summary(
         if segment.get("id") or segment.get("name")
     }
     edge_flow_m3_s = branch_flow_summary.get("edge_flow_m3_s", {})
-    incoming_edges = [
-        edge
-        for edge in edge_lookup.values()
-        if str(edge.get("to") or "") == "heat_exchanger"
-    ]
+    incoming_edges = [edge for edge in edge_lookup.values() if str(edge.get("to") or "") == "heat_exchanger"]
     explicit_area_fraction_sum = 0.0
     explicit_area_fractions: dict[str, float] = {}
     for edge in incoming_edges:
@@ -1099,7 +1072,9 @@ def _build_primary_hx_inlet_summary(
             break
         explicit_area_fractions[edge_id] = area_fraction_value
         explicit_area_fraction_sum += area_fraction_value
-    has_explicit_hx_area_split = len(explicit_area_fractions) == len(incoming_edges) and explicit_area_fraction_sum > 0.0
+    has_explicit_hx_area_split = (
+        len(explicit_area_fractions) == len(incoming_edges) and explicit_area_fraction_sum > 0.0
+    )
     branches: list[dict[str, Any]] = []
     for edge in incoming_edges:
         edge_id = str(edge["id"])
@@ -1114,22 +1089,20 @@ def _build_primary_hx_inlet_summary(
         )
         hydraulic_segment = hydraulic_segment_lookup.get(edge_id, {})
         inlet_temp_c = float(segment.get("outlet_temp_c", segment.get("inlet_temp_c", 0.0)))
-        branch_flow_fraction = mass_flow_kg_s / default_primary_mass_flow_kg_s if default_primary_mass_flow_kg_s > 0.0 else 0.0
+        branch_flow_fraction = (
+            mass_flow_kg_s / default_primary_mass_flow_kg_s if default_primary_mass_flow_kg_s > 0.0 else 0.0
+        )
         local_hot_side_heat_transfer = _estimate_internal_convection(
             density_kg_m3=salt_density_kg_m3,
             dynamic_viscosity_pa_s=dynamic_viscosity_pa_s,
             cp_j_kgk=cp_j_kgk,
             thermal_conductivity_w_mk=thermal_conductivity_w_mk,
-            hydraulic_diameter_m=float(
-                hydraulic_segment.get("inner_diameter_m", hx_primary_hydraulic_diameter_m)
-            ),
+            hydraulic_diameter_m=float(hydraulic_segment.get("inner_diameter_m", hx_primary_hydraulic_diameter_m)),
             velocity_m_s=float(hydraulic_segment.get("velocity_m_s", 0.0)),
         )
         branch_thermal_capacity_w = max(inlet_temp_c - target_cold_leg_temp_c, 0.0) * mass_flow_kg_s * cp_j_kgk
         hx_area_fraction = (
-            explicit_area_fractions[edge_id] / explicit_area_fraction_sum
-            if has_explicit_hx_area_split
-            else None
+            explicit_area_fractions[edge_id] / explicit_area_fraction_sum if has_explicit_hx_area_split else None
         )
         branch_hx_area_m2 = hx_primary_flow_area_m2 * hx_area_fraction if hx_area_fraction is not None else None
         branch_hx_velocity_m_s = (
@@ -1169,7 +1142,9 @@ def _build_primary_hx_inlet_summary(
                     if branch_hx_heat_transfer is not None
                     else None
                 ),
-                "hx_local_velocity_m_s": _round_float(branch_hx_velocity_m_s) if branch_hx_velocity_m_s is not None else None,
+                "hx_local_velocity_m_s": _round_float(branch_hx_velocity_m_s)
+                if branch_hx_velocity_m_s is not None
+                else None,
                 "hx_allocated_flow_area_m2": _round_float(branch_hx_area_m2) if branch_hx_area_m2 is not None else None,
             }
         )
@@ -1181,12 +1156,15 @@ def _build_primary_hx_inlet_summary(
         duty_fraction = (
             thermal_capacity_mw / total_thermal_capacity_mw
             if total_thermal_capacity_mw > 0.0
-            else float(branch["mass_flow_kg_s"]) / total_mass_flow_kg_s if total_mass_flow_kg_s > 0.0 else 0.0
+            else float(branch["mass_flow_kg_s"]) / total_mass_flow_kg_s
+            if total_mass_flow_kg_s > 0.0
+            else 0.0
         )
         branch["duty_fraction"] = _round_float(duty_fraction)
         branch["duty_share_mw"] = _round_float(duty_fraction * duty_mw)
     mixed_inlet_temp_c = (
-        sum(float(branch["mass_flow_kg_s"]) * float(branch["inlet_temp_c"]) for branch in branches) / total_mass_flow_kg_s
+        sum(float(branch["mass_flow_kg_s"]) * float(branch["inlet_temp_c"]) for branch in branches)
+        / total_mass_flow_kg_s
         if total_mass_flow_kg_s > 0.0
         else None
     )
@@ -1232,6 +1210,7 @@ def _evaluate_branch_path_pressure_drop(
         )
     return total_drop_pa
 
+
 def _build_heat_exchanger_geometry(config: Any) -> dict[str, float]:
     reactor = config.reactor
     primary_hydraulic_diameter_m = float(reactor.get("hx_primary_hydraulic_diameter_m", 0.032))
@@ -1267,15 +1246,11 @@ def _estimate_internal_convection(
         else 0.0
     )
     prandtl_number = (
-        cp_j_kgk * dynamic_viscosity_pa_s / thermal_conductivity_w_mk
-        if thermal_conductivity_w_mk > 0.0
-        else 0.0
+        cp_j_kgk * dynamic_viscosity_pa_s / thermal_conductivity_w_mk if thermal_conductivity_w_mk > 0.0 else 0.0
     )
     nusselt_number = _internal_nusselt_number(reynolds_number, prandtl_number)
     heat_transfer_coefficient_w_m2k = (
-        nusselt_number * thermal_conductivity_w_mk / hydraulic_diameter_m
-        if hydraulic_diameter_m > 0.0
-        else 0.0
+        nusselt_number * thermal_conductivity_w_mk / hydraulic_diameter_m if hydraulic_diameter_m > 0.0 else 0.0
     )
     regime = "turbulent" if reynolds_number >= 4000.0 else "transitional" if reynolds_number >= 2300.0 else "laminar"
     return {
@@ -1293,11 +1268,11 @@ def _internal_nusselt_number(reynolds_number: float, prandtl_number: float) -> f
     if reynolds_number < 2300.0:
         return 3.66
     if reynolds_number < 4000.0:
-        turbulent_nu = 0.023 * (4000.0 ** 0.8) * (prandtl_number ** 0.4)
+        turbulent_nu = 0.023 * (4000.0**0.8) * (prandtl_number**0.4)
         laminar_nu = 3.66
         blend = (reynolds_number - 2300.0) / (4000.0 - 2300.0)
         return laminar_nu + blend * (turbulent_nu - laminar_nu)
-    return 0.023 * (reynolds_number ** 0.8) * (prandtl_number ** 0.4)
+    return 0.023 * (reynolds_number**0.8) * (prandtl_number**0.4)
 
 
 def _combine_film_coefficients(*, primary_h_w_m2k: float, secondary_h_w_m2k: float) -> float:
@@ -1313,7 +1288,9 @@ def _build_inventory_summary(
     primary_loop: dict[str, Any],
 ) -> dict[str, Any]:
     bulk_temperature_c = average_primary_temperature_c(config.reactor)
-    salt_density_kg_m3 = float(evaluate_primary_coolant_properties(config, temperature_c=bulk_temperature_c)["density_kg_m3"])
+    salt_density_kg_m3 = float(
+        evaluate_primary_coolant_properties(config, temperature_c=bulk_temperature_c)["density_kg_m3"]
+    )
     shell_lookup = {shell["name"]: shell for shell in geometry_description.get("shells", [])}
     lower_plenum_m3 = _shell_volume_m3(shell_lookup.get("lower_plenum"))
     upper_plenum_m3 = _shell_volume_m3(shell_lookup.get("upper_plenum"))
@@ -1344,7 +1321,11 @@ def _build_inventory_summary(
 
     coolant_material = pool.get("material")
     coolant_density_kg_m3 = (
-        float(evaluate_fluid_properties(config.materials[coolant_material], temperature_c=bulk_temperature_c)["density_kg_m3"])
+        float(
+            evaluate_fluid_properties(config.materials[coolant_material], temperature_c=bulk_temperature_c)[
+                "density_kg_m3"
+            ]
+        )
         if coolant_material in config.materials
         else 0.0
     )
@@ -1387,14 +1368,8 @@ def _build_primary_thermal_profile(
     target_cold_leg_temp_c = float(reactor.get("cold_leg_temp_c", 560.0))
     target_hot_leg_temp_c = float(reactor.get("hot_leg_temp_c", 700.0))
     target_delta_t_c = target_hot_leg_temp_c - target_cold_leg_temp_c
-    component_lookup = {
-        str(component["id"]): component
-        for component in loop_graph.get("components", [])
-    }
-    edge_lookup = {
-        str(edge["id"]): edge
-        for edge in loop_graph.get("edges", [])
-    }
+    component_lookup = {str(component["id"]): component for component in loop_graph.get("components", [])}
+    edge_lookup = {str(edge["id"]): edge for edge in loop_graph.get("edges", [])}
     cycle_edge_ids = list(loop_graph.get("cycle_edge_ids", []))
     if fixed_primary_mass_flow_kg_s is not None:
         solved_profile = _simulate_primary_loop_network_pass(
@@ -1428,7 +1403,9 @@ def _build_primary_thermal_profile(
             initial_mass_flow_kg_s=initial_mass_flow_kg_s,
             salt_density_kg_m3=float(salt_density_kg_m3 or 0.0),
             dynamic_viscosity_pa_s=float(
-                salt_properties["dynamic_viscosity_pa_s"] if salt_properties.get("dynamic_viscosity_pa_s") is not None else 0.012
+                salt_properties["dynamic_viscosity_pa_s"]
+                if salt_properties.get("dynamic_viscosity_pa_s") is not None
+                else 0.012
             ),
             elbow_loss_coefficient=float(reactor.get("primary_elbow_loss_coefficient", 0.9)),
             terminal_loss_coefficient=float(reactor.get("primary_terminal_loss_coefficient", 1.6)),
@@ -1449,10 +1426,13 @@ def _build_primary_thermal_profile(
         "solver_iterations": int(solved_profile["iterations"]),
         "solved_primary_mass_flow_kg_s": _round_float(solved_profile["primary_mass_flow_kg_s"]),
         "mass_flow_error_kg_s": _round_float(solved_profile["primary_mass_flow_kg_s"] - initial_mass_flow_kg_s),
-        "required_heat_exchanger_duty_mw": _round_float(abs(solved_profile["required_heat_exchanger_heat_kw"]) / 1000.0),
+        "required_heat_exchanger_duty_mw": _round_float(
+            abs(solved_profile["required_heat_exchanger_heat_kw"]) / 1000.0
+        ),
         "available_heat_exchanger_duty_mw": _round_float(float(bop.get("steam_generator_duty_mw", 0.0))),
         "heat_exchanger_duty_error_mw": _round_float(
-            float(bop.get("steam_generator_duty_mw", 0.0)) - abs(solved_profile["required_heat_exchanger_heat_kw"]) / 1000.0
+            float(bop.get("steam_generator_duty_mw", 0.0))
+            - abs(solved_profile["required_heat_exchanger_heat_kw"]) / 1000.0
         ),
         "total_pipe_heat_loss_kw": _round_float(solved_profile["total_pipe_heat_loss_kw"]),
         "segments": solved_profile["segments"],
@@ -1752,8 +1732,7 @@ def _simulate_primary_loop_network_pass(
     for edge in loop_graph.get("edges", []):
         outgoing_edges.setdefault(str(edge.get("from") or ""), []).append(edge)
     branch_groups_by_split = {
-        str(group.get("split_component_id", "")): group
-        for group in loop_graph.get("branch_groups", [])
+        str(group.get("split_component_id", "")): group for group in loop_graph.get("branch_groups", [])
     }
     visited_edges: set[str] = set()
     visited_branch_splits: set[str] = set()
@@ -1814,9 +1793,7 @@ def _simulate_primary_loop_network_pass(
             continue
 
         candidate_edges = [
-            edge
-            for edge in outgoing_edges.get(current_component_id, [])
-            if str(edge["id"]) not in visited_edges
+            edge for edge in outgoing_edges.get(current_component_id, []) if str(edge["id"]) not in visited_edges
         ]
         if len(candidate_edges) != 1:
             break
@@ -1877,7 +1854,10 @@ def _simulate_primary_loop_network_pass(
                 hot_leg_temp_c = core_outlet_temp_c
             elif component_kind == "heat_sink":
                 required_heat_exchanger_heat_kw = -max(
-                    (current_temp_c - target_cold_leg_temp_c) * default_primary_mass_flow_kg_s * primary_cp_j_kgk / 1000.0,
+                    (current_temp_c - target_cold_leg_temp_c)
+                    * default_primary_mass_flow_kg_s
+                    * primary_cp_j_kgk
+                    / 1000.0,
                     0.0,
                 )
                 thermal_segments.append(
@@ -1979,20 +1959,14 @@ def _build_fuel_cycle_summary(config: Any, bop: dict[str, Any], inventory_summar
     specific_power_mw_per_t_hm = thermal_power_mw / (heavy_metal_mass_kg / 1000.0) if heavy_metal_mass_kg > 0.0 else 0.0
     cleanup_turnover_hours = cleanup_turnover_days * 24.0
     depletion_assumptions = build_depletion_assumptions(config)
-    fissile_burn_fraction_per_day_full_power = float(
-        depletion_assumptions["fissile_burn_fraction_per_day_full_power"]
-    )
+    fissile_burn_fraction_per_day_full_power = float(depletion_assumptions["fissile_burn_fraction_per_day_full_power"])
     breeding_gain_fraction_per_day = float(depletion_assumptions["breeding_gain_fraction_per_day"])
-    minor_actinide_sink_fraction_per_day = float(
-        depletion_assumptions["minor_actinide_sink_fraction_per_day"]
-    )
+    minor_actinide_sink_fraction_per_day = float(depletion_assumptions["minor_actinide_sink_fraction_per_day"])
     equilibrium_protactinium_inventory_fraction = breeding_gain_fraction_per_day * float(
         depletion_assumptions["protactinium_holdup_days"]
     )
     net_fissile_change_fraction_per_day = (
-        breeding_gain_fraction_per_day
-        - fissile_burn_fraction_per_day_full_power
-        - minor_actinide_sink_fraction_per_day
+        breeding_gain_fraction_per_day - fissile_burn_fraction_per_day_full_power - minor_actinide_sink_fraction_per_day
     )
 
     return {
@@ -2091,6 +2065,7 @@ def _build_primary_system_checks(
         for name, passed, success, failure in checks
     ]
 
+
 def _shell_volume_m3(shell: dict[str, Any] | None) -> float:
     if not shell:
         return 0.0
@@ -2112,7 +2087,9 @@ def _dished_pool_fill_volume_m3(
         return 0.0
     cylinder_fill_height_cm = max(min(fill_top_z_cm - cylinder_bottom_z_cm, fill_top_z_cm), 0.0)
     cylinder_volume_cm3 = math.pi * inner_radius_cm * inner_radius_cm * cylinder_fill_height_cm
-    head_volume_cm3 = _dished_head_volume_cm3(inner_radius_cm, head_depth_cm) if fill_top_z_cm > cylinder_bottom_z_cm else 0.0
+    head_volume_cm3 = (
+        _dished_head_volume_cm3(inner_radius_cm, head_depth_cm) if fill_top_z_cm > cylinder_bottom_z_cm else 0.0
+    )
     return (cylinder_volume_cm3 + head_volume_cm3) * 1.0e-6
 
 
@@ -2174,7 +2151,7 @@ def _primary_loop_hardware_displacement_m3(primary_loop: dict[str, Any]) -> floa
     for pipe_run in pipe_runs:
         radius_cm = float(pipe_run.get("radius_cm", 0.0))
         points = [tuple(float(value) for value in point) for point in pipe_run.get("points", [])]
-        for start, stop in zip(points, points[1:]):
+        for start, stop in itertools.pairwise(points):
             length_cm = math.dist(start, stop)
             pipe_volume_cm3 += math.pi * radius_cm * radius_cm * length_cm
 
@@ -2194,7 +2171,7 @@ def _darcy_friction_factor(reynolds_number: float) -> float:
         return 0.0
     if reynolds_number < 2300.0:
         return 64.0 / reynolds_number
-    return 0.3164 / (reynolds_number ** 0.25)
+    return 0.3164 / (reynolds_number**0.25)
 
 
 def _round_float(value: float) -> float:

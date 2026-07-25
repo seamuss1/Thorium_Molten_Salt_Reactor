@@ -7,10 +7,10 @@ import math
 import os
 import subprocess
 import sys
-from pathlib import Path
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Sequence
-
+from pathlib import Path
+from typing import Any
 
 SUPPORTED_ARRAY_BACKENDS = ("python", "numpy", "torch-cpu", "torch-xpu")
 VECTOR_ARRAY_BACKENDS = ("numpy", "torch-cpu", "torch-xpu")
@@ -235,12 +235,16 @@ class TorchBackend(ArrayBackend):
         self.torch.manual_seed(seed)
 
     def asarray(self, value: Any, *, dtype: str | None = None) -> Any:
-        resolved_dtype = self.dtype if dtype is None else {
-            "float32": self.torch.float32,
-            "float64": self.torch.float64,
-            "float16": self.torch.float16,
-            "bfloat16": self.torch.bfloat16,
-        }[dtype]
+        resolved_dtype = (
+            self.dtype
+            if dtype is None
+            else {
+                "float32": self.torch.float32,
+                "float64": self.torch.float64,
+                "float16": self.torch.float16,
+                "bfloat16": self.torch.bfloat16,
+            }[dtype]
+        )
         return self.torch.tensor(value, dtype=resolved_dtype, device=self.device)
 
     def full(self, shape: tuple[int, ...], value: float) -> Any:
@@ -330,7 +334,9 @@ class TorchBackend(ArrayBackend):
         return None
 
 
-def create_array_backend(name: str, *, dtype: str = DEFAULT_DTYPE, seed: int = 42) -> ArrayBackend | PythonReferenceBackend:
+def create_array_backend(
+    name: str, *, dtype: str = DEFAULT_DTYPE, seed: int = 42
+) -> ArrayBackend | PythonReferenceBackend:
     if name == "python":
         return PythonReferenceBackend()
     if name == "numpy":
@@ -354,7 +360,9 @@ def resolve_runtime_backend(
         raise BackendUnavailable(f"Unsupported array backend: {requested}")
     if requested != "auto":
         create_array_backend(requested, dtype=dtype, seed=seed)
-        return BackendSelection(requested=requested, selected=requested, reason="explicit backend requested", dtype=dtype)
+        return BackendSelection(
+            requested=requested, selected=requested, reason="explicit backend requested", dtype=dtype
+        )
 
     try:
         create_array_backend("torch-xpu", dtype=dtype, seed=seed)

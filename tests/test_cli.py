@@ -5,11 +5,17 @@ from pathlib import Path
 
 import pytest
 
-from thorium_reactor.cli import _finish_cli_stage, _load_or_create_bundle, _stage_command_from_argv, build_parser, main, resolve_benchmark_runtime
+from thorium_reactor.cli import (
+    _finish_cli_stage,
+    _load_or_create_bundle,
+    _stage_command_from_argv,
+    build_parser,
+    main,
+    resolve_benchmark_runtime,
+)
 from thorium_reactor.paths import create_result_bundle, snapshot_bundle_artifacts
 from thorium_reactor.transient_sweep import DEFAULT_TRANSIENT_SWEEP_SAMPLES
 from thorium_reactor.uncertainty import DEFAULT_UNCERTAINTY_SWEEP_SAMPLES
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -85,19 +91,21 @@ def test_cli_registers_external_integration_commands() -> None:
 
 def test_cli_registers_transient_sweep_command() -> None:
     parser = build_parser()
-    namespace = parser.parse_args([
-        "transient-sweep",
-        "immersed_pool_reference",
-        "--scenario",
-        "partial_heat_sink_loss",
-        "--samples",
-        "1024",
-        "--seed",
-        "7",
-        "--prefer-gpu",
-        "--backend",
-        "numpy",
-    ])
+    namespace = parser.parse_args(
+        [
+            "transient-sweep",
+            "immersed_pool_reference",
+            "--scenario",
+            "partial_heat_sink_loss",
+            "--samples",
+            "1024",
+            "--seed",
+            "7",
+            "--prefer-gpu",
+            "--backend",
+            "numpy",
+        ]
+    )
 
     assert namespace.command == "transient-sweep"
     assert namespace.case == "immersed_pool_reference"
@@ -118,15 +126,17 @@ def test_cli_transient_sweep_defaults_to_gpu_sized_ensemble() -> None:
 
 def test_cli_registers_runtime_benchmark_command() -> None:
     parser = build_parser()
-    namespace = parser.parse_args([
-        "runtime-benchmark",
-        "immersed_pool_reference",
-        "--samples",
-        "128",
-        "--backends",
-        "python,numpy",
-        "--fail-on-gpu-fallback",
-    ])
+    namespace = parser.parse_args(
+        [
+            "runtime-benchmark",
+            "immersed_pool_reference",
+            "--samples",
+            "128",
+            "--backends",
+            "python,numpy",
+            "--fail-on-gpu-fallback",
+        ]
+    )
 
     assert namespace.command == "runtime-benchmark"
     assert namespace.case == "immersed_pool_reference"
@@ -194,8 +204,13 @@ def test_cli_run_writes_stage_manifest_and_artifact_status(tmp_path: Path) -> No
     scratch = tmp_path / "repo"
     (scratch / "configs" / "cases" / "example_pin").mkdir(parents=True)
     (scratch / "benchmarks" / "tmsr_lf1").mkdir(parents=True)
-    shutil.copy2(REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml", scratch / "configs" / "cases" / "example_pin" / "case.yaml")
-    shutil.copy2(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", scratch / "benchmarks" / "tmsr_lf1" / "benchmark.yaml")
+    shutil.copy2(
+        REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml",
+        scratch / "configs" / "cases" / "example_pin" / "case.yaml",
+    )
+    shutil.copy2(
+        REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", scratch / "benchmarks" / "tmsr_lf1" / "benchmark.yaml"
+    )
 
     assert main(["--repo-root", str(scratch), "run", "example_pin", "--run-id", "cli-stage", "--no-solver"]) == 0
 
@@ -269,15 +284,22 @@ def test_cli_records_failed_stage_when_command_raises(tmp_path: Path) -> None:
     scratch = tmp_path / "repo"
     (scratch / "configs" / "cases" / "example_pin").mkdir(parents=True)
     (scratch / "benchmarks" / "tmsr_lf1").mkdir(parents=True)
-    shutil.copy2(REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml", scratch / "configs" / "cases" / "example_pin" / "case.yaml")
-    shutil.copy2(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", scratch / "benchmarks" / "tmsr_lf1" / "benchmark.yaml")
+    shutil.copy2(
+        REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml",
+        scratch / "configs" / "cases" / "example_pin" / "case.yaml",
+    )
+    shutil.copy2(
+        REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", scratch / "benchmarks" / "tmsr_lf1" / "benchmark.yaml"
+    )
 
     # report on a bundle with no summary.json raises FileNotFoundError.
     create_result_bundle(scratch, "example_pin", "no-summary")
     with pytest.raises(FileNotFoundError):
         main(["--repo-root", str(scratch), "report", "example_pin", "--run-id", "no-summary"])
 
-    manifest = json.loads((scratch / "results" / "example_pin" / "no-summary" / "stage_manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (scratch / "results" / "example_pin" / "no-summary" / "stage_manifest.json").read_text(encoding="utf-8")
+    )
     failed = [stage for stage in manifest["stages"] if stage["status"] == "failed"]
     assert failed and failed[-1]["stage"] == "report"
     assert failed[-1].get("message")
@@ -287,8 +309,13 @@ def test_cli_verify_bundle_passes_for_dry_run_report(tmp_path: Path) -> None:
     scratch = tmp_path / "repo"
     (scratch / "configs" / "cases" / "example_pin").mkdir(parents=True)
     (scratch / "benchmarks" / "tmsr_lf1").mkdir(parents=True)
-    shutil.copy2(REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml", scratch / "configs" / "cases" / "example_pin" / "case.yaml")
-    shutil.copy2(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", scratch / "benchmarks" / "tmsr_lf1" / "benchmark.yaml")
+    shutil.copy2(
+        REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml",
+        scratch / "configs" / "cases" / "example_pin" / "case.yaml",
+    )
+    shutil.copy2(
+        REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", scratch / "benchmarks" / "tmsr_lf1" / "benchmark.yaml"
+    )
 
     assert main(["--repo-root", str(scratch), "run", "example_pin", "--run-id", "vb", "--no-solver"]) == 0
     assert main(["--repo-root", str(scratch), "report", "example_pin", "--run-id", "vb"]) == 0
@@ -299,8 +326,13 @@ def test_cli_verify_bundle_fails_on_stale_summary_status(tmp_path: Path) -> None
     scratch = tmp_path / "repo"
     (scratch / "configs" / "cases" / "example_pin").mkdir(parents=True)
     (scratch / "benchmarks" / "tmsr_lf1").mkdir(parents=True)
-    shutil.copy2(REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml", scratch / "configs" / "cases" / "example_pin" / "case.yaml")
-    shutil.copy2(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", scratch / "benchmarks" / "tmsr_lf1" / "benchmark.yaml")
+    shutil.copy2(
+        REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml",
+        scratch / "configs" / "cases" / "example_pin" / "case.yaml",
+    )
+    shutil.copy2(
+        REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", scratch / "benchmarks" / "tmsr_lf1" / "benchmark.yaml"
+    )
 
     assert main(["--repo-root", str(scratch), "run", "example_pin", "--run-id", "vb", "--no-solver"]) == 0
     assert main(["--repo-root", str(scratch), "report", "example_pin", "--run-id", "vb"]) == 0

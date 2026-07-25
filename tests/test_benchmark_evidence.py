@@ -12,7 +12,6 @@ from thorium_reactor.config import load_case_config, load_yaml
 from thorium_reactor.paths import create_result_bundle, refresh_bundle_artifact_statuses
 from thorium_reactor.reporting.plots import _resolve_statepoint_path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 

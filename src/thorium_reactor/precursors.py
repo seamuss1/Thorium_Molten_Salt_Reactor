@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 TWO_REGION_PRECURSOR_TRANSPORT_MODEL = "two_region_six_group_advection_decay"
 LOOP_SEGMENT_PRECURSOR_TRANSPORT_MODEL = "loop_segment_six_group_advection_decay"
 SUPPORTED_PRECURSOR_TRANSPORT_MODELS = {
@@ -22,9 +21,7 @@ DEFAULT_DELAYED_NEUTRON_PRECURSOR_GROUPS: tuple[dict[str, float | str], ...] = (
 
 def resolve_precursor_transport(transient_config: dict[str, Any]) -> dict[str, Any]:
     groups = normalize_precursor_groups(transient_config.get("delayed_neutron_precursor_groups"))
-    requested_model = str(
-        transient_config.get("precursor_transport_model", DEFAULT_PRECURSOR_TRANSPORT_MODEL)
-    )
+    requested_model = str(transient_config.get("precursor_transport_model", DEFAULT_PRECURSOR_TRANSPORT_MODEL))
     transport_model = (
         requested_model
         if requested_model in SUPPORTED_PRECURSOR_TRANSPORT_MODELS
@@ -34,9 +31,7 @@ def resolve_precursor_transport(transient_config: dict[str, Any]) -> dict[str, A
         "precursor_transport_model": transport_model,
         "delayed_neutron_precursor_groups": groups,
         "delayed_neutron_group_count": len(groups),
-        "delayed_neutron_total_yield_fraction": _round_float(
-            sum(float(group["yield_fraction"]) for group in groups)
-        ),
+        "delayed_neutron_total_yield_fraction": _round_float(sum(float(group["yield_fraction"]) for group in groups)),
     }
 
 
@@ -125,12 +120,10 @@ def build_initial_precursor_state(
     loop_inventory = sum(loop_inventories)
     total_inventory = core_inventory + loop_inventory
     core_delayed_source = sum(
-        float(group["decay_constant_s"]) * core_inventories[index]
-        for index, group in enumerate(groups)
+        float(group["decay_constant_s"]) * core_inventories[index] for index, group in enumerate(groups)
     )
     loop_delayed_source = sum(
-        float(group["decay_constant_s"]) * loop_inventories[index]
-        for index, group in enumerate(groups)
+        float(group["decay_constant_s"]) * loop_inventories[index] for index, group in enumerate(groups)
     )
     total_delayed_source = core_delayed_source + loop_delayed_source
     state["steady_state"] = {
@@ -139,9 +132,7 @@ def build_initial_precursor_state(
         "core_precursor_fraction": core_inventory / max(total_inventory, 1.0e-12),
         "core_delayed_neutron_source": core_delayed_source,
         "total_delayed_neutron_source": total_delayed_source,
-        "core_delayed_neutron_source_absolute_fraction": (
-            core_delayed_source / max(total_delayed_source, 1.0e-12)
-        ),
+        "core_delayed_neutron_source_absolute_fraction": (core_delayed_source / max(total_delayed_source, 1.0e-12)),
         "precursor_transport_loss_fraction": loop_delayed_source / max(total_delayed_source, 1.0e-12),
         "loop_segment_count": len(segment_specs) if transport_model == LOOP_SEGMENT_PRECURSOR_TRANSPORT_MODEL else 1,
     }
@@ -167,9 +158,7 @@ def step_precursor_state(
     dt = max(float(dt_s), 0.0)
     cleanup_rate = max(float(cleanup_rate_s), 0.0)
     model = str(state.get("transport_model", transport_model))
-    segment_specs = normalize_loop_segments(
-        loop_segments if loop_segments is not None else state.get("loop_segments")
-    )
+    segment_specs = normalize_loop_segments(loop_segments if loop_segments is not None else state.get("loop_segments"))
 
     new_core: list[float] = []
     new_loop: list[float] = []
@@ -233,12 +222,10 @@ def summarize_precursor_state(
     loop_inventory = sum(loop_inventories)
     total_inventory = core_inventory + loop_inventory
     core_delayed_source = sum(
-        float(group["decay_constant_s"]) * core_inventories[index]
-        for index, group in enumerate(groups)
+        float(group["decay_constant_s"]) * core_inventories[index] for index, group in enumerate(groups)
     )
     loop_delayed_source = sum(
-        float(group["decay_constant_s"]) * loop_inventories[index]
-        for index, group in enumerate(groups)
+        float(group["decay_constant_s"]) * loop_inventories[index] for index, group in enumerate(groups)
     )
     total_delayed_source = core_delayed_source + loop_delayed_source
     segment_sources = _segment_delayed_sources(state, groups)
@@ -263,10 +250,8 @@ def summarize_precursor_state(
         "core_delayed_neutron_source_absolute_fraction": _round_float(
             core_delayed_source / max(total_delayed_source, 1.0e-12)
         ),
-        "precursor_transport_loss_fraction": _round_float(
-            loop_delayed_source / max(total_delayed_source, 1.0e-12)
-        ),
-        "loop_segment_count": int(len(state.get("loop_segments") or [])),
+        "precursor_transport_loss_fraction": _round_float(loop_delayed_source / max(total_delayed_source, 1.0e-12)),
+        "loop_segment_count": len(state.get("loop_segments") or []),
         "peak_loop_segment_delayed_neutron_source_fraction": _round_float(
             max(segment_sources) / max(total_delayed_source, 1.0e-12) if segment_sources else 0.0
         ),
@@ -315,9 +300,7 @@ def precursor_loop_segment_summary(
                 "inventory": _round_float(segment_inventories[index]),
                 "inventory_fraction": _round_float(segment_inventories[index] / max(total_inventory, 1.0e-12)),
                 "delayed_neutron_source": _round_float(segment_sources[index]),
-                "delayed_neutron_source_fraction": _round_float(
-                    segment_sources[index] / max(total_source, 1.0e-12)
-                ),
+                "delayed_neutron_source_fraction": _round_float(segment_sources[index] / max(total_source, 1.0e-12)),
             }
         )
     return summary
@@ -466,12 +449,7 @@ def _step_segmented_group_inventory(
     dt = max(dt_s, 0.0)
     segment_transport_rates = _segment_transport_rates(loop_residence_time_s, segments)
     segment_diagonals = [
-        1.0
-        + dt * (
-            segment_transport_rates[index]
-            + decay
-            + cleanup_rate_s * float(segment["cleanup_weight"])
-        )
+        1.0 + dt * (segment_transport_rates[index] + decay + cleanup_rate_s * float(segment["cleanup_weight"]))
         for index, segment in enumerate(segments)
     ]
 
@@ -481,7 +459,9 @@ def _step_segmented_group_inventory(
     prior_slope = dt * core_transport_rate_s
     for index, diagonal in enumerate(segment_diagonals):
         if index > 0:
-            prior_constant = max(prior_segments[index], 0.0) + dt * segment_transport_rates[index - 1] * affine_constants[-1]
+            prior_constant = (
+                max(prior_segments[index], 0.0) + dt * segment_transport_rates[index - 1] * affine_constants[-1]
+            )
             prior_slope = dt * segment_transport_rates[index - 1] * affine_slopes[-1]
         affine_constants.append(prior_constant / max(diagonal, 1.0e-18))
         affine_slopes.append(prior_slope / max(diagonal, 1.0e-18))
@@ -489,12 +469,11 @@ def _step_segmented_group_inventory(
     core_diagonal = 1.0 + dt * (core_transport_rate_s + decay)
     rhs_core = max(core_inventory, 0.0) + dt * max(source_rate, 0.0)
     return_rate = dt * segment_transport_rates[-1]
-    next_core = (
-        rhs_core + return_rate * affine_constants[-1]
-    ) / max(core_diagonal - return_rate * affine_slopes[-1], 1.0e-18)
+    next_core = (rhs_core + return_rate * affine_constants[-1]) / max(
+        core_diagonal - return_rate * affine_slopes[-1], 1.0e-18
+    )
     next_segments = [
-        max(affine_constants[index] + affine_slopes[index] * next_core, 0.0)
-        for index in range(len(segments))
+        max(affine_constants[index] + affine_slopes[index] * next_core, 0.0) for index in range(len(segments))
     ]
     return max(next_core, 0.0), next_segments
 

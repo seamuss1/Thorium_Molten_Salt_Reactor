@@ -19,10 +19,9 @@ from thorium_reactor.capabilities import (
 )
 from thorium_reactor.cli import main
 from thorium_reactor.config import load_case_config
-from thorium_reactor.neutronics.workflows import run_case
 from thorium_reactor.neutronics import workflows
+from thorium_reactor.neutronics.workflows import run_case
 from thorium_reactor.paths import create_result_bundle
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -44,10 +43,18 @@ def test_example_pin_run_no_solver_succeeds_end_to_end() -> None:
         exit_code = main(["--repo-root", str(scratch_root), "run", "example_pin", "--run-id", "smoke", "--no-solver"])
 
         assert exit_code == 0
-        summary = json.loads((scratch_root / "results" / "example_pin" / "smoke" / "summary.json").read_text(encoding="utf-8"))
-        validation = json.loads((scratch_root / "results" / "example_pin" / "smoke" / "validation.json").read_text(encoding="utf-8"))
-        runtime_context = json.loads((scratch_root / "results" / "example_pin" / "smoke" / "runtime_context.json").read_text(encoding="utf-8"))
-        state_store = json.loads((scratch_root / "results" / "example_pin" / "smoke" / "state_store.json").read_text(encoding="utf-8"))
+        summary = json.loads(
+            (scratch_root / "results" / "example_pin" / "smoke" / "summary.json").read_text(encoding="utf-8")
+        )
+        validation = json.loads(
+            (scratch_root / "results" / "example_pin" / "smoke" / "validation.json").read_text(encoding="utf-8")
+        )
+        runtime_context = json.loads(
+            (scratch_root / "results" / "example_pin" / "smoke" / "runtime_context.json").read_text(encoding="utf-8")
+        )
+        state_store = json.loads(
+            (scratch_root / "results" / "example_pin" / "smoke" / "state_store.json").read_text(encoding="utf-8")
+        )
         assert summary["neutronics"]["status"] == "dry-run"
         assert summary["neutronics"]["message"] == "Solver execution was disabled for this run."
         assert summary["workflow_capabilities"] == [NEUTRONICS_ONLY]
@@ -78,7 +85,12 @@ def test_solver_enabled_without_openmc_reports_missing_solver_status() -> None:
 
         summary = run_case(config, bundle, solver_enabled=True)
 
-        assert summary["neutronics"]["status"] in {"completed", "completed_without_statepoint", "failed", "skipped_missing_solver"}
+        assert summary["neutronics"]["status"] in {
+            "completed",
+            "completed_without_statepoint",
+            "failed",
+            "skipped_missing_solver",
+        }
         if summary["neutronics"]["status"] == "skipped_missing_solver":
             assert "docker compose run --rm openmc" in summary["neutronics"]["message"]
     finally:
@@ -152,7 +164,13 @@ def test_capability_inference_distinguishes_generic_and_msr_cases() -> None:
 
     assert get_case_capabilities(example_pin) == {NEUTRONICS_ONLY}
     assert get_case_capabilities(tmsr_core) == {NEUTRONICS_ONLY, BALANCE_OF_PLANT, THERMAL_NETWORK, TRANSIENT_ANALYSIS}
-    assert get_case_capabilities(immersed_pool) == {NEUTRONICS_ONLY, BALANCE_OF_PLANT, THERMAL_NETWORK, MSR_PRIMARY_SYSTEM, TRANSIENT_ANALYSIS}
+    assert get_case_capabilities(immersed_pool) == {
+        NEUTRONICS_ONLY,
+        BALANCE_OF_PLANT,
+        THERMAL_NETWORK,
+        MSR_PRIMARY_SYSTEM,
+        TRANSIENT_ANALYSIS,
+    }
     assert get_case_capabilities(flagship) == {
         NEUTRONICS_ONLY,
         BALANCE_OF_PLANT,
@@ -262,7 +280,10 @@ def test_transient_command_produces_configured_history() -> None:
             )
         )
         assert summary["transient"]["scenario_name"] == "partial_heat_sink_loss"
-        assert summary["transient"]["peak_fuel_temperature_c"] >= summary["primary_system"]["thermal_profile"]["estimated_hot_leg_temp_c"]
+        assert (
+            summary["transient"]["peak_fuel_temperature_c"]
+            >= summary["primary_system"]["thermal_profile"]["estimated_hot_leg_temp_c"]
+        )
         assert transient["metrics"]["history_points"] > 10
         assert transient["depletion"]["chain"] == "thorium_u233_cleanup_proxy"
         assert transient["chemistry"]["model"] == "salt_redox_cleanup_proxy"
@@ -295,11 +316,21 @@ def test_external_integration_commands_export_inputs_and_update_summary() -> Non
         moose_summary = run_case(config, bundle, solver_enabled=False)
         assert "integrations" not in moose_summary
 
-        moose_exit = main(["--repo-root", str(scratch_root), "moose", "immersed_pool_reference", "--run-id", "integrations"])
-        scale_exit = main(["--repo-root", str(scratch_root), "scale", "immersed_pool_reference", "--run-id", "integrations"])
-        thermochimica_exit = main(["--repo-root", str(scratch_root), "thermochimica", "immersed_pool_reference", "--run-id", "integrations"])
-        saltproc_exit = main(["--repo-root", str(scratch_root), "saltproc", "immersed_pool_reference", "--run-id", "integrations"])
-        moltres_exit = main(["--repo-root", str(scratch_root), "moltres", "immersed_pool_reference", "--run-id", "integrations"])
+        moose_exit = main(
+            ["--repo-root", str(scratch_root), "moose", "immersed_pool_reference", "--run-id", "integrations"]
+        )
+        scale_exit = main(
+            ["--repo-root", str(scratch_root), "scale", "immersed_pool_reference", "--run-id", "integrations"]
+        )
+        thermochimica_exit = main(
+            ["--repo-root", str(scratch_root), "thermochimica", "immersed_pool_reference", "--run-id", "integrations"]
+        )
+        saltproc_exit = main(
+            ["--repo-root", str(scratch_root), "saltproc", "immersed_pool_reference", "--run-id", "integrations"]
+        )
+        moltres_exit = main(
+            ["--repo-root", str(scratch_root), "moltres", "immersed_pool_reference", "--run-id", "integrations"]
+        )
 
         assert moose_exit == 0
         assert scale_exit == 0
@@ -341,7 +372,10 @@ def test_external_integration_commands_export_inputs_and_update_summary() -> Non
         assert moltres_handoff["tool"] == "moltres"
         assert moose_payload["provenance"]["runtime_context"]["command"] == ["moose", "immersed_pool_reference"]
         assert thermochimica_payload["provenance"]["runtime_context"]["tool_version"] in {None, "python-container"}
-        assert thermochimica_handoff["provenance"]["runtime_context"]["command"] == ["thermochimica", "immersed_pool_reference"]
+        assert thermochimica_handoff["provenance"]["runtime_context"]["command"] == [
+            "thermochimica",
+            "immersed_pool_reference",
+        ]
         assert moose_handoff["geometry"]["channel_count"] == summary["metrics"]["channel_count"]
         assert scale_handoff["materials"]["fuel_salt"]["nuclide_count"] > 0
     finally:
@@ -369,7 +403,9 @@ def test_integration_runtime_provenance_uses_explicit_repo_root(monkeypatch) -> 
         shutil.copy2(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml", case_dir / "case.yaml")
         shutil.copy2(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", benchmark_dir / "benchmark.yaml")
 
-        exit_code = main(["--repo-root", str(scratch_root), "thermochimica", "immersed_pool_reference", "--run-id", "repo-root"])
+        exit_code = main(
+            ["--repo-root", str(scratch_root), "thermochimica", "immersed_pool_reference", "--run-id", "repo-root"]
+        )
         assert exit_code == 0
 
         # The integration must describe the target repo, not the process cwd.
@@ -389,18 +425,34 @@ def test_render_command_uses_existing_run_state_and_emits_visual_assets() -> Non
         shutil.copy2(REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml", case_dir / "case.yaml")
         shutil.copy2(REPO_ROOT / "benchmarks" / "tmsr_lf1" / "benchmark.yaml", benchmark_dir / "benchmark.yaml")
 
-        run_exit = main(["--repo-root", str(scratch_root), "run", "immersed_pool_reference", "--run-id", "render-smoke", "--no-solver"])
+        run_exit = main(
+            [
+                "--repo-root",
+                str(scratch_root),
+                "run",
+                "immersed_pool_reference",
+                "--run-id",
+                "render-smoke",
+                "--no-solver",
+            ]
+        )
         assert run_exit == 0
 
-        render_assets_path = scratch_root / "results" / "immersed_pool_reference" / "render-smoke" / "render_assets.json"
+        render_assets_path = (
+            scratch_root / "results" / "immersed_pool_reference" / "render-smoke" / "render_assets.json"
+        )
         assert not render_assets_path.exists()
 
-        render_exit = main(["--repo-root", str(scratch_root), "render", "immersed_pool_reference", "--run-id", "render-smoke"])
+        render_exit = main(
+            ["--repo-root", str(scratch_root), "render", "immersed_pool_reference", "--run-id", "render-smoke"]
+        )
         assert render_exit == 0
 
         assets = json.loads(render_assets_path.read_text(encoding="utf-8"))
         summary = json.loads(
-            (scratch_root / "results" / "immersed_pool_reference" / "render-smoke" / "summary.json").read_text(encoding="utf-8")
+            (scratch_root / "results" / "immersed_pool_reference" / "render-smoke" / "summary.json").read_text(
+                encoding="utf-8"
+            )
         )
         assert Path(assets["hero_cutaway"]).exists()
         assert Path(assets["annotated_cutaway"]).exists()

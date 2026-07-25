@@ -9,7 +9,6 @@ from thorium_reactor.paths import create_result_bundle
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot
 from thorium_reactor.reporting.reports import build_presentation_qa, generate_report
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -668,9 +667,7 @@ def test_report_includes_reduced_order_flow_section() -> None:
                         "cfl": 0.35,
                         "conservation_residual": 2.0e-8,
                         "minimum_field_value": 0.0,
-                        "source_fractions": {
-                            "delayed_neutron_precursors": {"outlet_source_fraction": 0.12}
-                        },
+                        "source_fractions": {"delayed_neutron_precursors": {"outlet_source_fraction": 0.12}},
                         "artifacts": {"solution_path": "transport_solution.npz"},
                     },
                     "depletion_matrix": {
@@ -1061,11 +1058,7 @@ def test_report_reconciles_construction_checks_with_primary_physics_gap() -> Non
         validation_path = scratch_root / "validation.json"
         validation_path.write_text(
             json.dumps(
-                {
-                    "checks": [
-                        {"name": "channel_count", "status": "pass", "message": "91 is within the expected range."}
-                    ]
-                }
+                {"checks": [{"name": "channel_count", "status": "pass", "message": "91 is within the expected range."}]}
             ),
             encoding="utf-8",
         )
@@ -1085,7 +1078,9 @@ def test_report_reconciles_construction_checks_with_primary_physics_gap() -> Non
         assert "Benchmark blocker: Primary physics benchmark metric 'keff'" in residuals
         assert "`channel_count`: metric=`channel_count`, category=`construction_check`, status=`pass`" in residuals
         assert "category=`physics_benchmark`, status=`pending`" in residuals
-        assert "`channel_count`: metric=`channel_count`, category=`construction_check`, status=`pending`" not in residuals
+        assert (
+            "`channel_count`: metric=`channel_count`, category=`construction_check`, status=`pending`" not in residuals
+        )
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
@@ -1213,7 +1208,11 @@ def test_report_writes_validation_claims_limitations_and_qa_artifacts() -> None:
                 {
                     "checks": [
                         {"name": "keff_core_band", "status": "pending", "message": "Awaiting solver-backed keff."},
-                        {"name": "physics::active_channel_velocity_reasonable", "status": "fail", "message": "Too high."},
+                        {
+                            "name": "physics::active_channel_velocity_reasonable",
+                            "status": "fail",
+                            "message": "Too high.",
+                        },
                     ]
                 }
             ),
@@ -1260,7 +1259,11 @@ def test_report_writes_validation_claims_limitations_and_qa_artifacts() -> None:
         assert validation_summary["details_csv"] == "validation_details.csv"
         assert validation_summary["blockers"][0]["name"] == "keff_core_band"
         limitations = json.loads((scratch_root / "limitations_matrix.json").read_text(encoding="utf-8"))
-        assert {row["area"] for row in limitations} >= {"neutronics_status", "benchmark_quality", "cross_code_validation"}
+        assert {row["area"] for row in limitations} >= {
+            "neutronics_status",
+            "benchmark_quality",
+            "cross_code_validation",
+        }
         readiness = json.loads((scratch_root / "design_readiness.json").read_text(encoding="utf-8"))
         severe_metrics = {item["metric"]: item["severity"] for item in readiness["findings"]}
         assert severe_metrics["graphite_lifetime"] == "disqualifying_for_claimed_use"
@@ -1379,7 +1382,17 @@ def test_report_surfaces_model_validity_and_validation_maturity() -> None:
         )
         validation_path = scratch_root / "validation.json"
         validation_path.write_text(
-            json.dumps({"checks": [{"name": "physics::active_channel_velocity_reasonable", "status": "fail", "message": "Too high."}]}),
+            json.dumps(
+                {
+                    "checks": [
+                        {
+                            "name": "physics::active_channel_velocity_reasonable",
+                            "status": "fail",
+                            "message": "Too high.",
+                        }
+                    ]
+                }
+            ),
             encoding="utf-8",
         )
 

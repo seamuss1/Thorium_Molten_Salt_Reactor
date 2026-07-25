@@ -8,7 +8,6 @@ from thorium_reactor.benchmarking import (
 from thorium_reactor.config import load_case_config, load_yaml
 from thorium_reactor.neutronics.workflows import _build_validation_result
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 

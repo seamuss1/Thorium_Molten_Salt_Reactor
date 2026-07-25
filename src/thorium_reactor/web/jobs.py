@@ -12,7 +12,6 @@ from typing import Any
 from thorium_reactor.web.repository import TERMINAL_STATUSES, WebRepository, read_json, utc_now
 from thorium_reactor.web.schemas import RunEvent, RunRecord, SimulationDraft, copy_model, model_to_dict
 
-
 ALLOWED_PHASES = ("build", "run", "transient", "transient-sweep", "validate", "render", "report")
 DEFAULT_PHASE_TIMEOUT_SECONDS = 900.0
 
@@ -63,7 +62,7 @@ class JobManager:
                 status.update({"status": "completed", "phase": "completed", "finished_at": utc_now(), "progress": 1.0})
                 write_status(run_dir, status)
                 append_event(run_dir, "info", "completed", "Run completed.", progress=1.0)
-            except Exception as exc:  # noqa: BLE001 - job failures are persisted for the browser.
+            except Exception as exc:
                 status.update({"status": "failed", "finished_at": utc_now(), "error": str(exc)})
                 write_status(run_dir, status)
                 append_event(run_dir, "error", status.get("phase"), str(exc), progress=status.get("progress"))
@@ -87,7 +86,12 @@ class JobManager:
 
         def kill_on_timeout() -> None:
             timed_out["value"] = True
-            append_event(run_dir, "error", phase, f"Phase '{phase}' exceeded the {phase_timeout_seconds(phase):.0f} second job budget.")
+            append_event(
+                run_dir,
+                "error",
+                phase,
+                f"Phase '{phase}' exceeded the {phase_timeout_seconds(phase):.0f} second job budget.",
+            )
             try:
                 process.kill()
             except OSError:
@@ -143,7 +147,10 @@ def normalize_phases(phases: list[str]) -> list[str]:
     requested = [phase for phase in phases if phase in ALLOWED_PHASES]
     if not requested:
         requested = ["run", "validate", "report"]
-    if any(phase in requested for phase in ("validate", "render", "report", "transient", "transient-sweep")) and "run" not in requested:
+    if (
+        any(phase in requested for phase in ("validate", "render", "report", "transient", "transient-sweep"))
+        and "run" not in requested
+    ):
         requested.append("run")
     ordered = [phase for phase in ALLOWED_PHASES if phase in requested]
     if "transient-sweep" in ordered and "transient" in ordered:
@@ -191,7 +198,9 @@ _SEQUENCE_LOCK = threading.Lock()
 _SEQUENCE_CACHE: dict[Path, int] = {}
 
 
-def append_event(run_dir: Path, level: str, phase: str | None, message: str, *, progress: float | None = None) -> RunEvent:
+def append_event(
+    run_dir: Path, level: str, phase: str | None, message: str, *, progress: float | None = None
+) -> RunEvent:
     path = run_dir / "job_events.ndjson"
     with _SEQUENCE_LOCK:
         sequence = _SEQUENCE_CACHE.get(path)
@@ -203,7 +212,9 @@ def append_event(run_dir: Path, level: str, phase: str | None, message: str, *, 
                     sequence = sum(1 for _ in handle)
         sequence += 1
         _SEQUENCE_CACHE[path] = sequence
-        event = RunEvent(sequence=sequence, timestamp=utc_now(), level=level, phase=phase, message=message, progress=progress)
+        event = RunEvent(
+            sequence=sequence, timestamp=utc_now(), level=level, phase=phase, message=message, progress=progress
+        )
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(model_to_dict(event), sort_keys=True) + "\n")
     return event

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 import numpy as np
 
 from thorium_reactor.precursors import normalize_precursor_groups
-
 
 RKDG_TRANSPORT_MODEL = "native_rz_rkdg_scalar_transport_v1"
 TRANSPORT_NPZ_SCHEMA_VERSION = 1
@@ -281,7 +281,16 @@ def run_transport_case(config: Any, bundle: Any, summary: dict[str, Any]) -> dic
     group_sets: dict[str, dict[str, float]] = {}
     for field in result.summary["fields"]:
         group = field["group_set"]
-        record = group_sets.setdefault(group, {"initial_inventory": 0.0, "final_inventory": 0.0, "source_integral": 0.0, "decay_integral": 0.0, "outlet_integral": 0.0})
+        record = group_sets.setdefault(
+            group,
+            {
+                "initial_inventory": 0.0,
+                "final_inventory": 0.0,
+                "source_integral": 0.0,
+                "decay_integral": 0.0,
+                "outlet_integral": 0.0,
+            },
+        )
         for key in ("initial_inventory", "final_inventory", "source_integral", "decay_integral", "outlet_integral"):
             record[key] += float(field[key])
     source_fractions = {}
@@ -290,7 +299,9 @@ def run_transport_case(config: Any, bundle: Any, summary: dict[str, Any]) -> dic
         source_fractions[group] = {
             "decay_source_fraction": _round_float(record["decay_integral"] / total_source),
             "outlet_source_fraction": _round_float(record["outlet_integral"] / total_source),
-            "final_inventory_fraction": _round_float(record["final_inventory"] / max(result.summary["final_inventory"], 1.0e-30)),
+            "final_inventory_fraction": _round_float(
+                record["final_inventory"] / max(result.summary["final_inventory"], 1.0e-30)
+            ),
         }
 
     mesh_path = bundle.write_json("transport_mesh.json", mesh.to_json())
@@ -344,21 +355,13 @@ def _ssp_rk3_step(
     u2 = _enforce_floor(
         0.75 * u0
         + 0.25
-        * (
-            u1
-            + dt
-            * _rhs(u1, mesh, field_specs, source, velocity_z_m_s, diffusion_coefficient_m2_s, cleanup_rate_s)
-        ),
+        * (u1 + dt * _rhs(u1, mesh, field_specs, source, velocity_z_m_s, diffusion_coefficient_m2_s, cleanup_rate_s)),
         positivity_floor,
     )
     return _enforce_floor(
         (1.0 / 3.0) * u0
         + (2.0 / 3.0)
-        * (
-            u2
-            + dt
-            * _rhs(u2, mesh, field_specs, source, velocity_z_m_s, diffusion_coefficient_m2_s, cleanup_rate_s)
-        ),
+        * (u2 + dt * _rhs(u2, mesh, field_specs, source, velocity_z_m_s, diffusion_coefficient_m2_s, cleanup_rate_s)),
         positivity_floor,
     )
 
@@ -405,7 +408,9 @@ def _axisymmetric_laplacian(fields: np.ndarray, mesh: RZStructuredMesh) -> np.nd
     for radial_index in range(1, mesh.radial_cells):
         r_face = radial_edges[radial_index]
         left_dr = 0.5 * (dr[radial_index - 1] + dr[radial_index])
-        flux = 2.0 * np.pi * r_face * dz[None, :] * (fields[:, :, radial_index] - fields[:, :, radial_index - 1]) / left_dr
+        flux = (
+            2.0 * np.pi * r_face * dz[None, :] * (fields[:, :, radial_index] - fields[:, :, radial_index - 1]) / left_dr
+        )
         lap[:, :, radial_index - 1] += flux / volumes[None, :, radial_index - 1]
         lap[:, :, radial_index] -= flux / volumes[None, :, radial_index]
 
@@ -498,7 +503,9 @@ def _field_specs(config: Any, settings: Mapping[str, Any]) -> list[TransportFiel
     return specs
 
 
-def _normalize_group_set(raw_groups: Any | None, default_groups: Sequence[Mapping[str, float | str]]) -> list[dict[str, float | str]]:
+def _normalize_group_set(
+    raw_groups: Any | None, default_groups: Sequence[Mapping[str, float | str]]
+) -> list[dict[str, float | str]]:
     groups = list(default_groups if raw_groups is None else raw_groups)
     if not groups:
         return []
@@ -540,7 +547,11 @@ def _representative_velocity(summary: Mapping[str, Any], settings: Mapping[str, 
 
 
 def _cleanup_rate_from_summary(summary: Mapping[str, Any]) -> float:
-    cleanup_days = summary.get("fuel_cycle", {}).get("cleanup_turnover_days") if isinstance(summary.get("fuel_cycle"), Mapping) else None
+    cleanup_days = (
+        summary.get("fuel_cycle", {}).get("cleanup_turnover_days")
+        if isinstance(summary.get("fuel_cycle"), Mapping)
+        else None
+    )
     if cleanup_days is None:
         return 0.0
     cleanup_efficiency = float(summary.get("fuel_cycle", {}).get("cleanup_removal_efficiency", 0.0))
@@ -563,7 +574,9 @@ def _stable_time_step(
     return float(min(advective, diffusive, 0.25))
 
 
-def _source_density(mesh: RZStructuredMesh, specs: Sequence[TransportFieldSpec], summary: Mapping[str, Any]) -> np.ndarray:
+def _source_density(
+    mesh: RZStructuredMesh, specs: Sequence[TransportFieldSpec], summary: Mapping[str, Any]
+) -> np.ndarray:
     axial_shape = _axial_power_shape(mesh, summary)
     radial_shape = np.ones(mesh.radial_cells, dtype=float)
     base_shape = axial_shape[:, None] * radial_shape[None, :]

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from thorium_reactor.flow.properties import average_primary_temperature_c, evaluate_primary_coolant_properties
-
 
 DEFAULT_PROPERTY_UNCERTAINTIES_95: dict[str, float] = {
     "density": 0.02,
@@ -86,7 +86,11 @@ def build_tritium_transport_summary(
     li6_fraction = _setting_float(settings, "lithium6_atom_fraction", _infer_lithium6_fraction(config))
     reference_li6_fraction = _setting_float(settings, "reference_lithium6_atom_fraction", 5.0e-4)
     reference_power_mwth = _setting_float(settings, "reference_power_mwth", 10.0)
-    removal_blend = _clamp(gas_stripping_efficiency / max(_setting_float(settings, "reference_gas_stripping_efficiency", 0.88), 1.0e-9), 0.0, 1.0)
+    removal_blend = _clamp(
+        gas_stripping_efficiency / max(_setting_float(settings, "reference_gas_stripping_efficiency", 0.88), 1.0e-9),
+        0.0,
+        1.0,
+    )
 
     unmitigated_release = _setting_float(settings, "unmitigated_environment_fraction", 0.33)
     mitigated_release = _setting_float(settings, "mitigated_environment_fraction", 0.10)
@@ -146,7 +150,9 @@ def build_graphite_lifetime_summary(
     settings = _mapping_section(config, "graphite_lifetime")
     fuel_volume_fraction = _fuel_volume_fraction(config, reduced_order_flow)
     target_fuel_volume_fraction = _setting_float(settings, "target_fuel_volume_fraction", 0.08)
-    volume_fraction_penalty = abs(fuel_volume_fraction - target_fuel_volume_fraction) / max(target_fuel_volume_fraction, 1.0e-9)
+    volume_fraction_penalty = abs(fuel_volume_fraction - target_fuel_volume_fraction) / max(
+        target_fuel_volume_fraction, 1.0e-9
+    )
     control_channel_fraction = _control_channel_fraction(reduced_order_flow)
     core_zoning_credit = _setting_float(settings, "core_zoning_flattening_credit", 0.0)
     hpa_credit = _setting_float(
@@ -208,16 +214,8 @@ def build_msre_pump_transient_benchmark_screen(
     non_active_volume_cm3 = _setting_float(disconnected_inventory, "salt_volume_cm3", 0.0)
     stagnant_volume_cm3 = _setting_float(stagnant_inventory, "salt_volume_cm3", 0.0)
     total_tracked_volume_cm3 = max(active_volume_cm3 + non_active_volume_cm3, 0.0)
-    non_active_fraction = (
-        non_active_volume_cm3 / total_tracked_volume_cm3
-        if total_tracked_volume_cm3 > 0.0
-        else 0.0
-    )
-    stagnant_fraction = (
-        stagnant_volume_cm3 / total_tracked_volume_cm3
-        if total_tracked_volume_cm3 > 0.0
-        else 0.0
-    )
+    non_active_fraction = non_active_volume_cm3 / total_tracked_volume_cm3 if total_tracked_volume_cm3 > 0.0 else 0.0
+    stagnant_fraction = stagnant_volume_cm3 / total_tracked_volume_cm3 if total_tracked_volume_cm3 > 0.0 else 0.0
     channel_count = int(active_flow.get("channel_count", 0)) if active_flow else 0
     status = "watch" if non_active_fraction > 0.0 or stagnant_fraction > 0.0 else "nominal"
     return {
@@ -377,11 +375,7 @@ def _control_channel_fraction(reduced_order_flow: Mapping[str, Any]) -> float:
     total = sum(int(value) for value in variant_counts.values())
     if total <= 0:
         return 0.0
-    control = sum(
-        int(value)
-        for key, value in variant_counts.items()
-        if "control" in str(key).lower()
-    )
+    control = sum(int(value) for key, value in variant_counts.items() if "control" in str(key).lower())
     return control / total
 
 

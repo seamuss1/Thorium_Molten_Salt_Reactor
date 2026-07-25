@@ -6,6 +6,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from thorium_reactor.benchmark_evidence import (
+    materialize_benchmark_evidence,
+    merge_benchmark_evidence_into_quality,
+)
+from thorium_reactor.benchmarking import (
+    assess_benchmark_traceability,
+    build_benchmark_residuals,
+    evaluate_validation_target,
+)
+from thorium_reactor.bop.steady_state import BOPInputs, run_steady_state_bop
 from thorium_reactor.capabilities import (
     BALANCE_OF_PLANT,
     MSR_PRIMARY_SYSTEM,
@@ -14,40 +24,31 @@ from thorium_reactor.capabilities import (
     get_case_capabilities,
     validate_case_capability,
 )
-from thorium_reactor.benchmarking import assess_benchmark_traceability
-from thorium_reactor.benchmarking import build_benchmark_residuals
-from thorium_reactor.benchmarking import evaluate_validation_target
-from thorium_reactor.benchmark_evidence import (
-    materialize_benchmark_evidence,
-    merge_benchmark_evidence_into_quality,
-)
-from thorium_reactor.bop.steady_state import BOPInputs, run_steady_state_bop
 from thorium_reactor.config import CaseConfig, load_yaml
+from thorium_reactor.flow.primary_system import build_primary_system_summary
 from thorium_reactor.flow.properties import (
     average_primary_temperature_c,
     evaluate_property,
     primary_coolant_cp_kj_kgk,
     property_reference_temperature_c,
 )
-from thorium_reactor.flow.primary_system import build_primary_system_summary
 from thorium_reactor.flow.reduced_order import build_reduced_order_flow_summary
-from thorium_reactor.geometry.exporters import export_geometry
 from thorium_reactor.geometry.molten_salt_reactor import (
     build_msr_flow_summary,
     build_msr_geometry_description,
     build_msr_invariants,
     resolve_msr_geometry,
 )
-from thorium_reactor.modeling import (
-    case_uses_thorium_fuel,
-    fuel_salt_has_thorium,
-    get_model_representation,
-)
 from thorium_reactor.literature_models import (
     build_graphite_lifetime_summary,
     build_msre_pump_transient_benchmark_screen,
     build_property_uncertainty_summary,
     build_tritium_transport_summary,
+)
+from thorium_reactor.modeling import (
+    case_uses_thorium_fuel,
+    fuel_salt_has_thorium,
+    get_model_representation,
 )
 from thorium_reactor.neutronics.openmc_compat import missing_openmc_runtime_message, openmc
 from thorium_reactor.paths import refresh_bundle_artifact_statuses
@@ -236,8 +237,10 @@ def build_case(
     output_dir: Path | None = None,
     benchmark: dict[str, Any] | None = None,
 ) -> BuiltCase:
-    benchmark = json.loads(json.dumps(benchmark)) if benchmark is not None else (
-        load_yaml(config.benchmark_file) if config.benchmark_file and config.benchmark_file.exists() else {}
+    benchmark = (
+        json.loads(json.dumps(benchmark))
+        if benchmark is not None
+        else (load_yaml(config.benchmark_file) if config.benchmark_file and config.benchmark_file.exists() else {})
     )
     geometry_kind = config.geometry["kind"]
     if geometry_kind in {"pin_cell", "layered_channel"}:
@@ -328,7 +331,9 @@ def run_case(
     summary: dict[str, Any] = {
         "case": config.name,
         "result_dir": str(bundle.root),
-        "model_representation": _json_copy(build_manifest.get("model_representation", get_model_representation(config))),
+        "model_representation": _json_copy(
+            build_manifest.get("model_representation", get_model_representation(config))
+        ),
         "validation_maturity": _json_copy(build_manifest.get("validation_maturity", {})),
         "property_audit": _json_copy(property_audit),
         "neutronics": {
@@ -414,9 +419,9 @@ def run_case(
             primary_delta_t_c=float(summary["bop"]["primary_delta_t_c"]),
         )
         summary["metrics"]["electric_power_mwe"] = round(summary["bop"]["electric_power_mw"], 3)
-        summary["metrics"]["core_outlet_temperature_uncertainty_95_c"] = summary[
-            "property_uncertainty"
-        ]["core_outlet_temperature_uncertainty_95_c"]
+        summary["metrics"]["core_outlet_temperature_uncertainty_95_c"] = summary["property_uncertainty"][
+            "core_outlet_temperature_uncertainty_95_c"
+        ]
         if THERMAL_NETWORK in capabilities and "flow" in summary:
             validate_case_capability(config, THERMAL_NETWORK)
             reduced_order_flow = build_reduced_order_flow_summary(
@@ -428,28 +433,34 @@ def run_case(
             dynamic_validity_checks = _build_core_screening_checks(config, reduced_order_flow)
             summary["metrics"]["active_flow_channel_count"] = reduced_order_flow["active_flow"]["channel_count"]
             summary["metrics"]["active_flow_area_cm2"] = reduced_order_flow["active_flow"]["total_flow_area_cm2"]
-            summary["metrics"]["active_flow_velocity_m_s"] = reduced_order_flow["active_flow"]["representative_velocity_m_s"]
-            summary["metrics"]["active_flow_residence_time_s"] = reduced_order_flow["active_flow"]["representative_residence_time_s"]
-            summary["metrics"]["disconnected_flow_inventory_channels"] = reduced_order_flow["disconnected_inventory"]["channel_count"]
-            summary["metrics"]["stagnant_flow_inventory_channels"] = reduced_order_flow["stagnant_inventory"]["channel_count"]
+            summary["metrics"]["active_flow_velocity_m_s"] = reduced_order_flow["active_flow"][
+                "representative_velocity_m_s"
+            ]
+            summary["metrics"]["active_flow_residence_time_s"] = reduced_order_flow["active_flow"][
+                "representative_residence_time_s"
+            ]
+            summary["metrics"]["disconnected_flow_inventory_channels"] = reduced_order_flow["disconnected_inventory"][
+                "channel_count"
+            ]
+            summary["metrics"]["stagnant_flow_inventory_channels"] = reduced_order_flow["stagnant_inventory"][
+                "channel_count"
+            ]
             summary["msre_pump_transient_benchmark"] = build_msre_pump_transient_benchmark_screen(
                 config,
                 reduced_order_flow=reduced_order_flow,
             )
-            summary["metrics"]["msre_pump_transient_startup_error_max_pcm"] = summary[
-                "msre_pump_transient_benchmark"
-            ]["benchmark_mean_error_startup_pcm"]["max"]
-            summary["metrics"]["non_active_salt_inventory_fraction"] = summary[
-                "msre_pump_transient_benchmark"
-            ]["non_active_salt_inventory_fraction"]
+            summary["metrics"]["msre_pump_transient_startup_error_max_pcm"] = summary["msre_pump_transient_benchmark"][
+                "benchmark_mean_error_startup_pcm"
+            ]["max"]
+            summary["metrics"]["non_active_salt_inventory_fraction"] = summary["msre_pump_transient_benchmark"][
+                "non_active_salt_inventory_fraction"
+            ]
             summary["graphite_lifetime"] = build_graphite_lifetime_summary(
                 config,
                 reduced_order_flow=reduced_order_flow,
                 thermal_power_mw=float(summary["bop"]["thermal_power_mw"]),
             )
-            summary["metrics"]["graphite_lifetime_years"] = summary["graphite_lifetime"][
-                "estimated_lifespan_years"
-            ]
+            summary["metrics"]["graphite_lifetime_years"] = summary["graphite_lifetime"]["estimated_lifespan_years"]
             summary["metrics"]["graphite_fast_flux_peaking_factor"] = summary["graphite_lifetime"][
                 "fast_flux_peaking_factor"
             ]
@@ -479,7 +490,9 @@ def run_case(
                     summary["metrics"]["primary_pump_head_m"] = hydraulics["pump_head_m"]
                     summary["metrics"]["primary_hx_area_m2"] = heat_exchanger["required_area_m2"]
                     summary["metrics"]["fuel_salt_inventory_m3"] = primary_system["inventory"]["fuel_salt"]["total_m3"]
-                    summary["metrics"]["coolant_salt_inventory_m3"] = primary_system["inventory"]["coolant_salt"]["net_pool_inventory_m3"]
+                    summary["metrics"]["coolant_salt_inventory_m3"] = primary_system["inventory"]["coolant_salt"][
+                        "net_pool_inventory_m3"
+                    ]
                     summary["metrics"]["fissile_inventory_kg"] = primary_system["fuel_cycle"]["fissile_inventory_kg"]
                     summary["metrics"]["chemistry_corrosion_index"] = primary_system["chemistry"]["corrosion_index"]
                     summary["metrics"]["tritium_environmental_release_fraction"] = summary["tritium"][
@@ -506,19 +519,21 @@ def run_case(
             ]
             dominant_loop_segment = decay_heat.get("dominant_loop_segment", {})
             if dominant_loop_segment:
-                summary["metrics"]["physics_core_dominant_loop_decay_heat_source_fraction"] = (
-                    dominant_loop_segment["decay_heat_source_fraction"]
-                )
+                summary["metrics"]["physics_core_dominant_loop_decay_heat_source_fraction"] = dominant_loop_segment[
+                    "decay_heat_source_fraction"
+                ]
         summary["metrics"]["physics_core_natural_circulation_fraction"] = physics_core["thermal_hydraulics"][
             "momentum_balance"
         ]["natural_circulation_fraction_of_nominal"]
     if built.manifest.get("benchmark_traceability"):
         summary["benchmark_traceability"] = _json_copy(built.manifest["benchmark_traceability"])
-        summary["benchmark_quality"] = _json_copy(
-            built.manifest["benchmark_traceability"].get("benchmark_quality", {})
+        summary["benchmark_quality"] = _json_copy(built.manifest["benchmark_traceability"].get("benchmark_quality", {}))
+        summary["metrics"]["benchmark_traceability_score"] = built.manifest["benchmark_traceability"][
+            "traceability_score"
+        ]
+        summary["metrics"]["validation_maturity_score"] = built.manifest.get("validation_maturity", {}).get(
+            "validation_maturity_score", 0.0
         )
-        summary["metrics"]["benchmark_traceability_score"] = built.manifest["benchmark_traceability"]["traceability_score"]
-        summary["metrics"]["validation_maturity_score"] = built.manifest.get("validation_maturity", {}).get("validation_maturity_score", 0.0)
         if summary["benchmark_quality"]:
             summary["metrics"]["benchmark_quality_score"] = summary["benchmark_quality"].get("quality_score", 0.0)
     benchmark_residuals = build_benchmark_residuals(config, summary, built.benchmark, manifest=build_manifest)
@@ -651,7 +666,9 @@ def _build_pin_case(config: CaseConfig, benchmark: dict[str, Any]) -> BuiltCase:
     layers = list(geometry["layers"])
     invariants = _validate_layers(layers)
     cell_count = len(layers) + 1
-    material_inventory = sorted({layer["material"] for layer in layers if layer.get("material")} | {geometry["background_material"]})
+    material_inventory = sorted(
+        {layer["material"] for layer in layers if layer.get("material")} | {geometry["background_material"]}
+    )
     invariants.extend(material_sanity_checks(config))
     benchmark_traceability = assess_benchmark_traceability(config, benchmark) if benchmark else {}
     model_representation = get_model_representation(config)
@@ -750,13 +767,17 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
     for ring in geometry["rings"]:
         radius = float(ring["radius"])
         count = int(ring["count"])
-        positions = [(0.0, 0.0)] if count == 1 else [
-            (
-                radius * math.cos(2.0 * math.pi * index / count),
-                radius * math.sin(2.0 * math.pi * index / count),
-            )
-            for index in range(count)
-        ]
+        positions = (
+            [(0.0, 0.0)]
+            if count == 1
+            else [
+                (
+                    radius * math.cos(2.0 * math.pi * index / count),
+                    radius * math.sin(2.0 * math.pi * index / count),
+                )
+                for index in range(count)
+            ]
+        )
         for index, (x_pos, y_pos) in enumerate(positions):
             channels.append(
                 {
@@ -784,7 +805,8 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
 
     model = _create_openmc_ring_core_model(config) if openmc is not None else None
     material_inventory = sorted(
-        {layer["material"] for layer in channel_layers if layer.get("material")} | {geometry["matrix_material"], geometry["background_material"]}
+        {layer["material"] for layer in channel_layers if layer.get("material")}
+        | {geometry["matrix_material"], geometry["background_material"]}
     )
     invariants.extend(material_sanity_checks(config))
     benchmark_traceability = assess_benchmark_traceability(config, benchmark) if benchmark else {}
@@ -929,13 +951,17 @@ def _create_openmc_ring_core_model(config: CaseConfig):
     for ring in geometry["rings"]:
         radius = float(ring["radius"])
         count = int(ring["count"])
-        positions = [(0.0, 0.0)] if count == 1 else [
-            (
-                radius * math.cos(2.0 * math.pi * index / count),
-                radius * math.sin(2.0 * math.pi * index / count),
-            )
-            for index in range(count)
-        ]
+        positions = (
+            [(0.0, 0.0)]
+            if count == 1
+            else [
+                (
+                    radius * math.cos(2.0 * math.pi * index / count),
+                    radius * math.sin(2.0 * math.pi * index / count),
+                )
+                for index in range(count)
+            ]
+        )
         for x_pos, y_pos in positions:
             previous_surface = None
             outermost_surface = None
@@ -1071,7 +1097,9 @@ def _create_openmc_detailed_msr_model(config: CaseConfig, resolved) -> Any:
 
     upper_reflector = openmc.Cell(name="upper_reflector")
     upper_reflector.fill = materials[geometry["matrix_material"]]
-    upper_reflector.region = +plenum_surface & -reflector_outer_surface & (axial_upper_plenum_region | axial_cover_gas_region)
+    upper_reflector.region = (
+        +plenum_surface & -reflector_outer_surface & (axial_upper_plenum_region | axial_cover_gas_region)
+    )
     root_cells.append(upper_reflector)
 
     cover_gas = openmc.Cell(name="cover_gas")
@@ -1154,9 +1182,7 @@ def describe_simulation_settings(config: CaseConfig) -> dict[str, Any]:
         "tallies": tallies,
         "geometry_boundary": str(config.geometry.get("boundary", "reflective")),
         "axial_boundary": (
-            str(config.geometry.get("axial_boundary", "vacuum"))
-            if geometry_kind == "ring_lattice_core"
-            else None
+            str(config.geometry.get("axial_boundary", "vacuum")) if geometry_kind == "ring_lattice_core" else None
         ),
     }
 

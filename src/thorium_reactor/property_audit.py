@@ -34,7 +34,9 @@ def build_property_audit(config: Any) -> dict[str, Any]:
 
     if primary_material_name is not None:
         for quantity_name, spec in config.materials[primary_material_name].items():
-            if quantity_name in {"density", "cp", "thermal_conductivity", "dynamic_viscosity"} and isinstance(spec, dict):
+            if quantity_name in {"density", "cp", "thermal_conductivity", "dynamic_viscosity"} and isinstance(
+                spec, dict
+            ):
                 audit["records"].append(
                     _describe_property_record(
                         f"materials.{primary_material_name}.{quantity_name}",
@@ -44,7 +46,9 @@ def build_property_audit(config: Any) -> dict[str, Any]:
                     )
                 )
         try:
-            audit["primary_properties"] = evaluate_primary_coolant_properties(config, temperature_c=reference_temperature_c)
+            audit["primary_properties"] = evaluate_primary_coolant_properties(
+                config, temperature_c=reference_temperature_c
+            )
         except Exception as exc:
             audit["status"] = "partial"
             audit["primary_properties_error"] = str(exc)
@@ -64,7 +68,9 @@ def build_property_audit(config: Any) -> dict[str, Any]:
     )
     if secondary_spec_present:
         try:
-            audit["secondary_properties"] = evaluate_secondary_coolant_properties(config, temperature_c=reference_temperature_c)
+            audit["secondary_properties"] = evaluate_secondary_coolant_properties(
+                config, temperature_c=reference_temperature_c
+            )
         except Exception as exc:
             audit["status"] = "partial"
             audit["secondary_properties_error"] = str(exc)

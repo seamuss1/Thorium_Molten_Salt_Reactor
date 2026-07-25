@@ -8,19 +8,26 @@ from thorium_reactor.config import load_case_config
 from thorium_reactor.paths import create_result_bundle
 from thorium_reactor.runtime_benchmark import parse_backend_list, run_runtime_benchmark_case
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _minimal_summary() -> dict:
     return {
         "bop": {"thermal_power_mw": 8.0},
-        "flow": {"reduced_order": {"active_flow": {"representative_residence_time_s": 0.85, "total_volumetric_flow_m3_s": 0.014}}},
+        "flow": {
+            "reduced_order": {
+                "active_flow": {"representative_residence_time_s": 0.85, "total_volumetric_flow_m3_s": 0.014}
+            }
+        },
         "primary_system": {
             "thermal_profile": {"estimated_hot_leg_temp_c": 690.0, "estimated_cold_leg_temp_c": 555.0},
             "inventory": {"fuel_salt": {"total_m3": 0.092}, "coolant_salt": {"net_pool_inventory_m3": 11.4}},
         },
-        "fuel_cycle": {"cleanup_turnover_hours": 240.0, "cleanup_turnover_days": 10.0, "cleanup_removal_efficiency": 0.78},
+        "fuel_cycle": {
+            "cleanup_turnover_hours": 240.0,
+            "cleanup_turnover_days": 10.0,
+            "cleanup_removal_efficiency": 0.78,
+        },
     }
 
 
@@ -50,8 +57,14 @@ def test_runtime_benchmark_compares_cpu_and_numpy_backends(tmp_path: Path) -> No
     assert payload["reference_backend"] == "python"
     assert payload["recommendation"]["backend"] in {"python", "numpy"}
     assert {item["backend"] for item in payload["results"] if item["status"] == "completed"} == {"python", "numpy"}
-    assert all(item["numerical_checks"]["status"] == "ok" for item in payload["results"] if item["status"] == "completed")
-    assert all(item["comparison_to_reference"]["status"] == "ok" for item in payload["results"] if item["status"] == "completed")
+    assert all(
+        item["numerical_checks"]["status"] == "ok" for item in payload["results"] if item["status"] == "completed"
+    )
+    assert all(
+        item["comparison_to_reference"]["status"] == "ok"
+        for item in payload["results"]
+        if item["status"] == "completed"
+    )
     assert summary["runtime_benchmark"]["status"] == "completed"
     assert (bundle.root / "runtime_benchmark.json").exists()
 

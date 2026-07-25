@@ -8,13 +8,13 @@ import time
 import uuid
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from thorium_reactor.paths import create_result_bundle
 from thorium_reactor.web.app import create_app
 from thorium_reactor.web.jobs import append_event
 from thorium_reactor.web.repository import WebRepository
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ADMIN_HEADERS = {"cf-access-authenticated-user-email": "seamusdgallagher@gmail.com"}
@@ -91,7 +91,9 @@ def test_web_run_summaries_only_advertise_viewable_geometry() -> None:
 
         listed = client.get("/api/runs")
         assert listed.status_code == 200
-        listed_run = next(item for item in listed.json() if item["case_name"] == "example_pin" and item["run_id"] == run_id)
+        listed_run = next(
+            item for item in listed.json() if item["case_name"] == "example_pin" and item["run_id"] == run_id
+        )
         assert [artifact["label"] for artifact in listed_run["artifacts"]] == ["core.gltf"]
 
         detail = client.get(f"/api/runs/example_pin/{run_id}")
@@ -455,6 +457,7 @@ def test_web_spa_deep_links_serve_index_but_api_routes_404(tmp_path: Path) -> No
     assert api_missing.headers["content-type"].startswith("application/json")
 
 
+@pytest.mark.slow
 def test_rate_limit_store_is_safe_across_processes(tmp_path: Path) -> None:
     store_path = tmp_path / "limits.json"
     worker = tmp_path / "claim_worker.py"
@@ -485,8 +488,7 @@ def test_rate_limit_store_is_safe_across_processes(tmp_path: Path) -> None:
     )
     env = dict(os.environ, THORIUM_REACTOR_RATE_LIMIT_PATH=str(store_path))
     processes = [
-        subprocess.Popen([sys.executable, str(worker)], env=env, stdout=subprocess.PIPE, text=True)
-        for _ in range(4)
+        subprocess.Popen([sys.executable, str(worker)], env=env, stdout=subprocess.PIPE, text=True) for _ in range(4)
     ]
     totals = []
     for process in processes:

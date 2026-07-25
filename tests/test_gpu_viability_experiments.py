@@ -3,8 +3,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+pytestmark = [pytest.mark.hardware, pytest.mark.slow]
 
 
 def test_simulation_class_probe_runner_emits_academic_integrity_metadata(tmp_path: Path) -> None:

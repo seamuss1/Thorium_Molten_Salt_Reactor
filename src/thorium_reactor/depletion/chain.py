@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
-import xml.etree.ElementTree as ET
+from typing import Any
 
 import yaml
 
@@ -101,8 +102,7 @@ def load_openmc_xml_chain(path: Path) -> DepletionChain:
     root = ET.fromstring(path.read_text(encoding="utf-8"))
     raw_nuclides = [raw for raw in root.findall(".//nuclide") if str(raw.get("name", "")).strip()]
     fission_yields_by_name = {
-        str(raw.get("name", "")).strip(): _parse_openmc_fission_yields(raw)
-        for raw in raw_nuclides
+        str(raw.get("name", "")).strip(): _parse_openmc_fission_yields(raw) for raw in raw_nuclides
     }
     fission_yield_parents = {
         str(raw.get("name", "")).strip(): parent

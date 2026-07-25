@@ -1,13 +1,12 @@
-from pathlib import Path
 import shutil
 import uuid
+from pathlib import Path
 
 import pytest
 import yaml
 
 from thorium_reactor.config import ConfigError, load_case_config
 from thorium_reactor.neutronics.workflows import build_case
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,7 +32,9 @@ def test_msre_benchmark_case_uses_historic_mode_and_resolves_benchmark() -> None
     assert config.data["benchmark_model"]["readiness"] == "illustrative_harness"
     assert built.manifest["simulation"]["particles"] == 100000
     assert built.manifest["benchmark_traceability"]["benchmark_quality"]["benchmark_ready"] is False
-    assert "benchmark_quality::benchmark_geometry_reconstructed" in built.manifest["model_validity"]["failed_check_names"]
+    assert (
+        "benchmark_quality::benchmark_geometry_reconstructed" in built.manifest["model_validity"]["failed_check_names"]
+    )
 
 
 def test_flagship_case_declares_commercial_grid_characteristics() -> None:
@@ -159,10 +160,7 @@ def test_immersed_pool_reference_case_builds_with_reference_render_layout() -> N
     assert 0.02 <= physics["pool_circulation_velocity_m_s"] <= 1.5
     assert any(solid.get("type") == "box" for solid in built.geometry_description["render_solids"])
     assert any(solid.get("axis") == "x" for solid in built.geometry_description["render_solids"])
-    path_materials = {
-        path["name"]: path["material"]
-        for path in built.geometry_description["animation"]["paths"]
-    }
+    path_materials = {path["name"]: path["material"] for path in built.geometry_description["animation"]["paths"]}
     assert path_materials["primary_hot_leg"] == "fuel_salt"
     assert path_materials["primary_cold_leg"] == "fuel_salt"
     layout_checks = {
@@ -178,9 +176,7 @@ def test_immersed_pool_reference_case_builds_with_reference_render_layout() -> N
         "render_layout::primary_loop_submerged": True,
     }
     physics_checks = {
-        item["name"]: item["passed"]
-        for item in built.manifest["invariants"]
-        if item["name"].startswith("physics::")
+        item["name"]: item["passed"] for item in built.manifest["invariants"] if item["name"].startswith("physics::")
     }
     assert physics_checks == {
         "physics::primary_delta_t_reasonable": True,
@@ -199,7 +195,14 @@ def test_flagship_case_builds_with_full_plant_schematic_layout() -> None:
     assert built.geometry_description["plant_system"]["design_basis"]["net_electric_power_mwe"] == 300.0
     assert len(built.geometry_description["plant_system"]["components"]) >= 12
     network_ids = {network["id"] for network in built.geometry_description["plant_system"]["networks"]}
-    assert {"primary_loop", "secondary_loop", "offgas_system", "drain_system", "power_conversion", "grid_interface"} <= network_ids
+    assert {
+        "primary_loop",
+        "secondary_loop",
+        "offgas_system",
+        "drain_system",
+        "power_conversion",
+        "grid_interface",
+    } <= network_ids
     solid_names = {solid["name"] for solid in built.geometry_description["render_solids"]}
     assert "plant_primary_heat_exchanger" in solid_names
     assert "plant_turbine" in solid_names
@@ -212,9 +215,7 @@ def test_isotopically_explicit_thorium_case_requires_th232_in_fuel_salt() -> Non
     config = _load_case("tmsr_lf1_core")
     config.data = yaml.safe_load(yaml.safe_dump(config.data, sort_keys=False))
     config.data["materials"]["fuel_salt"]["nuclides"] = [
-        nuclide
-        for nuclide in config.data["materials"]["fuel_salt"]["nuclides"]
-        if nuclide["name"] != "Th232"
+        nuclide for nuclide in config.data["materials"]["fuel_salt"]["nuclides"] if nuclide["name"] != "Th232"
     ]
 
     built = build_case(config)
@@ -240,7 +241,9 @@ def test_case_loader_rejects_unsupported_material_units() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml").read_text(encoding="utf-8"))
+        payload = yaml.safe_load(
+            (REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml").read_text(encoding="utf-8")
+        )
         payload["materials"]["uo2"]["density"]["units"] = "lb/ft3"
         case_path = scratch_root / "case.yaml"
         case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
@@ -255,7 +258,9 @@ def test_case_loader_rejects_invalid_openmc_batch_configuration() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml").read_text(encoding="utf-8"))
+        payload = yaml.safe_load(
+            (REPO_ROOT / "configs" / "cases" / "example_pin" / "case.yaml").read_text(encoding="utf-8")
+        )
         payload["simulation"]["inactive"] = payload["simulation"]["batches"]
         case_path = scratch_root / "case.yaml"
         case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
@@ -270,7 +275,9 @@ def test_case_loader_rejects_non_numeric_transient_duration() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8"))
+        payload = yaml.safe_load(
+            (REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8")
+        )
         payload["transient"]["duration_s"] = "fast"
         case_path = scratch_root / "case.yaml"
         case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
@@ -285,7 +292,9 @@ def test_case_loader_rejects_invalid_delayed_neutron_group() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8"))
+        payload = yaml.safe_load(
+            (REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8")
+        )
         payload["transient"]["delayed_neutron_precursor_groups"] = [
             {"name": "bad", "decay_constant_s": -0.1, "yield_fraction": 0.001}
         ]
@@ -302,12 +311,12 @@ def test_case_loader_rejects_invalid_decay_heat_precursor_group() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8"))
+        payload = yaml.safe_load(
+            (REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8")
+        )
         payload["physics_core"] = {
             "precursor_transport": {
-                "decay_heat_groups": [
-                    {"name": "bad", "decay_constant_s": 0.02, "yield_fraction": -0.1}
-                ]
+                "decay_heat_groups": [{"name": "bad", "decay_constant_s": 0.02, "yield_fraction": -0.1}]
             }
         }
         case_path = scratch_root / "case.yaml"
@@ -323,7 +332,9 @@ def test_case_loader_rejects_invalid_transport_solver_mesh() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8"))
+        payload = yaml.safe_load(
+            (REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8")
+        )
         payload["transport_solver"] = {"mesh": "cartesian", "radial_cells": 0}
         case_path = scratch_root / "case.yaml"
         case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
@@ -338,7 +349,9 @@ def test_case_loader_rejects_invalid_depletion_solver_steps() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8"))
+        payload = yaml.safe_load(
+            (REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8")
+        )
         payload["depletion_solver"] = {"steps": 0, "time_step_days": 1.0}
         case_path = scratch_root / "case.yaml"
         case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
@@ -353,7 +366,9 @@ def test_case_loader_rejects_non_list_integration_args() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8"))
+        payload = yaml.safe_load(
+            (REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8")
+        )
         payload.setdefault("integrations", {}).setdefault("moose", {})["args"] = "--fast"
         case_path = scratch_root / "case.yaml"
         case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
@@ -368,7 +383,9 @@ def test_case_loader_rejects_invalid_commercial_grid_characteristics() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-commercial-grid-config" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "flagship_grid_msr" / "case.yaml").read_text(encoding="utf-8"))
+        payload = yaml.safe_load(
+            (REPO_ROOT / "configs" / "cases" / "flagship_grid_msr" / "case.yaml").read_text(encoding="utf-8")
+        )
         payload["reactor"]["characteristics"].pop("net_electric_power_mwe")
         case_path = scratch_root / "case.yaml"
         case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
@@ -383,7 +400,9 @@ def test_case_loader_rejects_invalid_economics_default_scenario() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-economics-config" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "flagship_grid_msr" / "case.yaml").read_text(encoding="utf-8"))
+        payload = yaml.safe_load(
+            (REPO_ROOT / "configs" / "cases" / "flagship_grid_msr" / "case.yaml").read_text(encoding="utf-8")
+        )
         payload["economics"]["default_scenario"] = "missing"
         case_path = scratch_root / "case.yaml"
         case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
@@ -398,7 +417,9 @@ def test_case_loader_rejects_invalid_project_schedule_date() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-project-schedule-config" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "flagship_grid_msr" / "case.yaml").read_text(encoding="utf-8"))
+        payload = yaml.safe_load(
+            (REPO_ROOT / "configs" / "cases" / "flagship_grid_msr" / "case.yaml").read_text(encoding="utf-8")
+        )
         payload["project_schedule"]["project_start"] = "soon"
         case_path = scratch_root / "case.yaml"
         case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
@@ -413,7 +434,9 @@ def test_case_loader_rejects_non_numeric_chemistry_field() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8"))
+        payload = yaml.safe_load(
+            (REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8")
+        )
         payload["chemistry"]["target_redox_state_ev"] = "oxidizing"
         case_path = scratch_root / "case.yaml"
         case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
@@ -428,7 +451,9 @@ def test_case_loader_rejects_unsupported_property_provider() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "msre_first_criticality" / "case.yaml").read_text(encoding="utf-8"))
+        payload = yaml.safe_load(
+            (REPO_ROOT / "configs" / "cases" / "msre_first_criticality" / "case.yaml").read_text(encoding="utf-8")
+        )
         payload.setdefault("properties", {})["provider"] = "mystery_provider"
         case_path = scratch_root / "case.yaml"
         case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
@@ -443,7 +468,9 @@ def test_case_loader_requires_msd_tp_mixture_composition() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)
     try:
-        payload = yaml.safe_load((REPO_ROOT / "configs" / "cases" / "msre_first_criticality" / "case.yaml").read_text(encoding="utf-8"))
+        payload = yaml.safe_load(
+            (REPO_ROOT / "configs" / "cases" / "msre_first_criticality" / "case.yaml").read_text(encoding="utf-8")
+        )
         payload["materials"]["fuel_salt"]["density"] = {
             "provider": "msd_tp",
             "units": "g/cm3",

@@ -175,7 +175,7 @@ def test_precursor_steady_state_is_a_fixed_point_under_matched_stepping() -> Non
     # Stepping the steady state at the conditions it was built for must leave the
     # inventory essentially unchanged: the source exactly balances decay+transport.
     groups = normalize_precursor_groups(None)
-    params = dict(core_residence_time_s=1.5, loop_residence_time_s=7.0, cleanup_rate_s=0.0)
+    params = {"core_residence_time_s": 1.5, "loop_residence_time_s": 7.0, "cleanup_rate_s": 0.0}
     state = build_initial_precursor_state(groups=groups, transport_model=TWO_REGION_PRECURSOR_TRANSPORT_MODEL, **params)
     before = summarize_precursor_state(state, groups)["total_inventory"]
 
@@ -197,10 +197,12 @@ def test_precursor_lower_flow_retains_more_delayed_source_in_core() -> None:
     # Advection edge case: reducing the flow fraction lengthens residence times,
     # so fewer precursors are swept into the loop and the transport loss falls.
     groups = normalize_precursor_groups(None)
-    params = dict(core_residence_time_s=1.0, loop_residence_time_s=6.0, cleanup_rate_s=0.0)
+    params = {"core_residence_time_s": 1.0, "loop_residence_time_s": 6.0, "cleanup_rate_s": 0.0}
 
     def _loss_at_flow(flow_fraction: float) -> float:
-        state = build_initial_precursor_state(groups=groups, transport_model=TWO_REGION_PRECURSOR_TRANSPORT_MODEL, **params)
+        state = build_initial_precursor_state(
+            groups=groups, transport_model=TWO_REGION_PRECURSOR_TRANSPORT_MODEL, **params
+        )
         stepped = step_precursor_state(
             state=state,
             groups=groups,

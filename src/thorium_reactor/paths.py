@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import json
-from pathlib import Path
 import re
 import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from thorium_reactor.runtime_context import build_runtime_context
-
 
 PATH_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 ARTIFACT_STATUS_SCHEMA_VERSION = 1
@@ -63,11 +62,7 @@ def snapshot_bundle_artifacts(bundle: ResultBundle) -> dict[str, str]:
 
 
 def changed_bundle_artifacts(before: dict[str, str], after: dict[str, str]) -> set[str]:
-    return {
-        path
-        for path, fingerprint in after.items()
-        if before.get(path) != fingerprint
-    }
+    return {path for path, fingerprint in after.items() if before.get(path) != fingerprint}
 
 
 def append_stage_manifest(
@@ -108,8 +103,11 @@ def append_stage_manifest(
         "status": status,
         "runtime_context": context,
         "backend": context.get("backend", {"service": context.get("service", "host")}),
-        "device": context.get("backend", {}).get("device", "host-cpu") if isinstance(context.get("backend"), dict) else "host-cpu",
-        "input_snapshot": (inputs or {}).get("input_snapshots") or {
+        "device": context.get("backend", {}).get("device", "host-cpu")
+        if isinstance(context.get("backend"), dict)
+        else "host-cpu",
+        "input_snapshot": (inputs or {}).get("input_snapshots")
+        or {
             "case": (inputs or {}).get("case", {}),
             "benchmark": (inputs or {}).get("benchmark", {}),
         },
@@ -139,16 +137,8 @@ def refresh_bundle_artifact_statuses(bundle: ResultBundle, *, summary: dict[str,
     }
     if _has_benchmark_evidence_contract(summary):
         status["groups"]["benchmark_evidence"] = _benchmark_evidence_group_status(bundle, summary)
-    status["blockers"] = [
-        blocker
-        for group in status["groups"].values()
-        for blocker in group.get("blockers", [])
-    ]
-    status["warnings"] = [
-        warning
-        for group in status["groups"].values()
-        for warning in group.get("warnings", [])
-    ]
+    status["blockers"] = [blocker for group in status["groups"].values() for blocker in group.get("blockers", [])]
+    status["warnings"] = [warning for group in status["groups"].values() for warning in group.get("warnings", [])]
     (bundle.root / "artifact_status.json").write_text(json.dumps(status, indent=2, sort_keys=True), encoding="utf-8")
     _write_directory_status(bundle.openmc_dir, status["groups"]["openmc"])
     _write_directory_status(bundle.images_dir, status["groups"]["images"])
@@ -361,7 +351,7 @@ def _artifact_fingerprint(path: Path) -> str:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def safe_path_segment(value: str | None, label: str = "path segment") -> str:

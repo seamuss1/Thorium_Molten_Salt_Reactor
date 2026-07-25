@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import itertools
+import math
 from collections import Counter
 from dataclasses import dataclass
-import math
 from typing import Any
 
-from thorium_reactor.flow.properties import average_primary_temperature_c, evaluate_fluid_properties, evaluate_primary_coolant_properties, primary_coolant_cp_kj_kgk
+from thorium_reactor.flow.properties import (
+    average_primary_temperature_c,
+    evaluate_fluid_properties,
+    evaluate_primary_coolant_properties,
+    primary_coolant_cp_kj_kgk,
+)
 from thorium_reactor.modeling import get_core_model
-
 
 CHANNEL_RADIUS_TOLERANCE = 1.0e-3
 
@@ -54,17 +59,11 @@ def resolve_msr_geometry(config: Any) -> ResolvedMSRGeometry:
     core_radius = float(geometry["core_radius"])
     plenum_radius = float(geometry.get("plenum_radius", core_radius * 0.68))
     reflector_outer_radius = float(geometry.get("reflector_outer_radius", core_radius + 11.2))
-    downcomer_liner_outer_radius = float(
-        geometry.get("downcomer_liner_outer_radius", reflector_outer_radius + 1.4)
-    )
-    downcomer_outer_radius = float(
-        geometry.get("downcomer_outer_radius", downcomer_liner_outer_radius + 7.2)
-    )
+    downcomer_liner_outer_radius = float(geometry.get("downcomer_liner_outer_radius", reflector_outer_radius + 1.4))
+    downcomer_outer_radius = float(geometry.get("downcomer_outer_radius", downcomer_liner_outer_radius + 7.2))
     vessel_outer_radius = float(geometry.get("vessel_outer_radius", downcomer_outer_radius + 3.2))
     guard_gap_outer_radius = float(geometry.get("guard_gap_outer_radius", vessel_outer_radius + 3.0))
-    guard_vessel_outer_radius = float(
-        geometry.get("guard_vessel_outer_radius", guard_gap_outer_radius + 2.6)
-    )
+    guard_vessel_outer_radius = float(geometry.get("guard_vessel_outer_radius", guard_gap_outer_radius + 2.6))
 
     lower_plenum_height = float(geometry.get("lower_plenum_height_cm", 24.0))
     active_core_height = float(geometry.get("active_core_height_cm", 192.0))
@@ -252,10 +251,7 @@ def build_msr_flow_summary(config: Any, resolved: ResolvedMSRGeometry | None = N
         "plenum_radius_cm": resolved.plenum_radius,
         "active_height_cm": resolved.active_height,
         "interface_metrics": {name: _round_metric(value) for name, value in interface_metrics.items()},
-        "variant_counts": {
-            name: dict(sorted(counts.items()))
-            for name, counts in variant_counts.items()
-        },
+        "variant_counts": {name: dict(sorted(counts.items())) for name, counts in variant_counts.items()},
         "channels": channel_interfaces,
     }
 
@@ -292,7 +288,11 @@ def _build_channels(
             for special in specials:
                 if not math.isclose(radius, special["ring_radius"], rel_tol=0.0, abs_tol=CHANNEL_RADIUS_TOLERANCE):
                     continue
-                use_special = index in special["indices"] if special["indices"] else (index - special["start_index"]) % special["every"] == 0
+                use_special = (
+                    index in special["indices"]
+                    if special["indices"]
+                    else (index - special["start_index"]) % special["every"] == 0
+                )
                 if use_special:
                     layers = [dict(layer) for layer in special["layers"]]
                     variant = special["variant"]
@@ -686,7 +686,9 @@ def _build_immersed_pool_render_solids(
 
     primary_loop_solids = _build_primary_loop_render_solids(loop, core_offset_x, core_offset_y, resolved)
 
-    return containment_solids + pool_solids + core_box_solids + core_scene_solids + shifted_channels + primary_loop_solids
+    return (
+        containment_solids + pool_solids + core_box_solids + core_scene_solids + shifted_channels + primary_loop_solids
+    )
 
 
 def _build_plant_system_description(
@@ -768,9 +770,7 @@ def _build_plant_network_descriptions(render_layout: dict[str, Any]) -> list[dic
             if pipe.get("id")
         ]
         component_ids = [
-            str(component.get("id", ""))
-            for component in section.get("components", [])
-            if component.get("id")
+            str(component.get("id", "")) for component in section.get("components", []) if component.get("id")
         ]
         networks.append(
             {
@@ -880,23 +880,58 @@ def _configured_cylinder_solid(component: dict[str, Any]) -> dict[str, Any] | No
         "opacity": float(component.get("opacity", 0.96)),
     }
     if axis == "x":
-        x_min = float(component.get("x_min_cm", float(component.get("x_cm", 0.0)) - float(component.get("length_cm", 20.0)) / 2.0))
-        x_max = float(component.get("x_max_cm", float(component.get("x_cm", 0.0)) + float(component.get("length_cm", 20.0)) / 2.0))
+        x_min = float(
+            component.get("x_min_cm", float(component.get("x_cm", 0.0)) - float(component.get("length_cm", 20.0)) / 2.0)
+        )
+        x_max = float(
+            component.get("x_max_cm", float(component.get("x_cm", 0.0)) + float(component.get("length_cm", 20.0)) / 2.0)
+        )
         if x_max <= x_min:
             return None
-        solid.update({"axis": "x", "x_min": x_min, "x_max": x_max, "y": float(component.get("y_cm", 0.0)), "z": float(component.get("z_cm", 0.0))})
+        solid.update(
+            {
+                "axis": "x",
+                "x_min": x_min,
+                "x_max": x_max,
+                "y": float(component.get("y_cm", 0.0)),
+                "z": float(component.get("z_cm", 0.0)),
+            }
+        )
     elif axis == "y":
-        y_min = float(component.get("y_min_cm", float(component.get("y_cm", 0.0)) - float(component.get("length_cm", 20.0)) / 2.0))
-        y_max = float(component.get("y_max_cm", float(component.get("y_cm", 0.0)) + float(component.get("length_cm", 20.0)) / 2.0))
+        y_min = float(
+            component.get("y_min_cm", float(component.get("y_cm", 0.0)) - float(component.get("length_cm", 20.0)) / 2.0)
+        )
+        y_max = float(
+            component.get("y_max_cm", float(component.get("y_cm", 0.0)) + float(component.get("length_cm", 20.0)) / 2.0)
+        )
         if y_max <= y_min:
             return None
-        solid.update({"axis": "y", "y_min": y_min, "y_max": y_max, "x": float(component.get("x_cm", 0.0)), "z": float(component.get("z_cm", 0.0))})
+        solid.update(
+            {
+                "axis": "y",
+                "y_min": y_min,
+                "y_max": y_max,
+                "x": float(component.get("x_cm", 0.0)),
+                "z": float(component.get("z_cm", 0.0)),
+            }
+        )
     else:
-        z_min = float(component.get("z_min_cm", float(component.get("z_cm", 0.0)) - float(component.get("height_cm", 20.0)) / 2.0))
-        z_max = float(component.get("z_max_cm", float(component.get("z_cm", 0.0)) + float(component.get("height_cm", 20.0)) / 2.0))
+        z_min = float(
+            component.get("z_min_cm", float(component.get("z_cm", 0.0)) - float(component.get("height_cm", 20.0)) / 2.0)
+        )
+        z_max = float(
+            component.get("z_max_cm", float(component.get("z_cm", 0.0)) + float(component.get("height_cm", 20.0)) / 2.0)
+        )
         if z_max <= z_min:
             return None
-        solid.update({"z_min": z_min, "z_max": z_max, "x": float(component.get("x_cm", 0.0)), "y": float(component.get("y_cm", 0.0))})
+        solid.update(
+            {
+                "z_min": z_min,
+                "z_max": z_max,
+                "x": float(component.get("x_cm", 0.0)),
+                "y": float(component.get("y_cm", 0.0)),
+            }
+        )
     return solid
 
 
@@ -1062,7 +1097,9 @@ def _build_immersed_pool_render_animation(
                 "width_cm": 1.15,
                 "packet_count": 6,
                 "packet_length_cm": 12.0,
-                "speed": _normalize_animation_speed(float(physics["loop_pipe_velocity_m_s"]) * 1.08, reference_velocity),
+                "speed": _normalize_animation_speed(
+                    float(physics["loop_pipe_velocity_m_s"]) * 1.08, reference_velocity
+                ),
                 "points": hot_leg,
             },
             {
@@ -1071,7 +1108,9 @@ def _build_immersed_pool_render_animation(
                 "width_cm": 1.05,
                 "packet_count": 5,
                 "packet_length_cm": 12.0,
-                "speed": _normalize_animation_speed(float(physics["loop_pipe_velocity_m_s"]) * 0.82, reference_velocity),
+                "speed": _normalize_animation_speed(
+                    float(physics["loop_pipe_velocity_m_s"]) * 0.82, reference_velocity
+                ),
                 "phase_offset": 0.33,
                 "points": cold_leg,
             },
@@ -1081,7 +1120,9 @@ def _build_immersed_pool_render_animation(
                 "width_cm": 2.2,
                 "packet_count": 7,
                 "packet_length_cm": 16.0,
-                "speed": _normalize_animation_speed(float(physics["pool_circulation_velocity_m_s"]), reference_velocity),
+                "speed": _normalize_animation_speed(
+                    float(physics["pool_circulation_velocity_m_s"]), reference_velocity
+                ),
                 "phase_offset": 0.17,
                 "loop": True,
                 "points": coolant_swirl,
@@ -1115,16 +1156,22 @@ def _estimate_animation_physics(
             and str(channel.get("variant")) in active_variants
         )
     bulk_temperature_c = average_primary_temperature_c(config.reactor)
-    salt_density_kg_m3 = float(evaluate_primary_coolant_properties(config, temperature_c=bulk_temperature_c)["density_kg_m3"])
+    salt_density_kg_m3 = float(
+        evaluate_primary_coolant_properties(config, temperature_c=bulk_temperature_c)["density_kg_m3"]
+    )
     coolant_density_kg_m3 = float(
         evaluate_fluid_properties(
-            config.materials[str(render_layout.get("pool", {}).get("material", config.geometry.get("salt_material", "fuel_salt")))],
+            config.materials[
+                str(render_layout.get("pool", {}).get("material", config.geometry.get("salt_material", "fuel_salt")))
+            ],
             temperature_c=bulk_temperature_c,
         )["density_kg_m3"]
     )
 
     volumetric_flow_m3_s = primary_mass_flow_kg_s / salt_density_kg_m3 if salt_density_kg_m3 > 0.0 else 0.0
-    active_channel_velocity_m_s = volumetric_flow_m3_s / (active_flow_area_cm2 * 1.0e-4) if active_flow_area_cm2 > 0.0 else 0.0
+    active_channel_velocity_m_s = (
+        volumetric_flow_m3_s / (active_flow_area_cm2 * 1.0e-4) if active_flow_area_cm2 > 0.0 else 0.0
+    )
 
     pipe_runs = (render_layout.get("primary_loop", {}) or {}).get("pipes", [])
     pipe_radius_cm = min(float(pipe_run.get("radius_cm", 1.0)) for pipe_run in pipe_runs) if pipe_runs else 1.0
@@ -1159,6 +1206,7 @@ def _normalize_animation_speed(velocity_m_s: float, reference_velocity_m_s: floa
     scaled = velocity_m_s / reference_velocity_m_s
     return max(0.2, min(1.2, 0.18 + scaled))
 
+
 def _estimate_pool_recirculation_area_cm2(
     render_layout: dict[str, Any],
     resolved: ResolvedMSRGeometry,
@@ -1167,7 +1215,7 @@ def _estimate_pool_recirculation_area_cm2(
     pool = render_layout.get("pool", {})
     core_box = render_layout.get("core_box", {})
     inner_pool_radius = _pool_inner_radius_cm(pool, resolved)
-    free_pool_area_cm2 = math.pi * (inner_pool_radius ** 2)
+    free_pool_area_cm2 = math.pi * (inner_pool_radius**2)
     free_pool_area_cm2 -= float(core_box.get("outer_width_cm", resolved.core_radius * 2.3)) * float(
         core_box.get("outer_depth_cm", resolved.core_radius * 1.9)
     )
@@ -1208,7 +1256,9 @@ def _build_render_layout_invariants(
         for pipe_run in loop.get("pipes", [])
         for point in pipe_run.get("points", [])
     ]
-    loop_clear = all(math.hypot(x_value, y_value) <= pool_radius for x_value, y_value, _ in loop_points) if loop_points else True
+    loop_clear = (
+        all(math.hypot(x_value, y_value) <= pool_radius for x_value, y_value, _ in loop_points) if loop_points else True
+    )
     loop_top_z = max(
         _primary_component_top_z(exchanger, kind="heat_exchanger"),
         _primary_component_top_z(pump, kind="pump"),
@@ -1311,22 +1361,22 @@ def _build_render_physics_invariants(
     checks.extend(
         [
             (
-            "physics::active_channel_velocity_reasonable",
-            1.0 <= active_velocity <= 12.0,
-            f"Representative active-channel velocity is {active_velocity:.2f} m/s.",
-            "Representative active-channel velocity should remain between 1 and 12 m/s.",
+                "physics::active_channel_velocity_reasonable",
+                1.0 <= active_velocity <= 12.0,
+                f"Representative active-channel velocity is {active_velocity:.2f} m/s.",
+                "Representative active-channel velocity should remain between 1 and 12 m/s.",
             ),
             (
-            "physics::loop_pipe_velocity_reasonable",
-            1.0 <= loop_velocity <= 10.0,
-            f"Limiting primary-loop pipe velocity is {loop_velocity:.2f} m/s.",
-            "Limiting primary-loop pipe velocity should remain between 1 and 10 m/s.",
+                "physics::loop_pipe_velocity_reasonable",
+                1.0 <= loop_velocity <= 10.0,
+                f"Limiting primary-loop pipe velocity is {loop_velocity:.2f} m/s.",
+                "Limiting primary-loop pipe velocity should remain between 1 and 10 m/s.",
             ),
             (
-            "physics::pool_circulation_velocity_reasonable",
-            0.02 <= pool_velocity <= 1.5,
-            f"Representative pool recirculation velocity is {pool_velocity:.3f} m/s.",
-            "Representative pool recirculation velocity should remain between 0.02 and 1.5 m/s.",
+                "physics::pool_circulation_velocity_reasonable",
+                0.02 <= pool_velocity <= 1.5,
+                f"Representative pool recirculation velocity is {pool_velocity:.3f} m/s.",
+                "Representative pool recirculation velocity should remain between 0.02 and 1.5 m/s.",
             ),
         ]
     )
@@ -1351,7 +1401,9 @@ def _primary_component_top_z(component: dict[str, Any], *, kind: str) -> float:
     if kind == "heat_exchanger":
         return float(component.get("z_cm", 0.0)) + float(component.get("radius_cm", 0.0))
     if kind == "pump":
-        return float(component.get("z_max_cm", 0.0)) + float(component.get("header_radius_cm", component.get("radius_cm", 0.0)))
+        return float(component.get("z_max_cm", 0.0)) + float(
+            component.get("header_radius_cm", component.get("radius_cm", 0.0))
+        )
     return float("-inf")
 
 
@@ -1649,7 +1701,7 @@ def _build_pipe_run_solids(
     material: str,
 ) -> list[dict[str, Any]]:
     solids: list[dict[str, Any]] = []
-    for index, (start, stop) in enumerate(zip(points, points[1:])):
+    for index, (start, stop) in enumerate(itertools.pairwise(points)):
         x0, y0, z0 = start
         x1, y1, z1 = stop
         if math.isclose(x0, x1, abs_tol=1.0e-6) and math.isclose(y0, y1, abs_tol=1.0e-6):

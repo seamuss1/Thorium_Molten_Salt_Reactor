@@ -88,7 +88,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         claimed = controller.claim_run_start(user)
         try:
             return jobs.submit(draft)
-        except Exception as exc:  # noqa: BLE001 - converted into browser-safe feedback.
+        except Exception as exc:
             if claimed is not None:
                 controller.release_run_start(user)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -115,7 +115,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
                     events, offset = repository.read_events_from(case_name, run_id, offset)
                     status = repository.run_status(case_name, run_id)
                 except FileNotFoundError:
-                    yield "event: error\ndata: {\"message\":\"Run not found\"}\n\n"
+                    yield 'event: error\ndata: {"message":"Run not found"}\n\n'
                     return
                 for event in events:
                     yield f"event: run\ndata: {json.dumps(model_to_dict(event))}\n\n"

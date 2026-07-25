@@ -9,7 +9,6 @@ from thorium_reactor.literature_models import (
     build_tritium_transport_summary,
 )
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 

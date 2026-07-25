@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-
 PCM_PER_DELTA_K = 100000.0
 REQUIRED_OPENMC_XML = ("geometry.xml", "materials.xml", "settings.xml")
 REQUIRED_BUNDLE_ARTIFACTS = (
@@ -81,11 +80,7 @@ def merge_benchmark_evidence_into_quality(
     if not isinstance(evidence, dict) or not evidence:
         return dict(quality)
 
-    existing = [
-        dict(gate)
-        for gate in quality.get("gates", [])
-        if not str(gate.get("id", "")).startswith("evidence::")
-    ]
+    existing = [dict(gate) for gate in quality.get("gates", []) if not str(gate.get("id", "")).startswith("evidence::")]
     evidence_gates = [
         {
             "id": f"evidence::{gate.get('id', 'gate')}",
@@ -114,16 +109,8 @@ def build_nuclear_data_provenance(*, openmc_module: Any | None = None) -> dict[s
         "OPENMC_MG_CROSS_SECTIONS": os.environ.get("OPENMC_MG_CROSS_SECTIONS"),
         "OPENMC_CHAIN_FILE": os.environ.get("OPENMC_CHAIN_FILE"),
     }
-    path_records = {
-        name: _path_record(value)
-        for name, value in env_paths.items()
-        if value
-    }
-    hashed = [
-        record
-        for record in path_records.values()
-        if isinstance(record, dict) and record.get("sha256")
-    ]
+    path_records = {name: _path_record(value) for name, value in env_paths.items() if value}
+    hashed = [record for record in path_records.values() if isinstance(record, dict) and record.get("sha256")]
     status = "complete" if hashed else "blocked_missing_cross_sections"
     return {
         "schema_version": 1,
@@ -134,7 +121,9 @@ def build_nuclear_data_provenance(*, openmc_module: Any | None = None) -> dict[s
         "blockers": (
             []
             if status == "complete"
-            else ["No hashable OpenMC nuclear-data cross_sections XML or chain file was found in the runtime environment."]
+            else [
+                "No hashable OpenMC nuclear-data cross_sections XML or chain file was found in the runtime environment."
+            ]
         ),
     }
 
@@ -159,11 +148,15 @@ def build_source_convergence_diagnostics(
         "blockers": [],
     }
     if not statepoints:
-        diagnostics["blockers"].append("No OpenMC statepoint.*.h5 file is present, so source convergence cannot be audited.")
+        diagnostics["blockers"].append(
+            "No OpenMC statepoint.*.h5 file is present, so source convergence cannot be audited."
+        )
         return diagnostics
     if openmc_module is None:
         diagnostics["status"] = "blocked_openmc_python_unavailable"
-        diagnostics["blockers"].append("OpenMC Python bindings are unavailable, so statepoint convergence metadata was not extracted.")
+        diagnostics["blockers"].append(
+            "OpenMC Python bindings are unavailable, so statepoint convergence metadata was not extracted."
+        )
         return diagnostics
 
     try:
@@ -234,7 +227,9 @@ def build_cross_code_comparison(summary: dict[str, Any], benchmark: dict[str, An
         "openmc_status": solver_status or "unknown",
         "references": references,
         "comparisons": comparisons,
-        "blockers": [] if references and len(completed) == len(references) else _cross_code_blockers(references, openmc_keff, solver_status),
+        "blockers": []
+        if references and len(completed) == len(references)
+        else _cross_code_blockers(references, openmc_keff, solver_status),
     }
 
 
@@ -253,19 +248,69 @@ def build_benchmark_evidence(
     gates = []
     tallies_required = bool(config.get("simulation", {}).get("tallies"))
     xml_files = [*REQUIRED_OPENMC_XML, *(("tallies.xml",) if tallies_required else ())]
-    gates.append(_gate("openmc_xml_inputs", all((openmc_dir / name).exists() for name in xml_files), f"Required OpenMC XML inputs present: {', '.join(xml_files)}."))
+    gates.append(
+        _gate(
+            "openmc_xml_inputs",
+            all((openmc_dir / name).exists() for name in xml_files),
+            f"Required OpenMC XML inputs present: {', '.join(xml_files)}.",
+        )
+    )
     statepoints = sorted(openmc_dir.glob("statepoint.*.h5"))
-    gates.append(_gate("openmc_statepoint", bool(statepoints), "At least one OpenMC statepoint.*.h5 artifact is present."))
+    gates.append(
+        _gate("openmc_statepoint", bool(statepoints), "At least one OpenMC statepoint.*.h5 artifact is present.")
+    )
     for artifact in REQUIRED_BUNDLE_ARTIFACTS:
         if artifact == "benchmark_evidence.json":
             continue
-        gates.append(_gate(f"artifact::{artifact}", (bundle_root / artifact).exists(), f"Required evidence artifact {artifact} is present."))
-    gates.append(_gate("nuclear_data_provenance", nuclear_data.get("status") == "complete", "Nuclear data provenance includes a hashable runtime library record."))
-    gates.append(_gate("source_convergence_diagnostics", convergence.get("status") == "complete", "OpenMC source convergence diagnostics were extracted from a statepoint."))
-    gates.append(_gate("cross_code_comparison", cross_code.get("status") == "completed", "Declared cross-code comparison residuals are complete."))
-    gates.append(_gate("uncertainty_budget", _uncertainty_budget_complete(bundle_root), "Geometry/material uncertainty budget is complete and source-backed for benchmark-ready use."))
-    gates.append(_gate("runtime_context", _runtime_context_complete(summary, provenance), "Runtime context includes git commit and reproducibility metadata."))
-    gates.append(_gate("source_dossier_paths", _source_dossier_paths_exist(bundle_root, benchmark), "Source index, parameter table, and assumption log paths exist."))
+        gates.append(
+            _gate(
+                f"artifact::{artifact}",
+                (bundle_root / artifact).exists(),
+                f"Required evidence artifact {artifact} is present.",
+            )
+        )
+    gates.append(
+        _gate(
+            "nuclear_data_provenance",
+            nuclear_data.get("status") == "complete",
+            "Nuclear data provenance includes a hashable runtime library record.",
+        )
+    )
+    gates.append(
+        _gate(
+            "source_convergence_diagnostics",
+            convergence.get("status") == "complete",
+            "OpenMC source convergence diagnostics were extracted from a statepoint.",
+        )
+    )
+    gates.append(
+        _gate(
+            "cross_code_comparison",
+            cross_code.get("status") == "completed",
+            "Declared cross-code comparison residuals are complete.",
+        )
+    )
+    gates.append(
+        _gate(
+            "uncertainty_budget",
+            _uncertainty_budget_complete(bundle_root),
+            "Geometry/material uncertainty budget is complete and source-backed for benchmark-ready use.",
+        )
+    )
+    gates.append(
+        _gate(
+            "runtime_context",
+            _runtime_context_complete(summary, provenance),
+            "Runtime context includes git commit and reproducibility metadata.",
+        )
+    )
+    gates.append(
+        _gate(
+            "source_dossier_paths",
+            _source_dossier_paths_exist(bundle_root, benchmark),
+            "Source index, parameter table, and assumption log paths exist.",
+        )
+    )
     passed = [gate for gate in gates if gate["status"] == "pass"]
     failed = [gate for gate in gates if gate["status"] != "pass"]
     return {
@@ -338,13 +383,19 @@ def _cross_code_references(benchmark: dict[str, Any]) -> list[dict[str, Any]]:
             if not isinstance(observable, dict):
                 continue
             observable_id = str(observable.get("id", ""))
-            if "serpent" not in observable_id.lower() and "scale" not in observable_id.lower() and "shift" not in observable_id.lower():
+            if (
+                "serpent" not in observable_id.lower()
+                and "scale" not in observable_id.lower()
+                and "shift" not in observable_id.lower()
+            ):
                 continue
             references.append(
                 {
                     "id": observable_id,
                     "code": _reference_code(observable_id),
-                    "library": observable.get("library") or "ENDF/B-VII.1" if "serpent" in observable_id.lower() else observable.get("library"),
+                    "library": observable.get("library") or "ENDF/B-VII.1"
+                    if "serpent" in observable_id.lower()
+                    else observable.get("library"),
                     "keff": observable.get("value"),
                     "uncertainty_pcm": observable.get("uncertainty_pcm"),
                     "source": dataset.get("source"),
@@ -426,10 +477,11 @@ def _artifact_index(bundle_root: Path, openmc_dir: Path) -> dict[str, Any]:
     for name in REQUIRED_BUNDLE_ARTIFACTS:
         artifacts[name] = _path_record(str(bundle_root / name))
     artifacts["openmc"] = {
-        name: _path_record(str(openmc_dir / name))
-        for name in (*REQUIRED_OPENMC_XML, "tallies.xml", "summary.h5")
+        name: _path_record(str(openmc_dir / name)) for name in (*REQUIRED_OPENMC_XML, "tallies.xml", "summary.h5")
     }
-    artifacts["openmc"]["statepoints"] = [_path_record(str(path)) for path in sorted(openmc_dir.glob("statepoint.*.h5"))]
+    artifacts["openmc"]["statepoints"] = [
+        _path_record(str(path)) for path in sorted(openmc_dir.glob("statepoint.*.h5"))
+    ]
     return artifacts
 
 

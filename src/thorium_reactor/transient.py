@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from thorium_reactor.capabilities import BALANCE_OF_PLANT, THERMAL_NETWORK, validate_case_capability
 from thorium_reactor.chemistry import (
     build_chemistry_assumptions,
     build_steady_state_chemistry_summary,
     corrosion_index_from_state,
 )
-from thorium_reactor.capabilities import BALANCE_OF_PLANT, THERMAL_NETWORK, validate_case_capability
 from thorium_reactor.precursors import (
     build_initial_precursor_state,
     precursor_group_summary,
@@ -17,7 +17,6 @@ from thorium_reactor.precursors import (
     step_precursor_state,
     summarize_precursor_state,
 )
-
 
 DEFAULT_TRANSIENT_MODEL = "reduced_order_transient_proxy"
 
@@ -45,9 +44,7 @@ def build_depletion_assumptions(config: Any) -> dict[str, Any]:
         "fissile_burn_fraction_per_day_full_power": _round_float(
             float(depletion.get("fissile_burn_fraction_per_day_full_power", 8.0e-4))
         ),
-        "breeding_gain_fraction_per_day": _round_float(
-            float(depletion.get("breeding_gain_fraction_per_day", 5.5e-4))
-        ),
+        "breeding_gain_fraction_per_day": _round_float(float(depletion.get("breeding_gain_fraction_per_day", 5.5e-4))),
         "minor_actinide_sink_fraction_per_day": _round_float(
             float(depletion.get("minor_actinide_sink_fraction_per_day", 1.2e-4))
         ),
@@ -162,11 +159,7 @@ def _resolve_scenario(transient_config: dict[str, Any], scenario_name: str | Non
         [
             {
                 "time_s": float(event.get("time_s", 0.0)),
-                **{
-                    key: value
-                    for key, value in event.items()
-                    if key != "time_s"
-                },
+                **{key: value for key, value in event.items() if key != "time_s"},
             }
             for event in events
             if isinstance(event, dict)
@@ -191,27 +184,23 @@ def _build_transient_baseline(config: Any, summary: dict[str, Any]) -> dict[str,
     fuel_inventory = inventory.get("fuel_salt", {})
 
     thermal_power_mw = float(bop.get("thermal_power_mw", config.reactor.get("design_power_mwth", 0.0)))
-    hot_leg_temp_c = float(
-        thermal_profile.get("estimated_hot_leg_temp_c", config.reactor.get("hot_leg_temp_c", 700.0))
-    )
+    hot_leg_temp_c = float(thermal_profile.get("estimated_hot_leg_temp_c", config.reactor.get("hot_leg_temp_c", 700.0)))
     cold_leg_temp_c = float(
         thermal_profile.get("estimated_cold_leg_temp_c", config.reactor.get("cold_leg_temp_c", 560.0))
     )
     average_temp_c = 0.5 * (hot_leg_temp_c + cold_leg_temp_c)
     delta_t_c = max(hot_leg_temp_c - cold_leg_temp_c, 1.0)
-    core_residence_time_s = float(
-        reduced_order.get("active_flow", {}).get("representative_residence_time_s", 1.0)
-    )
+    core_residence_time_s = float(reduced_order.get("active_flow", {}).get("representative_residence_time_s", 1.0))
     total_fuel_volume_m3 = float(fuel_inventory.get("total_m3", 0.0))
-    total_volumetric_flow_m3_s = float(
-        reduced_order.get("active_flow", {}).get("total_volumetric_flow_m3_s", 0.0)
-    )
+    total_volumetric_flow_m3_s = float(reduced_order.get("active_flow", {}).get("total_volumetric_flow_m3_s", 0.0))
     loop_residence_time_s = (
         total_fuel_volume_m3 / total_volumetric_flow_m3_s
         if total_fuel_volume_m3 > 0.0 and total_volumetric_flow_m3_s > 0.0
         else max(core_residence_time_s * 8.0, 5.0)
     )
-    cleanup_turnover_hours = float(fuel_cycle.get("cleanup_turnover_hours", 24.0 * float(config.reactor.get("cleanup_turnover_days", 14.0))))
+    cleanup_turnover_hours = float(
+        fuel_cycle.get("cleanup_turnover_hours", 24.0 * float(config.reactor.get("cleanup_turnover_days", 14.0)))
+    )
     cleanup_turnover_s = max(cleanup_turnover_hours * 3600.0, 1.0)
     cleanup_removal_efficiency = float(
         fuel_cycle.get("cleanup_removal_efficiency", config.reactor.get("cleanup_removal_efficiency", 0.75))
@@ -227,7 +216,9 @@ def _build_transient_baseline(config: Any, summary: dict[str, Any]) -> dict[str,
             config,
             fuel_salt_volume_m3=total_fuel_volume_m3,
             bulk_temperature_c=average_temp_c,
-            cleanup_turnover_days=float(fuel_cycle.get("cleanup_turnover_days", config.reactor.get("cleanup_turnover_days", 14.0))),
+            cleanup_turnover_days=float(
+                fuel_cycle.get("cleanup_turnover_days", config.reactor.get("cleanup_turnover_days", 14.0))
+            ),
         )
     precursor_loop_segments = _resolve_precursor_loop_segments(
         config,
@@ -255,15 +246,15 @@ def _resolve_model_parameters(transient_config: dict[str, Any]) -> dict[str, Any
     model_parameters: dict[str, Any] = {
         "power_response_time_s": float(transient_config.get("power_response_time_s", 2.5)),
         "fuel_temperature_response_time_s": float(transient_config.get("fuel_temperature_response_time_s", 8.0)),
-        "graphite_temperature_response_time_s": float(transient_config.get("graphite_temperature_response_time_s", 28.0)),
+        "graphite_temperature_response_time_s": float(
+            transient_config.get("graphite_temperature_response_time_s", 28.0)
+        ),
         "coolant_temperature_response_time_s": float(transient_config.get("coolant_temperature_response_time_s", 12.0)),
         "precursor_inventory_response_time_s": float(transient_config.get("precursor_inventory_response_time_s", 5.0)),
         "precursor_transport_response_time_s": float(transient_config.get("precursor_transport_response_time_s", 3.0)),
         "xenon_response_time_s": float(transient_config.get("xenon_response_time_s", 240.0)),
         "reactivity_to_power_scale_pcm": float(transient_config.get("reactivity_to_power_scale_pcm", 650.0)),
-        "fuel_temperature_feedback_pcm_per_c": float(
-            transient_config.get("fuel_temperature_feedback_pcm_per_c", -3.0)
-        ),
+        "fuel_temperature_feedback_pcm_per_c": float(transient_config.get("fuel_temperature_feedback_pcm_per_c", -3.0)),
         "graphite_temperature_feedback_pcm_per_c": float(
             transient_config.get("graphite_temperature_feedback_pcm_per_c", -0.8)
         ),
@@ -271,18 +262,14 @@ def _resolve_model_parameters(transient_config: dict[str, Any]) -> dict[str, Any
             transient_config.get("coolant_temperature_feedback_pcm_per_c", -0.5)
         ),
         "precursor_worth_pcm": float(transient_config.get("precursor_worth_pcm", 180.0)),
-        "xenon_worth_pcm_per_fraction": float(
-            transient_config.get("xenon_worth_pcm_per_fraction", -120.0)
-        ),
+        "xenon_worth_pcm_per_fraction": float(transient_config.get("xenon_worth_pcm_per_fraction", -120.0)),
         "depletion_reactivity_worth_pcm_per_fraction": float(
             transient_config.get("depletion_reactivity_worth_pcm_per_fraction", 320.0)
         ),
         "protactinium_penalty_pcm_per_fraction": float(
             transient_config.get("protactinium_penalty_pcm_per_fraction", -140.0)
         ),
-        "chemistry_redox_worth_pcm_per_ev": float(
-            transient_config.get("chemistry_redox_worth_pcm_per_ev", -90.0)
-        ),
+        "chemistry_redox_worth_pcm_per_ev": float(transient_config.get("chemistry_redox_worth_pcm_per_ev", -90.0)),
         "chemistry_impurity_worth_pcm_per_fraction": float(
             transient_config.get("chemistry_impurity_worth_pcm_per_fraction", -240.0)
         ),
@@ -340,9 +327,7 @@ def _integrate_transient(
     baseline["initial_core_delayed_neutron_source_absolute_fraction"] = precursor_summary[
         "core_delayed_neutron_source_absolute_fraction"
     ]
-    baseline["initial_precursor_transport_loss_fraction"] = precursor_summary[
-        "precursor_transport_loss_fraction"
-    ]
+    baseline["initial_precursor_transport_loss_fraction"] = precursor_summary["precursor_transport_loss_fraction"]
     baseline["delayed_neutron_precursor_groups"] = precursor_group_summary(
         precursor_state,
         precursor_groups,
@@ -385,7 +370,10 @@ def _integrate_transient(
     for step in range(step_count + 1):
         time_s = step * dt
         dt_days = dt / 86400.0
-        while event_index < len(scenario["events"]) and float(scenario["events"][event_index]["time_s"]) <= time_s + 1.0e-9:
+        while (
+            event_index < len(scenario["events"])
+            and float(scenario["events"][event_index]["time_s"]) <= time_s + 1.0e-9
+        ):
             event = scenario["events"][event_index]
             for source_key, target_key in (
                 ("reactivity_step_pcm", "reactivity_pcm"),
@@ -414,10 +402,14 @@ def _integrate_transient(
             effective_flow_fraction * max(effective_heat_sink_fraction, 0.15),
             0.05,
         )
-        fuel_target_c = steady_fuel_temp_c + (thermal_load_ratio - 1.0) * float(baseline["steady_state_delta_t_c"]) * 0.7
+        fuel_target_c = (
+            steady_fuel_temp_c + (thermal_load_ratio - 1.0) * float(baseline["steady_state_delta_t_c"]) * 0.7
+        )
         fuel_target_c += controls["sink_temp_offset_c"] * 0.25
         graphite_target_c = steady_graphite_temp_c + (fuel_temp_c - steady_fuel_temp_c) * 0.7
-        coolant_target_c = steady_coolant_temp_c + (thermal_load_ratio - 1.0) * float(baseline["steady_state_delta_t_c"]) * 0.45
+        coolant_target_c = (
+            steady_coolant_temp_c + (thermal_load_ratio - 1.0) * float(baseline["steady_state_delta_t_c"]) * 0.45
+        )
         coolant_target_c += controls["sink_temp_offset_c"] * 0.55
 
         fuel_temp_c = _first_order_step(
@@ -458,9 +450,7 @@ def _integrate_transient(
         )
         core_precursor_fraction = float(precursor_summary["core_precursor_fraction"])
         precursor_total = float(precursor_summary["precursor_total_fraction"])
-        core_delayed_neutron_source_fraction = float(
-            precursor_summary["core_delayed_neutron_source_fraction"]
-        )
+        core_delayed_neutron_source_fraction = float(precursor_summary["core_delayed_neutron_source_fraction"])
         precursor_transport_loss_fraction = float(precursor_summary["precursor_transport_loss_fraction"])
 
         xenon_target = max(power_fraction, 0.0)
@@ -509,7 +499,9 @@ def _integrate_transient(
         impurity_capture_rate_per_day = (
             float(chemistry["impurity_capture_efficiency"]) + gas_stripping_efficiency
         ) / max(float(baseline["fuel_cycle"].get("cleanup_turnover_days", 14.0)), 0.25)
-        impurity_fraction += (impurity_ingress_fraction_per_day - impurity_capture_rate_per_day * impurity_fraction) * dt_days
+        impurity_fraction += (
+            impurity_ingress_fraction_per_day - impurity_capture_rate_per_day * impurity_fraction
+        ) * dt_days
         impurity_fraction = _clamp(impurity_fraction, 0.0, 0.05)
         corrosion_index = corrosion_index_from_state(
             redox_state_ev=redox_state_ev,
@@ -523,9 +515,7 @@ def _integrate_transient(
             + model_parameters["graphite_temperature_feedback_pcm_per_c"] * (graphite_temp_c - steady_graphite_temp_c)
             + model_parameters["coolant_temperature_feedback_pcm_per_c"] * (coolant_temp_c - steady_coolant_temp_c)
         )
-        precursor_feedback_pcm = model_parameters["precursor_worth_pcm"] * (
-            core_delayed_neutron_source_fraction - 1.0
-        )
+        precursor_feedback_pcm = model_parameters["precursor_worth_pcm"] * (core_delayed_neutron_source_fraction - 1.0)
         xenon_feedback_pcm = model_parameters["xenon_worth_pcm_per_fraction"] * (xenon_fraction - 1.0)
         depletion_feedback_pcm = (
             model_parameters["depletion_reactivity_worth_pcm_per_fraction"] * (fissile_inventory_fraction - 1.0)
@@ -564,7 +554,9 @@ def _integrate_transient(
             minimum_core_delayed_neutron_source_fraction,
             core_delayed_neutron_source_fraction,
         )
-        peak_protactinium_inventory_fraction = max(peak_protactinium_inventory_fraction, protactinium_inventory_fraction)
+        peak_protactinium_inventory_fraction = max(
+            peak_protactinium_inventory_fraction, protactinium_inventory_fraction
+        )
         peak_corrosion_index = max(peak_corrosion_index, corrosion_index)
 
         history.append(
@@ -665,7 +657,9 @@ def _resolve_precursor_loop_segments(
             diameter_m = max(float(segment.get("inner_diameter_m", 0.0)), 0.0)
             volume_m3 = 3.141592653589793 * (0.5 * diameter_m) ** 2 * length_m
             residence_s = volume_m3 / flow_m3_s if flow_m3_s > 0.0 else 0.0
-            residence_estimates.append((str(segment.get("id") or segment.get("name") or f"loop_segment_{index + 1}"), residence_s))
+            residence_estimates.append(
+                (str(segment.get("id") or segment.get("name") or f"loop_segment_{index + 1}"), residence_s)
+            )
         total_residence_s = sum(value for _, value in residence_estimates)
         if total_residence_s > 0.0:
             return [

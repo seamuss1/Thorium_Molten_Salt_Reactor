@@ -1,7 +1,7 @@
-from pathlib import Path
 import json
 import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -28,6 +28,7 @@ def test_latest_result_bundle_prefers_newest_run_regardless_of_run_id_format(tmp
 
     os.utime(web.root, (base, base))
     assert latest_result_bundle(tmp_path, "layout_case").run_id == "web-demo"
+
 
 def test_result_bundle_creates_dedicated_geometry_exports_dir(tmp_path: Path) -> None:
     repo_root = tmp_path / "bundle-layout-test"

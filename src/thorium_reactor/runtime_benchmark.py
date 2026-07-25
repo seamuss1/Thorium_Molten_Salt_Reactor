@@ -12,7 +12,6 @@ from thorium_reactor.accelerators import (
 )
 from thorium_reactor.transient_sweep import build_transient_sweep_payload
 
-
 DEFAULT_RUNTIME_BENCHMARK_BACKENDS = ("python", "numpy", "torch-xpu")
 COMPARISON_METRICS = (
     "peak_power_fraction_p95",
@@ -68,7 +67,9 @@ def run_runtime_benchmark_case(
             failure = {
                 "backend": backend_name,
                 "status": "unavailable",
-                "reason": next((item.get("reason") for item in discovery if item["name"] == backend_name), "backend unavailable"),
+                "reason": next(
+                    (item.get("reason") for item in discovery if item["name"] == backend_name), "backend unavailable"
+                ),
             }
             failures.append(failure)
             results.append(failure)
@@ -96,9 +97,7 @@ def run_runtime_benchmark_case(
             continue
 
         fallback_enabled = bool(
-            payload.get("backend_report", {})
-            .get("environment", {})
-            .get("pytorch_xpu_fallback_enabled", False)
+            payload.get("backend_report", {}).get("environment", {}).get("pytorch_xpu_fallback_enabled", False)
         )
         if payload["backend"].startswith("torch-xpu") and fallback_enabled and fail_on_gpu_fallback:
             raise RuntimeError("torch-xpu benchmark ran with PYTORCH_ENABLE_XPU_FALLBACK enabled.")
@@ -195,7 +194,9 @@ def _compare_to_reference(
         max_abs_error = max(max_abs_error, abs_error)
         max_rel_error = max(max_rel_error, rel_error)
         if not math.isfinite(value) or abs_error > atol + rtol * abs(expected):
-            failures.append({"metric": key, "value": value, "reference": expected, "abs_error": abs_error, "rel_error": rel_error})
+            failures.append(
+                {"metric": key, "value": value, "reference": expected, "abs_error": abs_error, "rel_error": rel_error}
+            )
     return {
         "status": "ok" if not failures else "failed",
         "max_abs_error": max_abs_error,
@@ -216,7 +217,11 @@ def _recommend_backend(results: list[dict[str, Any]], reference: dict[str, Any])
         speedup = rate / max(reference_rate, 1.0e-12)
         candidates.append((speedup, rate, result))
     if not candidates:
-        return {"backend": reference.get("backend"), "speedup_vs_reference": 1.0, "reason": "no valid accelerated candidate"}
+        return {
+            "backend": reference.get("backend"),
+            "speedup_vs_reference": 1.0,
+            "reason": "no valid accelerated candidate",
+        }
     speedup, rate, result = max(candidates, key=lambda item: item[1])
     if result is reference or speedup < 1.5:
         return {

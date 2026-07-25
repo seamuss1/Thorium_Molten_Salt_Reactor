@@ -13,7 +13,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 EVIDENCE_STATUS_SCHEMA_VERSION = 1
 
 _SOLVER_BACKED_STATES = {"completed"}
@@ -61,7 +60,9 @@ def build_evidence_status(bundle_dir: Path | None, summary: dict[str, Any]) -> d
 
     can_use_solver_backed_language = not blockers
 
-    benchmark_quality = summary.get("benchmark_quality", {}) if isinstance(summary.get("benchmark_quality"), dict) else {}
+    benchmark_quality = (
+        summary.get("benchmark_quality", {}) if isinstance(summary.get("benchmark_quality"), dict) else {}
+    )
     benchmark_evidence = _load_benchmark_evidence(bundle_dir, summary)
     benchmark_blockers: list[str] = []
     if benchmark_quality.get("benchmark_ready") is not True:
@@ -114,9 +115,7 @@ def _statepoint_artifacts(bundle_dir: Path | None, openmc_group: dict[str, Any])
     if not isinstance(artifacts, list):
         return []
     return [
-        str(name)
-        for name in artifacts
-        if Path(str(name)).name.startswith("statepoint.") and str(name).endswith(".h5")
+        str(name) for name in artifacts if Path(str(name)).name.startswith("statepoint.") and str(name).endswith(".h5")
     ]
 
 

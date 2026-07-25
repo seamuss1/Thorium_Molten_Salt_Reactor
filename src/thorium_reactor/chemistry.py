@@ -12,7 +12,9 @@ def build_chemistry_assumptions(config: Any) -> dict[str, Any]:
         "target_redox_state_ev": _round_float(float(chemistry.get("target_redox_state_ev", -0.03))),
         "initial_redox_state_ev": _round_float(float(chemistry.get("initial_redox_state_ev", -0.02))),
         "redox_control_time_days": _round_float(float(chemistry.get("redox_control_time_days", 2.0))),
-        "oxidant_ingress_fraction_per_day": _round_float(float(chemistry.get("oxidant_ingress_fraction_per_day", 2.0e-4))),
+        "oxidant_ingress_fraction_per_day": _round_float(
+            float(chemistry.get("oxidant_ingress_fraction_per_day", 2.0e-4))
+        ),
         "impurity_capture_efficiency": _round_float(float(chemistry.get("impurity_capture_efficiency", 0.65))),
         "gas_stripping_efficiency": _round_float(float(chemistry.get("gas_stripping_efficiency", 0.88))),
         "noble_metal_plateout_fraction": _round_float(float(chemistry.get("noble_metal_plateout_fraction", 0.12))),
@@ -36,7 +38,9 @@ def build_steady_state_chemistry_summary(
     impurity_capture_efficiency = float(assumptions["impurity_capture_efficiency"])
     gas_stripping_efficiency = float(assumptions["gas_stripping_efficiency"])
     cleanup_damping = max(cleanup_turnover_days, 0.25)
-    impurity_fraction = oxidant_ingress_fraction_per_day / (1.0 + (impurity_capture_efficiency + gas_stripping_efficiency) * cleanup_damping)
+    impurity_fraction = oxidant_ingress_fraction_per_day / (
+        1.0 + (impurity_capture_efficiency + gas_stripping_efficiency) * cleanup_damping
+    )
     corrosion_index = _corrosion_index(
         redox_deviation_ev=redox_deviation_ev,
         impurity_fraction=impurity_fraction,

@@ -4,7 +4,6 @@ from pathlib import Path
 
 import yaml
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -36,5 +35,5 @@ def test_windows_wrappers_delegate_to_docker_compose() -> None:
 
     assert '@("compose", "run", "--rm", "--build"' in run_reactor
     assert 'return "openmc"' in run_reactor
-    assert '& docker compose run --rm --build app python -m pytest' in run_tests
-    assert '& docker compose run --rm --build app sh' in enter_shell
+    assert "& docker compose run --rm --build app python -m pytest" in run_tests
+    assert "& docker compose run --rm --build app sh" in enter_shell

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
-import math
+from typing import Any
 
 import numpy as np
 
@@ -13,7 +14,7 @@ from thorium_reactor.depletion.chain import DepletionChain, DepletionReaction, l
 try:  # pragma: no cover - exercised when SciPy is installed in the runtime.
     import scipy.sparse as scipy_sparse
     from scipy.sparse.linalg import expm_multiply as scipy_expm_multiply
-except Exception:  # noqa: BLE001 - the repository runtime may not have SciPy until bootstrapped.
+except Exception:
     scipy_sparse = None
     scipy_expm_multiply = None
 
@@ -65,7 +66,9 @@ def build_depletion_matrix(
             if decay_constant > 0.0:
                 dense[parent_idx, parent_idx] -= decay_constant
                 for mode in parent.decay_modes:
-                    _add_product(dense, mode, decay_constant, parent_idx, zone_index[zone], nuclide_index, len(nuclide_names))
+                    _add_product(
+                        dense, mode, decay_constant, parent_idx, zone_index[zone], nuclide_index, len(nuclide_names)
+                    )
             for reaction in parent.reactions:
                 rate = _reaction_rate(reaction_rates, zone, parent.name, reaction)
                 if rate <= 0.0:
@@ -469,7 +472,9 @@ def _atom_balance_diagnostic(
     }
 
 
-def _history_record(matrix_result: DepletionMatrixResult, inventory: np.ndarray, *, time_s: float, step: int) -> dict[str, Any]:
+def _history_record(
+    matrix_result: DepletionMatrixResult, inventory: np.ndarray, *, time_s: float, step: int
+) -> dict[str, Any]:
     by_zone = {}
     nuclide_count = len(matrix_result.nuclide_names)
     for zone_index, zone in enumerate(matrix_result.zone_names):
@@ -504,7 +509,7 @@ def _depletion_settings(config: Any) -> dict[str, Any]:
 
 
 def _resolve_chain_path(config: Any, settings: Mapping[str, Any]) -> Path:
-    repo_root = getattr(config, "path").parents[3]
+    repo_root = config.path.parents[3]
     raw = settings.get("chain_path", "resources/depletion/tiny_thorium_chain.yaml")
     path = Path(str(raw))
     if not path.is_absolute():
