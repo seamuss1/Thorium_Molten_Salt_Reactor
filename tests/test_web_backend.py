@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 import re
@@ -370,19 +371,24 @@ def test_every_api_route_requires_identity_when_access_is_required(monkeypatch) 
     # Untrusted transport: no verified identity can be established.
     client = TestClient(app, client=("203.0.113.10", 4242))
 
-    public_paths = {"/api/health", "/api/openapi", "/api/redoc", "/api/openapi.json"}
+    public_paths = {"/api/health"}
+
+    # Enumerate from the OpenAPI schema rather than app.routes: it is the
+    # documented public surface, and unlike the route objects its shape does
+    # not change when Starlette changes how include_router nests routers.
+    schema = app.openapi()["paths"]
+    assert len(schema) >= 12, f"OpenAPI surface looks wrong, only {len(schema)} paths"
 
     checked = 0
-    for route in app.routes:
-        path = getattr(route, "path", "")
+    for path, operations in sorted(schema.items()):
         if not path.startswith("/api") or path in public_paths:
             continue
         # Placeholders only need to survive routing; auth must reject before
-        # any handler validates them. Handles {name} and {name:path} alike.
+        # any handler validates them.
         url = re.sub(r"\{[^}]+\}", "x", path)
-        for method in sorted(getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}):
-            response = client.request(method, url, json={})
-            assert response.status_code == 401, f"{method} {path} returned {response.status_code}, expected 401"
+        for method in sorted(set(operations) & {"get", "post", "put", "patch", "delete"}):
+            response = client.request(method.upper(), url, json={})
+            assert response.status_code == 401, f"{method.upper()} {path} returned {response.status_code}, expected 401"
             checked += 1
 
     assert checked >= 12, f"expected the full /api surface to be checked, only saw {checked}"
@@ -634,3 +640,23 @@ def test_web_admins_bypass_daily_run_limit(monkeypatch, tmp_path: Path) -> None:
     finally:
         for run_root in run_roots:
             shutil.rmtree(run_root, ignore_errors=True)
+
+
+def test_rate_limit_timezone_falls_back_when_no_tz_database_exists(monkeypatch) -> None:
+    """The fallback must not need the thing that is missing.
+
+    On a system with no tz database -- a plain Windows install without the
+    tzdata package -- ZoneInfo(...) raises, and the previous fallback of
+    ZoneInfo("UTC") raised the same error it was catching, so constructing
+    the app failed outright rather than degrading to UTC.
+    """
+    import zoneinfo
+
+    from thorium_reactor.web import permissions
+
+    def no_tz_database(key):
+        raise zoneinfo.ZoneInfoNotFoundError(f"No time zone found with key {key}")
+
+    monkeypatch.setattr(permissions, "ZoneInfo", no_tz_database)
+
+    assert permissions.configured_timezone() is datetime.UTC
