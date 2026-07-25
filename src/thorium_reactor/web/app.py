@@ -60,10 +60,12 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     # deliberately public has to be registered on `app` below, in the open.
     api = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
-    # Public: liveness must answer before an identity exists.
+    # Public: liveness must answer before an identity exists. Because it is
+    # public it must not disclose anything about the host -- it previously
+    # returned the absolute repo path to any unauthenticated caller.
     @app.get("/api/health", response_model=HealthResponse)
     def health() -> HealthResponse:
-        return HealthResponse(status="ok", repo_root=str(repository.repo_root))
+        return HealthResponse(status="ok")
 
     @api.get("/me", response_model=AuthSession)
     def get_me(

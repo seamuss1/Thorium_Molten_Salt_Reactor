@@ -150,7 +150,6 @@ class DocRecord(DocSummary):
 
 class HealthResponse(BaseModel):
     status: str
-    repo_root: str
 
 
 def model_to_dict(model: BaseModel) -> dict[str, Any]:

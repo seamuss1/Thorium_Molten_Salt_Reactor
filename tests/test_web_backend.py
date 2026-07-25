@@ -389,6 +389,10 @@ def test_every_api_route_requires_identity_when_access_is_required(monkeypatch) 
 
     health = client.get("/api/health")
     assert health.status_code == 200, "health must stay reachable without an identity"
+    # Being public, it must not describe the host: it used to hand the
+    # absolute repo path to any unauthenticated caller.
+    assert health.json() == {"status": "ok"}
+    assert str(REPO_ROOT) not in health.text
 
 
 def test_web_allows_loopback_transport_dev_identity_when_access_is_required(monkeypatch) -> None:
