@@ -20,6 +20,13 @@ ARTIFACT_STATUS_SCHEMA_VERSION = 1
 STAGE_MANIFEST_SCHEMA_VERSION = 1
 
 
+def _default_file_mode() -> int:
+    """The mode a plain open()-and-write would produce, i.e. 0666 & ~umask."""
+    umask = os.umask(0)
+    os.umask(umask)
+    return 0o666 & ~umask
+
+
 def atomic_write_text(path: Path, contents: str) -> None:
     """Write a bundle file so readers never observe a partial one.
 
@@ -38,6 +45,14 @@ def atomic_write_text(path: Path, contents: str) -> None:
             handle.write(contents)
             handle.flush()
             os.fsync(handle.fileno())
+        # mkstemp creates 0600 by design. Bundles are read by other users --
+        # the web process, and CI uploading artifacts written by a container
+        # running as root -- so restore the permissions an ordinary write
+        # would have produced, preserving the target's mode on overwrite.
+        try:
+            os.chmod(temp_name, path.stat().st_mode & 0o7777 if path.exists() else _default_file_mode())
+        except OSError:
+            pass
         os.replace(temp_name, path)
     finally:
         # A successful replace already moved the file, so this is a no-op then

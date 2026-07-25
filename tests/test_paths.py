@@ -161,3 +161,21 @@ def test_write_metrics_quotes_values_that_would_break_the_reader(tmp_path: Path)
 
     assert rows["plain"] == "1.5"
     assert rows["with,comma"] == "a,b"
+
+
+def test_bundle_files_are_group_and_world_readable(tmp_path: Path) -> None:
+    """Atomic writes must not narrow permissions to owner-only.
+
+    tempfile.mkstemp creates 0600 by design, but bundle files are read by
+    other users: the web process, and CI uploading artifacts produced by a
+    container running as root. Writing them 0600 made the upload fail with
+    EACCES even though the run itself succeeded.
+    """
+    if os.name == "nt":  # POSIX permission bits are not meaningful here
+        pytest.skip("POSIX file modes are not enforced on Windows")
+
+    bundle = _bundle_in(tmp_path)
+    bundle.write_json("summary.json", {"a": 1})
+
+    mode = (bundle.root / "summary.json").stat().st_mode & 0o777
+    assert mode & 0o044, f"summary.json is not group/world readable: {oct(mode)}"
