@@ -29,9 +29,3 @@ def missing_openmc_runtime_message(command_name: str = "run", *, system_name: st
             "or `docker compose run --rm openmc python -m thorium_reactor.cli benchmark <case>`."
         )
     return message
-
-
-def require_openmc():
-    if openmc is None:
-        raise RuntimeError(missing_openmc_runtime_message())
-    return openmc

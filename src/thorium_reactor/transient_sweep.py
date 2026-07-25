@@ -48,7 +48,6 @@ def run_transient_sweep_case(
     scenario_name: str | None = None,
     samples: int = DEFAULT_TRANSIENT_SWEEP_SAMPLES,
     seed: int = 42,
-    prefer_gpu: bool = False,
     backend: str = "auto",
     dtype: str = DEFAULT_DTYPE,
     provenance: dict[str, Any] | None = None,
@@ -59,7 +58,6 @@ def run_transient_sweep_case(
         scenario_name=scenario_name,
         samples=samples,
         seed=seed,
-        prefer_gpu=prefer_gpu,
         backend=backend,
         dtype=dtype,
         provenance=provenance,
@@ -87,7 +85,6 @@ def build_transient_sweep_payload(
     scenario_name: str | None = None,
     samples: int = DEFAULT_TRANSIENT_SWEEP_SAMPLES,
     seed: int = 42,
-    prefer_gpu: bool = False,
     backend: str = "auto",
     dtype: str = DEFAULT_DTYPE,
     provenance: dict[str, Any] | None = None,
@@ -119,8 +116,6 @@ def build_transient_sweep_payload(
     )
     sample_count = max(int(samples), MIN_TRANSIENT_SWEEP_SAMPLES)
     requested_backend = "auto" if backend == "auto" else backend
-    if prefer_gpu and backend == "auto":
-        requested_backend = "auto"
 
     (
         history,
@@ -137,7 +132,6 @@ def build_transient_sweep_payload(
         chemistry=chemistry,
         samples=sample_count,
         seed=int(seed),
-        prefer_gpu=prefer_gpu,
         uncertainty_model=uncertainty_model,
         backend_name=requested_backend,
         dtype=dtype,
@@ -331,7 +325,6 @@ def _integrate_transient_ensemble(
     chemistry: dict[str, Any],
     samples: int,
     seed: int,
-    prefer_gpu: bool,
     uncertainty_model: dict[str, float],
     backend_name: str,
     dtype: str,
@@ -351,7 +344,6 @@ def _integrate_transient_ensemble(
             chemistry=chemistry,
             samples=samples,
             seed=seed,
-            prefer_gpu=prefer_gpu,
             uncertainty_model=uncertainty_model,
             backend_report=backend_report_for_selection(selection, seed=seed),
         )
@@ -382,7 +374,6 @@ def _integrate_transient_ensemble_reference(
     chemistry: dict[str, Any],
     samples: int,
     seed: int,
-    prefer_gpu: bool,
     uncertainty_model: dict[str, float],
     backend_report: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], dict[str, Any], str, dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -797,8 +788,6 @@ def _integrate_transient_ensemble_reference(
         "peak_corrosion_index_p95": _round_float(max(item["corrosion_index_p95"] for item in history)),
         "peak_corrosion_index_max": _round_float(peak_corrosion_index_max),
     }
-    if prefer_gpu:
-        metrics["requested_gpu_backend"] = True
     elapsed_s = time.perf_counter() - integrate_start
     runtime_performance = {
         "elapsed_s": _round_float(elapsed_s),

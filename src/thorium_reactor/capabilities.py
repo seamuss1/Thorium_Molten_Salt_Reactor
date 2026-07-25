@@ -36,10 +36,6 @@ def get_case_capabilities(config: Any) -> set[str]:
     return capabilities
 
 
-def case_supports_capability(config: Any, capability: str) -> bool:
-    return capability in get_case_capabilities(config)
-
-
 def resolve_primary_coolant_material_name(config: Any, capability: str | None = None) -> str:
     explicit_name = config.geometry.get("salt_material")
     if explicit_name:

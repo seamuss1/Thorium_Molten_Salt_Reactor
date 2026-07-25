@@ -98,7 +98,6 @@ class SimulationDraft(BaseModel):
     scenario: str | None = None
     sweep_samples: int = Field(default=DEFAULT_TRANSIENT_SWEEP_SAMPLES, ge=1, le=65536)
     sweep_seed: int = Field(default=42, ge=0, le=4294967295)
-    prefer_gpu: bool = True
 
 
 class AuthSession(BaseModel):

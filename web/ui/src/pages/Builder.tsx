@@ -29,7 +29,6 @@ export function Builder() {
   const [scenario, setScenario] = useState("");
   const [sweepSamples, setSweepSamples] = useState(65536);
   const [sweepSeed, setSweepSeed] = useState(42);
-  const [preferGpu, setPreferGpu] = useState(true);
 
   // Honor ?case= on mount and on in-app navigation to a different case.
   useEffect(() => {
@@ -90,8 +89,7 @@ export function Builder() {
       phases,
       scenario: scenarioActive && scenario ? scenario : null,
       sweep_samples: sweepSamples,
-      sweep_seed: sweepSeed,
-      prefer_gpu: preferGpu
+      sweep_seed: sweepSeed
     };
     createRun.mutate(draft);
   }
@@ -171,10 +169,6 @@ export function Builder() {
               <label className="field">
                 <span>Sweep seed</span>
                 <input type="number" min={0} value={sweepSeed} disabled={!sweepActive} onChange={(event) => setSweepSeed(Number(event.target.value))} />
-              </label>
-              <label className="check-line">
-                <input type="checkbox" checked={preferGpu} disabled={!sweepActive} onChange={(event) => setPreferGpu(event.target.checked)} />
-                <span>Use GPU for sweep</span>
               </label>
             </div>
           </div>

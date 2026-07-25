@@ -21,7 +21,7 @@ is worth doing, but it is a careful multi-file refactor, not a delete.
 | Target | Verdict | LOC | Files to delete | Files to edit first |
 | --- | --- | --- | --- | --- |
 | External-tool integrations | PARTIAL | ~1,100 | 4 | **23** |
-| `msd_tp.py` | PARTIAL | ~1,001 | 3 | 10 |
+| `msd_tp.py` | **do not delete** | 0 | 0 | 0 |
 | `runtime_benchmark.py` + accelerators tail | PARTIAL | ~590 | 2 | 7 |
 | GPU viability experiments (Phase 1) | PARTIAL | ~3,061 | 9 | 3 |
 | Dead env/flag surface | PARTIAL | ~50 | 0 | **19** |
@@ -101,14 +101,65 @@ Several blockers the verifiers found were dissolved by the Phase 0 commits:
 
 Ordered so that each step's blockers are already retired:
 
-1. **`runtime_benchmark.py` + accelerators tail** — no consumers, no QA
-   entanglement, import blocker already gone.
-2. **Dead functions, `dev_preview_server.py`, `docker-compose.openmc.yml`** —
-   with the QA artifact edits for `test_container_workflow.py`.
-3. **`msd_tp.py`** — no production consumer; mind `tests/conftest.py`, whose
-   only fixture serves it.
-4. **Dead env/flag surface incl. `--prefer-gpu`** — Python and TypeScript in
-   one commit.
+1. ~~**`runtime_benchmark.py` + accelerators tail**~~ — **done** (#90).
+2. ~~**Dead functions, `dev_preview_server.py`, `docker-compose.openmc.yml`**~~
+   — **done.** Re-verification at execution time showed the four functions
+   each had exactly one reference (their own definition), and that
+   `tests/test_container_workflow.py` reads only `docker-compose.yml`, never
+   the `.openmc` variant. No QA artifact edit was needed after all: the QA
+   requirement names `test_container_workflow.py`, which stays. The QA gate
+   still reports `passed: true` with 11 requirements.
+3. **`msd_tp.py` — REMOVED FROM THE DELETION LIST. Do not delete it.**
+
+   Every "dead by default" claim about this module is factually true and
+   entirely beside the point. `src/thorium_reactor/data/` does not exist, the
+   `THORIUM_REACTOR_MSD_TP_DATA_DIR` override is set nowhere, and zero
+   shipped cases select the `msd_tp*` providers (they use `evaluated_table`
+   ×12, `thermochemical_equilibrium` ×3, `legacy_correlation` ×2).
+
+   **That is deliberate, and `docs/msd-tp-thermophysical-data.md` says so.**
+   This is a public-safe provider for ORNL MSD-TP data that the repository
+   cannot redistribute: "the public repository does not bundle the extracted
+   MSD-TP CSV files until redistribution rights are confirmed", and "public
+   example cases keep configured properties so the repository remains
+   runnable without redistributed third-party data." The provider is
+   deliberately kept behind a user-supplied data path because the upstream
+   Saline project carries a non-standard license.
+
+   So the module is a working capability for anyone holding licensed access
+   to that data, and the missing data package is the licensing posture
+   working as intended — not rot. Deleting it would remove functionality and
+   quietly reverse a considered legal decision.
+
+   The plan, the adversarial review, and the automated verification pass all
+   independently classified this as dead weight. All three were looking at
+   reference counts; none opened the document that explains the absence.
+4. ~~**Dead env/flag surface incl. `--prefer-gpu`**~~ — **partly done.**
+   `--prefer-gpu` is deleted end to end, Python and TypeScript in one commit
+   because the frontend build type-checks against the schema.
+
+   **The rest of this item is withdrawn.** Read in context, the remaining
+   "dead env surface" is not slop:
+
+   - `THORIUM_REACTOR_WEB_PHASE_TIMEOUT_S` (`web/jobs.py`) is a legitimate
+     operator knob for job timeouts, with a sensible per-phase fallback.
+     "Nothing sets it" is the normal state of an optional override, not
+     evidence that it is dead.
+   - `THORIUM_REACTOR_DEVICE` (`runtime_context.py`) is a one-line provenance
+     extension point recording the execution hardware.
+   - `PYTBKN_ENV` and the `REPO_ROOT`/`.runtime-env` entries in
+     `_resolve_ffmpeg_binary` are fallbacks reached only when `shutil.which`
+     fails, and `.runtime-env` is live (correction 2 above), so that branch
+     is not vestigial either.
+
+   That is about ten lines total, each with a default and no failure mode.
+   Deleting a working escape hatch to save three lines is not a
+   simplification. What they actually lack is documentation — none appears in
+   any README or `.env.example`. Documenting them belongs with Phase 1.6.
+
+   `loop_segments[].decay_heat_fraction` moves to the decision list: like the
+   `physics_core` validators, removing it removes validation rather than dead
+   code.
 5. **GPU experiments extraction** (Phase 1) — to an orphan branch.
 6. **External-tool integrations** — largest and most entangled; 23 files
    including QA artifacts, three case YAMLs, a report section, and a
