@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -356,6 +357,38 @@ def test_web_requires_access_identity_when_configured(monkeypatch) -> None:
     )
 
     assert response.status_code == 401
+
+
+def test_every_api_route_requires_identity_when_access_is_required(monkeypatch) -> None:
+    """Auth is opt-out, not opt-in.
+
+    Enumerates the live route table rather than a hand-written URL list, so a
+    new /api route added without auth fails here instead of shipping open.
+    """
+    monkeypatch.setenv("THORIUM_REACTOR_ACCESS_REQUIRED", "1")
+    app = create_app(REPO_ROOT)
+    # Untrusted transport: no verified identity can be established.
+    client = TestClient(app, client=("203.0.113.10", 4242))
+
+    public_paths = {"/api/health", "/api/openapi", "/api/redoc", "/api/openapi.json"}
+
+    checked = 0
+    for route in app.routes:
+        path = getattr(route, "path", "")
+        if not path.startswith("/api") or path in public_paths:
+            continue
+        # Placeholders only need to survive routing; auth must reject before
+        # any handler validates them. Handles {name} and {name:path} alike.
+        url = re.sub(r"\{[^}]+\}", "x", path)
+        for method in sorted(getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}):
+            response = client.request(method, url, json={})
+            assert response.status_code == 401, f"{method} {path} returned {response.status_code}, expected 401"
+            checked += 1
+
+    assert checked >= 12, f"expected the full /api surface to be checked, only saw {checked}"
+
+    health = client.get("/api/health")
+    assert health.status_code == 200, "health must stay reachable without an identity"
 
 
 def test_web_allows_loopback_transport_dev_identity_when_access_is_required(monkeypatch) -> None:
