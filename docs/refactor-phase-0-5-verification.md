@@ -101,10 +101,14 @@ Several blockers the verifiers found were dissolved by the Phase 0 commits:
 
 Ordered so that each step's blockers are already retired:
 
-1. **`runtime_benchmark.py` + accelerators tail** — no consumers, no QA
-   entanglement, import blocker already gone.
-2. **Dead functions, `dev_preview_server.py`, `docker-compose.openmc.yml`** —
-   with the QA artifact edits for `test_container_workflow.py`.
+1. ~~**`runtime_benchmark.py` + accelerators tail**~~ — **done** (#90).
+2. ~~**Dead functions, `dev_preview_server.py`, `docker-compose.openmc.yml`**~~
+   — **done.** Re-verification at execution time showed the four functions
+   each had exactly one reference (their own definition), and that
+   `tests/test_container_workflow.py` reads only `docker-compose.yml`, never
+   the `.openmc` variant. No QA artifact edit was needed after all: the QA
+   requirement names `test_container_workflow.py`, which stays. The QA gate
+   still reports `passed: true` with 11 requirements.
 3. **`msd_tp.py`** — no production consumer; mind `tests/conftest.py`, whose
    only fixture serves it.
 4. **Dead env/flag surface incl. `--prefer-gpu`** — Python and TypeScript in

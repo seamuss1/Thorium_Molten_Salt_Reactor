@@ -1573,9 +1573,3 @@ def get_path(payload: Mapping[str, Any], dotted_path: str) -> Any:
             return None
         current = current[part]
     return current
-
-
-def iter_json_lines(path: Path) -> Iterable[dict[str, Any]]:
-    if not path.exists():
-        return []
-    return (json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
