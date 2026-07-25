@@ -111,8 +111,32 @@ Ordered so that each step's blockers are already retired:
    still reports `passed: true` with 11 requirements.
 3. **`msd_tp.py`** — no production consumer; mind `tests/conftest.py`, whose
    only fixture serves it.
-4. **Dead env/flag surface incl. `--prefer-gpu`** — Python and TypeScript in
-   one commit.
+4. ~~**Dead env/flag surface incl. `--prefer-gpu`**~~ — **partly done.**
+   `--prefer-gpu` is deleted end to end, Python and TypeScript in one commit
+   because the frontend build type-checks against the schema.
+
+   **The rest of this item is withdrawn.** Read in context, the remaining
+   "dead env surface" is not slop:
+
+   - `THORIUM_REACTOR_WEB_PHASE_TIMEOUT_S` (`web/jobs.py`) is a legitimate
+     operator knob for job timeouts, with a sensible per-phase fallback.
+     "Nothing sets it" is the normal state of an optional override, not
+     evidence that it is dead.
+   - `THORIUM_REACTOR_DEVICE` (`runtime_context.py`) is a one-line provenance
+     extension point recording the execution hardware.
+   - `PYTBKN_ENV` and the `REPO_ROOT`/`.runtime-env` entries in
+     `_resolve_ffmpeg_binary` are fallbacks reached only when `shutil.which`
+     fails, and `.runtime-env` is live (correction 2 above), so that branch
+     is not vestigial either.
+
+   That is about ten lines total, each with a default and no failure mode.
+   Deleting a working escape hatch to save three lines is not a
+   simplification. What they actually lack is documentation — none appears in
+   any README or `.env.example`. Documenting them belongs with Phase 1.6.
+
+   `loop_segments[].decay_heat_fraction` moves to the decision list: like the
+   `physics_core` validators, removing it removes validation rather than dead
+   code.
 5. **GPU experiments extraction** (Phase 1) — to an orphan branch.
 6. **External-tool integrations** — largest and most entangled; 23 files
    including QA artifacts, three case YAMLs, a report section, and a
