@@ -361,11 +361,7 @@ def test_append_event_assigns_unique_contiguous_sequences_under_concurrency(tmp_
     for thread in threads:
         thread.join()
 
-    lines = [
-        line
-        for line in (run_dir / "job_events.ndjson").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    lines = [line for line in (run_dir / "job_events.ndjson").read_text(encoding="utf-8").splitlines() if line.strip()]
     sequences = sorted(json.loads(line)["sequence"] for line in lines)
     assert len(lines) == per_thread * thread_count
     assert sequences == list(range(1, per_thread * thread_count + 1))
