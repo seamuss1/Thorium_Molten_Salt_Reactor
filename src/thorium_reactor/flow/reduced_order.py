@@ -6,7 +6,6 @@ from typing import Any
 from thorium_reactor.flow.properties import average_primary_temperature_c, evaluate_fluid_properties
 from thorium_reactor.modeling import get_core_model
 
-
 DEFAULT_ALLOCATION_RULE = "salt_area_weighted"
 PRESSURE_BALANCED_ALLOCATION_RULE = "pressure_balanced"
 CONFIGURED_ACTIVE_SELECTION = "configured_active_variants"
@@ -62,7 +61,9 @@ def build_reduced_order_flow_summary(
             if str(channel.get("variant")) in stagnant_variants:
                 stagnant_channels.append(channel)
 
-    total_weight = sum(_allocation_weight(channel, allocation_rule, core_model["family_split_weights"]) for channel in active_channels)
+    total_weight = sum(
+        _allocation_weight(channel, allocation_rule, core_model["family_split_weights"]) for channel in active_channels
+    )
     total_area_cm2 = sum(float(channel["salt_cross_section_area_cm2"]) for channel in active_channels)
     total_volume_cm3 = sum(float(channel["salt_volume_cm3"]) for channel in active_channels)
     representative_velocity_m_s = (
@@ -124,7 +125,9 @@ def build_reduced_order_flow_summary(
         total_variant_area_cm2 = float(rollup["total_flow_area_cm2"])
         total_variant_volume_cm3 = float(rollup["total_salt_volume_cm3"])
         total_variant_volumetric_flow = float(rollup["allocated_volumetric_flow_m3_s"])
-        velocity_m_s = total_variant_volumetric_flow / (total_variant_area_cm2 * 1.0e-4) if total_variant_area_cm2 > 0.0 else 0.0
+        velocity_m_s = (
+            total_variant_volumetric_flow / (total_variant_area_cm2 * 1.0e-4) if total_variant_area_cm2 > 0.0 else 0.0
+        )
         residence_time_s = (
             (total_variant_volume_cm3 * 1.0e-6) / total_variant_volumetric_flow
             if total_variant_volumetric_flow > 0.0
@@ -284,12 +287,13 @@ def _allocation_weight(
     if allocation_rule == PRESSURE_BALANCED_ALLOCATION_RULE:
         area_cm2 = float(channel["salt_cross_section_area_cm2"])
         hydraulic_diameter_cm = float(channel.get("salt_hydraulic_diameter_cm", 0.0))
-        flow_length_cm = area_cm2 and float(channel.get("salt_volume_cm3", 0.0)) / area_cm2 or 0.0
+        flow_length_cm = (area_cm2 and float(channel.get("salt_volume_cm3", 0.0)) / area_cm2) or 0.0
         if area_cm2 <= 0.0 or hydraulic_diameter_cm <= 0.0 or flow_length_cm <= 0.0:
             return 0.0
         # First-pass conductance proxy for equal-dp channel splitting.
         return family_weight * area_cm2 * hydraulic_diameter_cm * hydraulic_diameter_cm / flow_length_cm
     raise ValueError(f"Unsupported reduced-order flow allocation rule: {allocation_rule}")
+
 
 def _round_float(value: float) -> float:
     return round(float(value), 6)

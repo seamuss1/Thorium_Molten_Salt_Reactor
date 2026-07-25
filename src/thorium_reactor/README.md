@@ -33,7 +33,6 @@ The command entrypoint is [`cli.py`](cli.py). It keeps command dispatch thin and
 | [`depletion/`](depletion) | Native sparse Bateman depletion matrix, YAML/OpenMC chain import, and inventory stepping |
 | [`transient.py`](transient.py) | Single-scenario reduced-order transient proxy |
 | [`transient_sweep.py`](transient_sweep.py) | Vectorized uncertainty ensemble with backend selection |
-| [`runtime_benchmark.py`](runtime_benchmark.py) | Backend timing and GPU/XPU viability checks |
 | [`economics/`](economics) | Finance, schedule, cash-flow, and cost-breakdown outputs |
 | [`benchmarking.py`](benchmarking.py) | Benchmark residuals, traceability, and Docker/OpenMC benchmark helpers |
 | [`qa.py`](qa.py) | Load and validate QA requirement records and the requirements traceability matrix |

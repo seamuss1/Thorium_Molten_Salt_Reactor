@@ -7,7 +7,6 @@ import numpy as np
 
 from thorium_reactor.precursors import normalize_loop_segments, normalize_precursor_groups
 
-
 PHYSICS_CORE_MODEL = "coupled_deterministic_physics_core_v1"
 FINITE_VOLUME_TH_MODEL = "one_dimensional_finite_volume_loop"
 FINITE_VOLUME_PRECURSOR_MODEL = "finite_volume_advection_diffusion_decay"
@@ -60,11 +59,14 @@ def build_deterministic_neutronics_summary(
     precursor_transport: dict[str, Any],
 ) -> dict[str, Any]:
     neutronics_settings = _section(settings, "neutronics")
-    methods = tuple(
-        method
-        for method in neutronics_settings.get("deterministic_methods", DEFAULT_DETERMINISTIC_METHODS)
-        if method in SUPPORTED_DETERMINISTIC_METHODS
-    ) or DEFAULT_DETERMINISTIC_METHODS
+    methods = (
+        tuple(
+            method
+            for method in neutronics_settings.get("deterministic_methods", DEFAULT_DETERMINISTIC_METHODS)
+            if method in SUPPORTED_DETERMINISTIC_METHODS
+        )
+        or DEFAULT_DETERMINISTIC_METHODS
+    )
     group_count = max(int(neutronics_settings.get("group_count", 11)), 2)
     temperature_grid_c = _temperature_grid(neutronics_settings)
     axial_nodes = thermal_hydraulics["axial_nodes"]
@@ -82,8 +84,7 @@ def build_deterministic_neutronics_summary(
         settings=neutronics_settings,
     )
     raw_results = {
-        method: _solve_multigroup_eigenvalue(base_xs, axial_nodes=axial_nodes, method=method)
-        for method in methods
+        method: _solve_multigroup_eigenvalue(base_xs, axial_nodes=axial_nodes, method=method) for method in methods
     }
     reference_keff = _reference_keff(config, summary)
     calibration_factor = reference_keff / max(raw_results[methods[0]]["k_eff"], 1.0e-12)
@@ -148,12 +149,8 @@ def build_deterministic_neutronics_summary(
             "core_delayed_neutron_source_absolute_fraction": precursor_transport[
                 "core_delayed_neutron_source_absolute_fraction"
             ],
-            "adjoint_weighted_core_delayed_neutron_source_fraction": adjoint_weighted_precursor[
-                "fraction"
-            ],
-            "adjoint_static_source_normalization": adjoint_weighted_precursor[
-                "static_source_normalization"
-            ],
+            "adjoint_weighted_core_delayed_neutron_source_fraction": adjoint_weighted_precursor["fraction"],
+            "adjoint_static_source_normalization": adjoint_weighted_precursor["static_source_normalization"],
             "transport_loss_fraction": precursor_transport["transport_loss_fraction"],
         },
     }
@@ -191,7 +188,13 @@ def build_finite_volume_thermal_hydraulics(
         1.0,
     )
     flow_area_m2 = max(float(active_flow.get("total_flow_area_cm2", 1.0)) * 1.0e-4, 1.0e-8)
-    hydraulic_diameter_m = max(float(active_flow.get("hydraulic_diameter_cm", geometry.get("channel_layers", [{}])[-1].get("outer_radius", 3.0))) * 0.01, 1.0e-4)
+    hydraulic_diameter_m = max(
+        float(
+            active_flow.get("hydraulic_diameter_cm", geometry.get("channel_layers", [{}])[-1].get("outer_radius", 3.0))
+        )
+        * 0.01,
+        1.0e-4,
+    )
     active_volume_m3 = max(float(active_flow.get("total_salt_volume_cm3", 0.0)) * 1.0e-6, flow_area_m2)
     core_length_m = max(active_volume_m3 / flow_area_m2, float(geometry.get("height_cm", 100.0)) * 0.01, 0.1)
     volumetric_flow_m3_s = mass_flow_kg_s / density_kg_m3 if density_kg_m3 > 0.0 else 0.0
@@ -236,7 +239,9 @@ def build_finite_volume_thermal_hydraulics(
     buoyancy_pa = existing_buoyancy_kpa * 1000.0
     if buoyancy_pa <= 0.0:
         beta_thermal_per_k = float(th_settings.get("thermal_expansion_per_k", 3.5e-4))
-        buoyancy_pa = density_kg_m3 * 9.80665 * core_length_m * beta_thermal_per_k * max(hot_leg_temp_c - cold_leg_temp_c, 0.0)
+        buoyancy_pa = (
+            density_kg_m3 * 9.80665 * core_length_m * beta_thermal_per_k * max(hot_leg_temp_c - cold_leg_temp_c, 0.0)
+        )
     loop_resistance_pa = max(
         float(hydraulics.get("frictional_pressure_drop_kpa", 0.0)) * 1000.0,
         friction_pa,
@@ -298,7 +303,9 @@ def build_finite_volume_thermal_hydraulics(
             "flow_reversal_margin_kpa": _round_float(flow_reversal_margin_pa / 1000.0),
             "flow_reversal_predicted": flow_reversal_margin_pa < 0.0,
             "natural_circulation_flow_m3_s": _round_float(natural_flow_m3_s),
-            "natural_circulation_fraction_of_nominal": _round_float(natural_flow_m3_s / max(volumetric_flow_m3_s, 1.0e-12)),
+            "natural_circulation_fraction_of_nominal": _round_float(
+                natural_flow_m3_s / max(volumetric_flow_m3_s, 1.0e-12)
+            ),
         },
         "pump_curve": pump_curve,
         "heat_exchanger": hx_summary,
@@ -417,8 +424,7 @@ def _adjoint_weighted_core_delayed_source_fraction(
 
     importance = _resample_profile(core_importance, len(core_cells))
     static_source = sum(
-        max(float(cell.get("source_fraction", 0.0)), 0.0) * importance[index]
-        for index, cell in enumerate(core_cells)
+        max(float(cell.get("source_fraction", 0.0)), 0.0) * importance[index] for index, cell in enumerate(core_cells)
     )
     weighted_source = sum(
         max(float(cell.get("delayed_neutron_source_fraction", 0.0)), 0.0) * importance[index]
@@ -535,7 +541,10 @@ def _solve_multigroup_eigenvalue(
     adjoint = np.linalg.solve(matrix.T, np.tile(nu_fission, node_count))
     adjoint = np.maximum(adjoint, 0.0)
     adjoint_by_node = np.array(
-        [float(np.mean(adjoint[_index(node, 0, group_count): _index(node + 1, 0, group_count)])) for node in range(node_count)]
+        [
+            float(np.mean(adjoint[_index(node, 0, group_count) : _index(node + 1, 0, group_count)]))
+            for node in range(node_count)
+        ]
     )
     importance = power_shape * adjoint_by_node
     importance /= max(float(np.mean(importance)), 1.0e-16)
@@ -580,8 +589,12 @@ def _feedback_coefficients(
     uniform_hot = solve(average_fuel_temp_c + delta_t, average_graphite_temp_c + delta_t)
     return {
         "fuel_temperature_pcm_per_c": _round_float(((fuel_hot - base_k) / max(base_k, 1.0e-12)) * 1.0e5 / delta_t),
-        "graphite_temperature_pcm_per_c": _round_float(((graphite_hot - base_k) / max(base_k, 1.0e-12)) * 1.0e5 / delta_t),
-        "uniform_temperature_pcm_per_c": _round_float(((uniform_hot - base_k) / max(base_k, 1.0e-12)) * 1.0e5 / delta_t),
+        "graphite_temperature_pcm_per_c": _round_float(
+            ((graphite_hot - base_k) / max(base_k, 1.0e-12)) * 1.0e5 / delta_t
+        ),
+        "uniform_temperature_pcm_per_c": _round_float(
+            ((uniform_hot - base_k) / max(base_k, 1.0e-12)) * 1.0e5 / delta_t
+        ),
         "perturbation_c": _round_float(delta_t),
     }
 
@@ -605,7 +618,9 @@ def _precursor_cells(
     loop_residence_time_s: float,
 ) -> list[dict[str, Any]]:
     cells: list[dict[str, Any]] = []
-    core_total_residence_s = sum(float(node.get("cell_length_m", 0.1)) / max(float(node.get("velocity_m_s", 0.0)), 1.0e-6) for node in core_nodes)
+    core_total_residence_s = sum(
+        float(node.get("cell_length_m", 0.1)) / max(float(node.get("velocity_m_s", 0.0)), 1.0e-6) for node in core_nodes
+    )
     power_total = sum(float(node["power_shape"]) for node in core_nodes)
     for node in core_nodes:
         cells.append(
@@ -690,9 +705,7 @@ def _solve_ring_advection_diffusion_decay(
             cleanup = cleanup_rate_s * float(cell.get("cleanup_weight", 0.0))
             source = source_strength * float(cell["source_fraction"])
             numerator = inventory[index] + dt * (
-                source
-                + in_rate * inventory[previous]
-                + diffusion_rate * (inventory[previous] + inventory[next_index])
+                source + in_rate * inventory[previous] + diffusion_rate * (inventory[previous] + inventory[next_index])
             )
             denominator = 1.0 + dt * (out_rate + decay_constant_s + cleanup + 2.0 * diffusion_rate)
             updated[index] = max(numerator / max(denominator, 1.0e-18), 0.0)
@@ -710,11 +723,15 @@ def _decay_heat_precursor_summary(
     settings: dict[str, Any],
 ) -> dict[str, Any]:
     raw_groups = settings.get("decay_heat_groups")
-    groups = raw_groups if isinstance(raw_groups, list) and raw_groups else [
-        {"name": "short_lived", "decay_constant_s": 0.08, "yield_fraction": 0.45},
-        {"name": "intermediate", "decay_constant_s": 0.006, "yield_fraction": 0.35},
-        {"name": "long_lived", "decay_constant_s": 0.00045, "yield_fraction": 0.20},
-    ]
+    groups = (
+        raw_groups
+        if isinstance(raw_groups, list) and raw_groups
+        else [
+            {"name": "short_lived", "decay_constant_s": 0.08, "yield_fraction": 0.45},
+            {"name": "intermediate", "decay_constant_s": 0.006, "yield_fraction": 0.35},
+            {"name": "long_lived", "decay_constant_s": 0.00045, "yield_fraction": 0.20},
+        ]
+    )
     group_results = []
     total_source = 0.0
     core_source = 0.0
@@ -793,11 +810,7 @@ def _decay_heat_segment_source_fractions(
 
 
 def _dominant_loop_decay_heat_segment(segment_source_fractions: list[dict[str, Any]]) -> dict[str, Any]:
-    loop_segments = [
-        segment
-        for segment in segment_source_fractions
-        if segment.get("region") != "core"
-    ]
+    loop_segments = [segment for segment in segment_source_fractions if segment.get("region") != "core"]
     if not loop_segments:
         return {}
     return dict(
@@ -870,7 +883,9 @@ def _custom_xs(
     chi = payload.get("chi", _fission_spectrum(group_count))
     return {
         "material": str(payload.get("material", "configured")),
-        "reference_temperature_c": float(payload.get("reference_temperature_c", temperature_grid_c[len(temperature_grid_c) // 2])),
+        "reference_temperature_c": float(
+            payload.get("reference_temperature_c", temperature_grid_c[len(temperature_grid_c) // 2])
+        ),
         "fuel_temperature_c": _round_float(fuel_temperature_c),
         "graphite_temperature_c": _round_float(graphite_temperature_c),
         "temperature_grid_c": [_round_float(value) for value in temperature_grid_c],
@@ -939,7 +954,10 @@ def _total_delayed_neutron_yield(config: Any) -> float:
     transient_config = config.data.get("transient", {})
     if not isinstance(transient_config, dict):
         transient_config = {}
-    return sum(float(group["yield_fraction"]) for group in normalize_precursor_groups(transient_config.get("delayed_neutron_precursor_groups")))
+    return sum(
+        float(group["yield_fraction"])
+        for group in normalize_precursor_groups(transient_config.get("delayed_neutron_precursor_groups"))
+    )
 
 
 def _fission_spectrum(group_count: int) -> list[float]:
@@ -949,10 +967,7 @@ def _fission_spectrum(group_count: int) -> list[float]:
 
 
 def _cosine_power_shape(node_count: int) -> list[float]:
-    values = [
-        1.0 + 0.24 * math.cos(math.pi * ((index + 0.5) / node_count - 0.5))
-        for index in range(node_count)
-    ]
+    values = [1.0 + 0.24 * math.cos(math.pi * ((index + 0.5) / node_count - 0.5)) for index in range(node_count)]
     mean = sum(values) / max(len(values), 1)
     return [value / mean for value in values]
 
@@ -976,9 +991,9 @@ def _index(node: int, group: int, group_count: int) -> int:
 def _scatter_source(flux: np.ndarray, scatter: np.ndarray, node_count: int, group_count: int) -> np.ndarray:
     source = np.zeros(node_count * group_count, dtype=float)
     for node in range(node_count):
-        local_flux = flux[_index(node, 0, group_count): _index(node + 1, 0, group_count)]
+        local_flux = flux[_index(node, 0, group_count) : _index(node + 1, 0, group_count)]
         local_source = scatter.T @ local_flux
-        source[_index(node, 0, group_count): _index(node + 1, 0, group_count)] = local_source
+        source[_index(node, 0, group_count) : _index(node + 1, 0, group_count)] = local_source
     return source
 
 
@@ -991,19 +1006,27 @@ def _fission_source(
 ) -> np.ndarray:
     source = np.zeros(node_count * group_count, dtype=float)
     for node in range(node_count):
-        local_flux = flux[_index(node, 0, group_count): _index(node + 1, 0, group_count)]
+        local_flux = flux[_index(node, 0, group_count) : _index(node + 1, 0, group_count)]
         fission = float(np.dot(nu_fission, local_flux))
-        source[_index(node, 0, group_count): _index(node + 1, 0, group_count)] = chi * fission
+        source[_index(node, 0, group_count) : _index(node + 1, 0, group_count)] = chi * fission
     return source
 
 
 def _total_fission_source(flux: np.ndarray, nu_fission: np.ndarray, node_count: int, group_count: int) -> float:
-    return float(sum(np.dot(nu_fission, flux[_index(node, 0, group_count): _index(node + 1, 0, group_count)]) for node in range(node_count)))
+    return float(
+        sum(
+            np.dot(nu_fission, flux[_index(node, 0, group_count) : _index(node + 1, 0, group_count)])
+            for node in range(node_count)
+        )
+    )
 
 
 def _power_by_node(flux: np.ndarray, nu_fission: np.ndarray, node_count: int, group_count: int) -> np.ndarray:
     return np.array(
-        [float(np.dot(nu_fission, flux[_index(node, 0, group_count): _index(node + 1, 0, group_count)])) for node in range(node_count)],
+        [
+            float(np.dot(nu_fission, flux[_index(node, 0, group_count) : _index(node + 1, 0, group_count)]))
+            for node in range(node_count)
+        ],
         dtype=float,
     )
 
@@ -1019,19 +1042,25 @@ def _darcy_friction_factor(reynolds: float) -> float:
         return 0.0
     if reynolds < 2300.0:
         return 64.0 / reynolds
-    return 0.3164 / (reynolds ** 0.25)
+    return 0.3164 / (reynolds**0.25)
 
 
-def _pump_curve(config: Any, *, nominal_flow_m3_s: float, nominal_head_m: float, density_kg_m3: float) -> dict[str, Any]:
+def _pump_curve(
+    config: Any, *, nominal_flow_m3_s: float, nominal_head_m: float, density_kg_m3: float
+) -> dict[str, Any]:
     reactor = config.reactor
     shutoff_head_m = float(reactor.get("primary_pump_shutoff_head_m", max(nominal_head_m * 1.8, 20.0)))
-    runout_flow_m3_s = float(reactor.get("primary_pump_runout_flow_m3_s", max(nominal_flow_m3_s * 1.75, nominal_flow_m3_s + 1.0e-6)))
+    runout_flow_m3_s = float(
+        reactor.get("primary_pump_runout_flow_m3_s", max(nominal_flow_m3_s * 1.75, nominal_flow_m3_s + 1.0e-6))
+    )
     return {
         "model": "quadratic_head_flow_curve",
         "shutoff_head_m": _round_float(shutoff_head_m),
         "runout_flow_m3_s": _round_float(runout_flow_m3_s),
         "nominal_flow_m3_s": _round_float(nominal_flow_m3_s),
-        "nominal_pressure_kpa": _round_float(_evaluate_pump_curve_raw(shutoff_head_m, runout_flow_m3_s, nominal_flow_m3_s, density_kg_m3) / 1000.0),
+        "nominal_pressure_kpa": _round_float(
+            _evaluate_pump_curve_raw(shutoff_head_m, runout_flow_m3_s, nominal_flow_m3_s, density_kg_m3) / 1000.0
+        ),
     }
 
 
@@ -1044,7 +1073,9 @@ def _evaluate_pump_curve(pump_curve: dict[str, Any], flow_m3_s: float, density_k
     )
 
 
-def _evaluate_pump_curve_raw(shutoff_head_m: float, runout_flow_m3_s: float, flow_m3_s: float, density_kg_m3: float) -> float:
+def _evaluate_pump_curve_raw(
+    shutoff_head_m: float, runout_flow_m3_s: float, flow_m3_s: float, density_kg_m3: float
+) -> float:
     flow_ratio = max(flow_m3_s, 0.0) / max(runout_flow_m3_s, 1.0e-12)
     head_m = max(shutoff_head_m * (1.0 - flow_ratio * flow_ratio), 0.0)
     return density_kg_m3 * 9.80665 * head_m
@@ -1176,7 +1207,9 @@ def _pipe_loop_residence_time_s(raw_segments: Any) -> float:
 def _cleanup_rate_s(config: Any, summary: dict[str, Any]) -> float:
     fuel_cycle = summary.get("fuel_cycle", summary.get("primary_system", {}).get("fuel_cycle", {}))
     turnover_days = float(fuel_cycle.get("cleanup_turnover_days", config.reactor.get("cleanup_turnover_days", 14.0)))
-    efficiency = float(fuel_cycle.get("cleanup_removal_efficiency", config.reactor.get("cleanup_removal_efficiency", 0.75)))
+    efficiency = float(
+        fuel_cycle.get("cleanup_removal_efficiency", config.reactor.get("cleanup_removal_efficiency", 0.75))
+    )
     return efficiency / max(turnover_days * 86400.0, 1.0)
 
 
@@ -1189,7 +1222,9 @@ def _physics_core_checks(
         "finite_k_eff": math.isfinite(float(neutronics["k_eff"])),
         "positive_beta_eff": float(neutronics["beta_eff"]) > 0.0,
         "power_shape_positive": all(float(value) > 0.0 for value in neutronics["power_shape"]),
-        "finite_volume_temperatures_positive": all(float(node["fuel_salt_temp_c"]) > 0.0 for node in thermal_hydraulics["axial_nodes"]),
+        "finite_volume_temperatures_positive": all(
+            float(node["fuel_salt_temp_c"]) > 0.0 for node in thermal_hydraulics["axial_nodes"]
+        ),
         "precursor_transport_fraction_bounded": 0.0 <= float(precursor_transport["transport_loss_fraction"]) <= 1.0,
     }
     return {

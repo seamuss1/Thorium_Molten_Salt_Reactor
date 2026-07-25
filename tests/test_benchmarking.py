@@ -1,13 +1,13 @@
 from pathlib import Path
 
 from thorium_reactor.benchmarking import (
+    _coerce_float,
     assess_benchmark_traceability,
     build_benchmark_residuals,
     build_docker_openmc_command,
 )
 from thorium_reactor.config import load_case_config, load_yaml
 from thorium_reactor.neutronics.workflows import _build_validation_result
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -176,3 +176,24 @@ def test_flagship_traceability_discloses_tmsr_surrogate_scale_mismatch() -> None
     assert scale["scale_ratio"] > 300.0
     assert "not same-scale validation" in scale["message"]
     assert any("not same-scale validation" in gap for gap in traceability["gaps"])
+
+
+def test_coerce_float_rejects_non_finite_values() -> None:
+    """Derived benchmark numbers must stay JSON-encodable.
+
+    json.dumps writes inf/nan as bare Infinity/NaN, which is not valid JSON
+    and throws in the browser's JSON.parse -- so a single non-finite residual
+    would break the whole bundle for the web UI, not just its own metric.
+    The other two copies of this helper (benchmark_evidence, uncertainty
+    .sweep) already filtered non-finite values; this one did not.
+    """
+    assert _coerce_float(float("inf")) is None
+    assert _coerce_float(float("-inf")) is None
+    assert _coerce_float(float("nan")) is None
+
+    # Ordinary coercion is unchanged.
+    assert _coerce_float(2) == 2.0
+    assert _coerce_float("1.5") == 1.5
+    assert _coerce_float(None) is None
+    assert _coerce_float(True) is None
+    assert _coerce_float("abc") is None

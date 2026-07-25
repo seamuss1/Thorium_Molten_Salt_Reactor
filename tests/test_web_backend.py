@@ -1,5 +1,7 @@
+import datetime
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -9,13 +11,13 @@ import time
 import uuid
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from thorium_reactor.paths import create_result_bundle
 from thorium_reactor.web.app import create_app
 from thorium_reactor.web.jobs import append_event
 from thorium_reactor.web.repository import WebRepository
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ADMIN_HEADERS = {"cf-access-authenticated-user-email": "seamusdgallagher@gmail.com"}
@@ -92,7 +94,9 @@ def test_web_run_summaries_only_advertise_viewable_geometry() -> None:
 
         listed = client.get("/api/runs")
         assert listed.status_code == 200
-        listed_run = next(item for item in listed.json() if item["case_name"] == "example_pin" and item["run_id"] == run_id)
+        listed_run = next(
+            item for item in listed.json() if item["case_name"] == "example_pin" and item["run_id"] == run_id
+        )
         assert [artifact["label"] for artifact in listed_run["artifacts"]] == ["core.gltf"]
 
         detail = client.get(f"/api/runs/example_pin/{run_id}")
@@ -357,11 +361,7 @@ def test_append_event_assigns_unique_contiguous_sequences_under_concurrency(tmp_
     for thread in threads:
         thread.join()
 
-    lines = [
-        line
-        for line in (run_dir / "job_events.ndjson").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    lines = [line for line in (run_dir / "job_events.ndjson").read_text(encoding="utf-8").splitlines() if line.strip()]
     sequences = sorted(json.loads(line)["sequence"] for line in lines)
     assert len(lines) == per_thread * thread_count
     assert sequences == list(range(1, per_thread * thread_count + 1))
@@ -397,6 +397,47 @@ def test_web_requires_access_identity_when_configured(monkeypatch) -> None:
     )
 
     assert response.status_code == 401
+
+
+def test_every_api_route_requires_identity_when_access_is_required(monkeypatch) -> None:
+    """Auth is opt-out, not opt-in.
+
+    Enumerates the live route table rather than a hand-written URL list, so a
+    new /api route added without auth fails here instead of shipping open.
+    """
+    monkeypatch.setenv("THORIUM_REACTOR_ACCESS_REQUIRED", "1")
+    app = create_app(REPO_ROOT)
+    # Untrusted transport: no verified identity can be established.
+    client = TestClient(app, client=("203.0.113.10", 4242))
+
+    public_paths = {"/api/health"}
+
+    # Enumerate from the OpenAPI schema rather than app.routes: it is the
+    # documented public surface, and unlike the route objects its shape does
+    # not change when Starlette changes how include_router nests routers.
+    schema = app.openapi()["paths"]
+    assert len(schema) >= 12, f"OpenAPI surface looks wrong, only {len(schema)} paths"
+
+    checked = 0
+    for path, operations in sorted(schema.items()):
+        if not path.startswith("/api") or path in public_paths:
+            continue
+        # Placeholders only need to survive routing; auth must reject before
+        # any handler validates them.
+        url = re.sub(r"\{[^}]+\}", "x", path)
+        for method in sorted(set(operations) & {"get", "post", "put", "patch", "delete"}):
+            response = client.request(method.upper(), url, json={})
+            assert response.status_code == 401, f"{method.upper()} {path} returned {response.status_code}, expected 401"
+            checked += 1
+
+    assert checked >= 12, f"expected the full /api surface to be checked, only saw {checked}"
+
+    health = client.get("/api/health")
+    assert health.status_code == 200, "health must stay reachable without an identity"
+    # Being public, it must not describe the host: it used to hand the
+    # absolute repo path to any unauthenticated caller.
+    assert health.json() == {"status": "ok"}
+    assert str(REPO_ROOT) not in health.text
 
 
 def test_web_allows_loopback_transport_dev_identity_when_access_is_required(monkeypatch) -> None:
@@ -498,6 +539,7 @@ def test_web_spa_deep_links_serve_index_but_api_routes_404(tmp_path: Path) -> No
     assert api_missing.headers["content-type"].startswith("application/json")
 
 
+@pytest.mark.slow
 def test_rate_limit_store_is_safe_across_processes(tmp_path: Path) -> None:
     store_path = tmp_path / "limits.json"
     worker = tmp_path / "claim_worker.py"
@@ -528,8 +570,7 @@ def test_rate_limit_store_is_safe_across_processes(tmp_path: Path) -> None:
     )
     env = dict(os.environ, THORIUM_REACTOR_RATE_LIMIT_PATH=str(store_path))
     processes = [
-        subprocess.Popen([sys.executable, str(worker)], env=env, stdout=subprocess.PIPE, text=True)
-        for _ in range(4)
+        subprocess.Popen([sys.executable, str(worker)], env=env, stdout=subprocess.PIPE, text=True) for _ in range(4)
     ]
     totals = []
     for process in processes:
@@ -638,3 +679,23 @@ def test_web_admins_bypass_daily_run_limit(monkeypatch, tmp_path: Path) -> None:
     finally:
         for run_root in run_roots:
             shutil.rmtree(run_root, ignore_errors=True)
+
+
+def test_rate_limit_timezone_falls_back_when_no_tz_database_exists(monkeypatch) -> None:
+    """The fallback must not need the thing that is missing.
+
+    On a system with no tz database -- a plain Windows install without the
+    tzdata package -- ZoneInfo(...) raises, and the previous fallback of
+    ZoneInfo("UTC") raised the same error it was catching, so constructing
+    the app failed outright rather than degrading to UTC.
+    """
+    import zoneinfo
+
+    from thorium_reactor.web import permissions
+
+    def no_tz_database(key):
+        raise zoneinfo.ZoneInfoNotFoundError(f"No time zone found with key {key}")
+
+    monkeypatch.setattr(permissions, "ZoneInfo", no_tz_database)
+
+    assert permissions.configured_timezone() is datetime.UTC

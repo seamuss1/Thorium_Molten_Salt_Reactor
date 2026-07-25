@@ -9,7 +9,6 @@ from typing import Any
 from thorium_reactor.neutronics.workflows import build_case, run_case
 from thorium_reactor.runtime_context import build_runtime_context
 
-
 INTEGRATION_DEFINITIONS = {
     "moose": {
         "input_name": "moose_input.i",
@@ -66,7 +65,9 @@ def run_named_integration(
     runtime_context = build_runtime_context(command=[name, config.name], cwd=repo_root)
     input_path = bundle.root / definition["input_name"]
     handoff_path = bundle.root / definition["handoff_name"]
-    rendered_input = _render_integration_input(name, config, summary, built.manifest, built.geometry_description, settings)
+    rendered_input = _render_integration_input(
+        name, config, summary, built.manifest, built.geometry_description, settings
+    )
     if definition["render_mode"] == "json":
         input_path.write_text(json.dumps(rendered_input, indent=2, sort_keys=True), encoding="utf-8")
         status = "input_bundle_exported"
@@ -369,7 +370,9 @@ def _build_handoff_payload(
             "bop": summary.get("bop", {}),
             "primary_system": summary.get("primary_system", {}),
             "reduced_order_flow": summary.get("flow", {}).get("reduced_order", {}),
-            "state_store_path": str((Path(summary.get("result_dir", "")) / "state_store.json")) if summary.get("result_dir") else None,
+            "state_store_path": str(Path(summary.get("result_dir", "")) / "state_store.json")
+            if summary.get("result_dir")
+            else None,
         },
         "materials": materials,
         "integration_settings": settings,
@@ -477,7 +480,7 @@ def _render_scale_input(
     batches = summary.get("neutronics", {}).get("simulation", {}).get("batches", config.simulation.get("batches"))
     keff_hint = summary.get("metrics", {}).get("keff", "n/a")
     lines = [
-        f"=shell",
+        "=shell",
         f"# Auto-generated SCALE integration input for {config.name}",
         f"# Sequence: {sequence}",
         f"# OpenMC keff hint: {keff_hint}",
@@ -530,7 +533,9 @@ def _render_saltproc_input(
         "fuel_cycle": summary.get("fuel_cycle", {}),
         "chemistry": summary.get("chemistry", {}),
         "processing": config.data.get("processing", {}),
-        "state_store_path": str(Path(summary.get("result_dir", "")) / "state_store.json") if summary.get("result_dir") else None,
+        "state_store_path": str(Path(summary.get("result_dir", "")) / "state_store.json")
+        if summary.get("result_dir")
+        else None,
         "settings": settings,
     }
 

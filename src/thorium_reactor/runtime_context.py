@@ -201,7 +201,9 @@ def _resolve_untracked_status_path(*, cwd: Path, repo_root: Path, status_path: s
     candidates = [repo_root / status_path, resolved_cwd / status_path]
     for candidate in candidates:
         lexical_candidate = _normalize_path(candidate)
-        if _is_relative_to(lexical_candidate, repo_root) and (lexical_candidate.exists() or lexical_candidate.is_symlink()):
+        if _is_relative_to(lexical_candidate, repo_root) and (
+            lexical_candidate.exists() or lexical_candidate.is_symlink()
+        ):
             return candidate
     fallback = _normalize_path(candidates[0])
     if _is_relative_to(fallback, repo_root):

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 NEUTRONICS_ONLY = "neutronics_only"
 THERMAL_NETWORK = "thermal_network"
 BALANCE_OF_PLANT = "balance_of_plant"
@@ -144,9 +143,7 @@ def _capability_overrides(config: Any) -> dict[str, bool]:
 def _require_reactor_fields(config: Any, capability: str, names: tuple[str, ...]) -> None:
     for name in names:
         if config.reactor.get(name) is None:
-            raise CapabilityConfigurationError(
-                _capability_message(capability, f"requires reactor.{name}.")
-            )
+            raise CapabilityConfigurationError(_capability_message(capability, f"requires reactor.{name}."))
 
 
 def _capability_message(capability: str | None, detail: str) -> str:

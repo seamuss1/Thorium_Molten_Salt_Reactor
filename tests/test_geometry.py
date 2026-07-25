@@ -8,7 +8,6 @@ from thorium_reactor.config import load_case_config
 from thorium_reactor.geometry.exporters import export_geometry, render_svg, validate_watertight_meshes
 from thorium_reactor.neutronics.workflows import build_case
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import yaml
 
@@ -13,7 +14,6 @@ from thorium_reactor.modeling import (
     MODEL_MATERIAL_REPRESENTATIONS,
 )
 from thorium_reactor.precursors import SUPPORTED_PRECURSOR_TRANSPORT_MODELS
-
 
 REQUIRED_CASE_KEYS = (
     "reactor",
@@ -169,21 +169,19 @@ def _validate_reactor_settings(path: Path, reactor: Any) -> None:
     mode = reactor.get("mode")
     if mode is not None and mode not in SUPPORTED_REACTOR_MODES:
         supported = ", ".join(sorted(SUPPORTED_REACTOR_MODES))
-        raise ConfigError(
-            f"Case config {path} reactor.mode '{mode}' is unsupported. Supported values: {supported}."
-        )
+        raise ConfigError(f"Case config {path} reactor.mode '{mode}' is unsupported. Supported values: {supported}.")
     if mode == "commercial_grid":
         characteristics = reactor.get("characteristics")
         if not isinstance(characteristics, Mapping):
-            raise ConfigError(
-                f"Case config {path} reactor.mode 'commercial_grid' requires reactor.characteristics."
-            )
+            raise ConfigError(f"Case config {path} reactor.mode 'commercial_grid' requires reactor.characteristics.")
         for field_name in ("net_electric_power_mwe", "thermal_power_mwth", "module_count"):
             if field_name not in characteristics:
                 raise ConfigError(
                     f"Case config {path} reactor.characteristics.{field_name} is required for commercial_grid cases."
                 )
-        _require_number(path, "reactor.characteristics.net_electric_power_mwe", characteristics["net_electric_power_mwe"])
+        _require_number(
+            path, "reactor.characteristics.net_electric_power_mwe", characteristics["net_electric_power_mwe"]
+        )
         _require_number(path, "reactor.characteristics.thermal_power_mwth", characteristics["thermal_power_mwth"])
         _require_positive_int(path, "reactor.characteristics.module_count", characteristics["module_count"])
 
@@ -291,7 +289,7 @@ def _validate_geometry_settings(path: Path, geometry: Any) -> None:
 def _validate_simulation_settings(path: Path, simulation: Any) -> None:
     if not isinstance(simulation, Mapping):
         raise ConfigError(f"Case config {path} has invalid 'simulation'; expected a mapping.")
-    particles = _require_positive_int(path, "simulation.particles", simulation.get("particles"))
+    _require_positive_int(path, "simulation.particles", simulation.get("particles"))
     batches = _require_positive_int(path, "simulation.batches", simulation.get("batches"))
     inactive = _require_non_negative_int(path, "simulation.inactive", simulation.get("inactive", 0))
     if inactive >= batches:
@@ -478,14 +476,20 @@ def _validate_optional_transport_solver_settings(path: Path, transport_solver: A
         raise ConfigError(f"Case config {path} optional 'transport_solver' section must be a mapping.")
     mesh = transport_solver.get("mesh", "rz_structured")
     if mesh != "rz_structured":
-        raise ConfigError(f"Case config {path} transport_solver.mesh '{mesh}' is unsupported. Supported value: rz_structured.")
+        raise ConfigError(
+            f"Case config {path} transport_solver.mesh '{mesh}' is unsupported. Supported value: rz_structured."
+        )
     for field_name in ("radial_cells", "axial_cells"):
         if field_name in transport_solver:
             _require_positive_int(path, f"transport_solver.{field_name}", transport_solver[field_name])
     if "polynomial_order" in transport_solver:
-        polynomial_order = _require_non_negative_int(path, "transport_solver.polynomial_order", transport_solver["polynomial_order"])
+        polynomial_order = _require_non_negative_int(
+            path, "transport_solver.polynomial_order", transport_solver["polynomial_order"]
+        )
         if polynomial_order > 3:
-            raise ConfigError(f"Case config {path} transport_solver.polynomial_order above 3 is not supported in the native v1 solver.")
+            raise ConfigError(
+                f"Case config {path} transport_solver.polynomial_order above 3 is not supported in the native v1 solver."
+            )
     for field_name in (
         "duration_s",
         "time_step_s",
@@ -500,7 +504,10 @@ def _validate_optional_transport_solver_settings(path: Path, transport_solver: A
             value = _require_number(path, f"transport_solver.{field_name}", transport_solver[field_name])
             if field_name in {"duration_s", "time_step_s", "cfl"} and value <= 0.0:
                 raise ConfigError(f"Case config {path} field 'transport_solver.{field_name}' must be positive.")
-            if field_name in {"flow_fraction", "diffusion_coefficient_m2_s", "cleanup_rate_s", "positivity_floor"} and value < 0.0:
+            if (
+                field_name in {"flow_fraction", "diffusion_coefficient_m2_s", "cleanup_rate_s", "positivity_floor"}
+                and value < 0.0
+            ):
                 raise ConfigError(f"Case config {path} field 'transport_solver.{field_name}' must be non-negative.")
     custom_group_sets = transport_solver.get("custom_group_sets")
     if custom_group_sets is not None:
@@ -511,7 +518,9 @@ def _validate_optional_transport_solver_settings(path: Path, transport_solver: A
                 raise ConfigError(f"Case config {path} transport_solver.custom_group_sets[{index}] must be a mapping.")
             groups = group_set.get("groups")
             if not isinstance(groups, list) or not groups:
-                raise ConfigError(f"Case config {path} transport_solver.custom_group_sets[{index}].groups must be a non-empty list.")
+                raise ConfigError(
+                    f"Case config {path} transport_solver.custom_group_sets[{index}].groups must be a non-empty list."
+                )
             _validate_transport_groups(path, groups, f"transport_solver.custom_group_sets[{index}].groups")
 
 
@@ -554,12 +563,16 @@ def _validate_transport_groups(path: Path, groups: Any, field_prefix: str) -> No
     for index, group in enumerate(groups, start=1):
         if not isinstance(group, Mapping):
             raise ConfigError(f"Case config {path} {field_prefix}[{index}] must be a mapping.")
-        decay_constant = _require_number(path, f"{field_prefix}[{index}].decay_constant_s", group.get("decay_constant_s"))
+        decay_constant = _require_number(
+            path, f"{field_prefix}[{index}].decay_constant_s", group.get("decay_constant_s")
+        )
         if decay_constant <= 0.0:
             raise ConfigError(f"Case config {path} field '{field_prefix}[{index}].decay_constant_s' must be positive.")
         yield_fraction = _require_number(path, f"{field_prefix}[{index}].yield_fraction", group.get("yield_fraction"))
         if yield_fraction < 0.0:
-            raise ConfigError(f"Case config {path} field '{field_prefix}[{index}].yield_fraction' must be non-negative.")
+            raise ConfigError(
+                f"Case config {path} field '{field_prefix}[{index}].yield_fraction' must be non-negative."
+            )
         total_yield += yield_fraction
     if total_yield <= 0.0:
         raise ConfigError(f"Case config {path} {field_prefix} total yield_fraction must be positive.")
@@ -691,7 +704,13 @@ def _validate_optional_loop_segments(path: Path, loop_segments: Any) -> None:
             raise ConfigError(f"Case config {path} loop_segments[{index}] must be a mapping.")
         if not segment.get("id"):
             raise ConfigError(f"Case config {path} loop_segments[{index}] must define an id.")
-        for field_name in ("residence_fraction", "volume_fraction", "decay_heat_fraction", "cleanup_weight", "cleanup_fraction"):
+        for field_name in (
+            "residence_fraction",
+            "volume_fraction",
+            "decay_heat_fraction",
+            "cleanup_weight",
+            "cleanup_fraction",
+        ):
             if field_name in segment:
                 _require_number(path, f"loop_segments[{index}].{field_name}", segment[field_name])
 
@@ -704,9 +723,7 @@ def _validate_validation_targets_settings(path: Path, validation_targets: Any) -
             raise ConfigError(f"Case config {path} validation_targets.{name} must be a mapping.")
         benchmark_target_ids = target.get("benchmark_target_ids")
         if benchmark_target_ids is not None and not isinstance(benchmark_target_ids, list):
-            raise ConfigError(
-                f"Case config {path} validation_targets.{name}.benchmark_target_ids must be a list."
-            )
+            raise ConfigError(f"Case config {path} validation_targets.{name}.benchmark_target_ids must be a list.")
         if isinstance(benchmark_target_ids, list):
             for index, value in enumerate(benchmark_target_ids, start=1):
                 if not str(value).strip():
@@ -779,7 +796,9 @@ def _validate_optional_physics_core_settings(path: Path, physics_core: Any) -> N
         methods = neutronics.get("deterministic_methods")
         if methods is not None:
             if not isinstance(methods, list) or not methods:
-                raise ConfigError(f"Case config {path} physics_core.neutronics.deterministic_methods must be a non-empty list.")
+                raise ConfigError(
+                    f"Case config {path} physics_core.neutronics.deterministic_methods must be a non-empty list."
+                )
             for index, method in enumerate(methods, start=1):
                 if method not in SUPPORTED_DETERMINISTIC_NEUTRONICS_METHODS:
                     supported = ", ".join(sorted(SUPPORTED_DETERMINISTIC_NEUTRONICS_METHODS))
@@ -790,7 +809,9 @@ def _validate_optional_physics_core_settings(path: Path, physics_core: Any) -> N
         temperature_grid = neutronics.get("temperature_grid_c")
         if temperature_grid is not None:
             if not isinstance(temperature_grid, list) or len(temperature_grid) < 2:
-                raise ConfigError(f"Case config {path} physics_core.neutronics.temperature_grid_c must contain at least two points.")
+                raise ConfigError(
+                    f"Case config {path} physics_core.neutronics.temperature_grid_c must contain at least two points."
+                )
             for index, value in enumerate(temperature_grid, start=1):
                 _require_number(path, f"physics_core.neutronics.temperature_grid_c[{index}]", value)
     thermal_hydraulics = physics_core.get("thermal_hydraulics")
@@ -798,13 +819,17 @@ def _validate_optional_physics_core_settings(path: Path, physics_core: Any) -> N
         if not isinstance(thermal_hydraulics, Mapping):
             raise ConfigError(f"Case config {path} physics_core.thermal_hydraulics must be a mapping.")
         if "axial_nodes" in thermal_hydraulics:
-            _require_positive_int(path, "physics_core.thermal_hydraulics.axial_nodes", thermal_hydraulics["axial_nodes"])
+            _require_positive_int(
+                path, "physics_core.thermal_hydraulics.axial_nodes", thermal_hydraulics["axial_nodes"]
+            )
     precursor_transport = physics_core.get("precursor_transport")
     if precursor_transport is not None:
         if not isinstance(precursor_transport, Mapping):
             raise ConfigError(f"Case config {path} physics_core.precursor_transport must be a mapping.")
         if "loop_cells" in precursor_transport:
-            _require_positive_int(path, "physics_core.precursor_transport.loop_cells", precursor_transport["loop_cells"])
+            _require_positive_int(
+                path, "physics_core.precursor_transport.loop_cells", precursor_transport["loop_cells"]
+            )
         if "diffusion_coefficient_m2_s" in precursor_transport:
             value = _require_number(
                 path,
@@ -812,7 +837,9 @@ def _validate_optional_physics_core_settings(path: Path, physics_core: Any) -> N
                 precursor_transport["diffusion_coefficient_m2_s"],
             )
             if value < 0.0:
-                raise ConfigError(f"Case config {path} physics_core.precursor_transport.diffusion_coefficient_m2_s must be non-negative.")
+                raise ConfigError(
+                    f"Case config {path} physics_core.precursor_transport.diffusion_coefficient_m2_s must be non-negative."
+                )
         decay_heat_groups = precursor_transport.get("decay_heat_groups")
         if decay_heat_groups is not None:
             _validate_decay_heat_groups(path, decay_heat_groups)
@@ -828,12 +855,16 @@ def _validate_decay_heat_groups(path: Path, groups: Any) -> None:
     for index, group in enumerate(groups, start=1):
         if not isinstance(group, Mapping):
             raise ConfigError(f"Case config {path} {field_prefix}[{index}] must be a mapping.")
-        decay_constant = _require_number(path, f"{field_prefix}[{index}].decay_constant_s", group.get("decay_constant_s"))
+        decay_constant = _require_number(
+            path, f"{field_prefix}[{index}].decay_constant_s", group.get("decay_constant_s")
+        )
         if decay_constant <= 0.0:
             raise ConfigError(f"Case config {path} field '{field_prefix}[{index}].decay_constant_s' must be positive.")
         yield_fraction = _require_number(path, f"{field_prefix}[{index}].yield_fraction", group.get("yield_fraction"))
         if yield_fraction < 0.0:
-            raise ConfigError(f"Case config {path} field '{field_prefix}[{index}].yield_fraction' must be non-negative.")
+            raise ConfigError(
+                f"Case config {path} field '{field_prefix}[{index}].yield_fraction' must be non-negative."
+            )
         total_yield += yield_fraction
     if total_yield <= 0.0:
         raise ConfigError(f"Case config {path} {field_prefix} total yield_fraction must be positive.")

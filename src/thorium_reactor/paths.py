@@ -1,20 +1,63 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
+import csv
 import hashlib
+import io
 import json
-from pathlib import Path
+import os
 import re
+import tempfile
 import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from thorium_reactor.runtime_context import build_runtime_context
 
-
 PATH_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 ARTIFACT_STATUS_SCHEMA_VERSION = 1
 STAGE_MANIFEST_SCHEMA_VERSION = 1
+
+
+def _default_file_mode() -> int:
+    """The mode a plain open()-and-write would produce, i.e. 0666 & ~umask."""
+    umask = os.umask(0)
+    os.umask(umask)
+    return 0o666 & ~umask
+
+
+def atomic_write_text(path: Path, contents: str) -> None:
+    """Write a bundle file so readers never observe a partial one.
+
+    The web process polls these files from another process while a CLI run is
+    writing them, so a plain write_text exposes a window where a reader sees a
+    truncated file. The web layer swallows the resulting JSONDecodeError and
+    renders the run as empty, which reads as data loss rather than a retry.
+
+    Writes to a temporary file in the same directory (so os.replace stays on
+    one filesystem and is atomic) and renames over the target.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(contents)
+            handle.flush()
+            os.fsync(handle.fileno())
+        # mkstemp creates 0600 by design. Bundles are read by other users --
+        # the web process, and CI uploading artifacts written by a container
+        # running as root -- so restore the permissions an ordinary write
+        # would have produced, preserving the target's mode on overwrite.
+        try:
+            os.chmod(temp_name, path.stat().st_mode & 0o7777 if path.exists() else _default_file_mode())
+        except OSError:
+            pass
+        os.replace(temp_name, path)
+    finally:
+        # A successful replace already moved the file, so this is a no-op then
+        # and a cleanup when anything above raised.
+        Path(temp_name).unlink(missing_ok=True)
 
 
 @dataclass(slots=True)
@@ -33,22 +76,25 @@ class ResultBundle:
 
     def write_text(self, name: str, contents: str) -> Path:
         path = self.root / name
-        path.write_text(contents, encoding="utf-8")
+        atomic_write_text(path, contents)
         return path
 
     def write_json(self, name: str, payload: object) -> Path:
-        import json
-
         path = self.root / name
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True))
         return path
 
     def write_metrics(self, metrics: dict[str, object]) -> Path:
         path = self.root / "metrics.csv"
-        lines = ["metric,value"]
+        buffer = io.StringIO()
+        # csv.writer, not manual joining: a metric key or value containing a
+        # comma or quote would otherwise emit a row that csv.DictReader (used
+        # by the web layer to read this file back) parses into the wrong keys.
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(["metric", "value"])
         for key, value in metrics.items():
-            lines.append(f"{key},{value}")
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            writer.writerow([key, value])
+        atomic_write_text(path, buffer.getvalue())
         return path
 
 
@@ -63,11 +109,7 @@ def snapshot_bundle_artifacts(bundle: ResultBundle) -> dict[str, str]:
 
 
 def changed_bundle_artifacts(before: dict[str, str], after: dict[str, str]) -> set[str]:
-    return {
-        path
-        for path, fingerprint in after.items()
-        if before.get(path) != fingerprint
-    }
+    return {path for path, fingerprint in after.items() if before.get(path) != fingerprint}
 
 
 def append_stage_manifest(
@@ -108,8 +150,11 @@ def append_stage_manifest(
         "status": status,
         "runtime_context": context,
         "backend": context.get("backend", {"service": context.get("service", "host")}),
-        "device": context.get("backend", {}).get("device", "host-cpu") if isinstance(context.get("backend"), dict) else "host-cpu",
-        "input_snapshot": (inputs or {}).get("input_snapshots") or {
+        "device": context.get("backend", {}).get("device", "host-cpu")
+        if isinstance(context.get("backend"), dict)
+        else "host-cpu",
+        "input_snapshot": (inputs or {}).get("input_snapshots")
+        or {
             "case": (inputs or {}).get("case", {}),
             "benchmark": (inputs or {}).get("benchmark", {}),
         },
@@ -139,16 +184,8 @@ def refresh_bundle_artifact_statuses(bundle: ResultBundle, *, summary: dict[str,
     }
     if _has_benchmark_evidence_contract(summary):
         status["groups"]["benchmark_evidence"] = _benchmark_evidence_group_status(bundle, summary)
-    status["blockers"] = [
-        blocker
-        for group in status["groups"].values()
-        for blocker in group.get("blockers", [])
-    ]
-    status["warnings"] = [
-        warning
-        for group in status["groups"].values()
-        for warning in group.get("warnings", [])
-    ]
+    status["blockers"] = [blocker for group in status["groups"].values() for blocker in group.get("blockers", [])]
+    status["warnings"] = [warning for group in status["groups"].values() for warning in group.get("warnings", [])]
     (bundle.root / "artifact_status.json").write_text(json.dumps(status, indent=2, sort_keys=True), encoding="utf-8")
     _write_directory_status(bundle.openmc_dir, status["groups"]["openmc"])
     _write_directory_status(bundle.images_dir, status["groups"]["images"])
@@ -361,7 +398,7 @@ def _artifact_fingerprint(path: Path) -> str:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def safe_path_segment(value: str | None, label: str = "path segment") -> str:

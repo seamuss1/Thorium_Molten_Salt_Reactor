@@ -8,16 +8,24 @@ import mimetypes
 import re
 import shutil
 import tempfile
-from datetime import datetime, timezone
+from collections.abc import Iterable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 import yaml
 
 from thorium_reactor.bundle_inputs import BENCHMARK_SNAPSHOT_NAME, CASE_SNAPSHOT_NAME, PROVENANCE_NAME
 from thorium_reactor.capabilities import get_case_capabilities
 from thorium_reactor.config import CaseConfig, load_case_config, resolve_benchmark_path
-from thorium_reactor.paths import ResultBundle, case_config_path, create_result_bundle, default_run_id, discover_repo_root, safe_path_segment
+from thorium_reactor.paths import (
+    ResultBundle,
+    case_config_path,
+    create_result_bundle,
+    default_run_id,
+    discover_repo_root,
+    safe_path_segment,
+)
 from thorium_reactor.web.schemas import (
     ArtifactRef,
     CaseDetail,
@@ -33,7 +41,6 @@ from thorium_reactor.web.schemas import (
     SimulationDraft,
     model_to_dict,
 )
-
 
 RUN_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 TERMINAL_STATUSES = {"completed", "failed", "canceled"}
@@ -57,7 +64,6 @@ RAW_ARTIFACTS = (
     "validation.json",
     "transient.json",
     "transient_sweep.json",
-    "runtime_benchmark.json",
     "uncertainty_manifest.json",
     "uncertainty_samples.json",
     "uncertainty_results.json",
@@ -107,10 +113,12 @@ class WebRepository:
             benchmark_path=self._display_path(benchmark_path) if benchmark_path else None,
         )
 
-    def validate_draft(self, case_name: str, *, draft_yaml: str | None, patch: Mapping[str, Any]) -> DraftValidationResponse:
+    def validate_draft(
+        self, case_name: str, *, draft_yaml: str | None, patch: Mapping[str, Any]
+    ) -> DraftValidationResponse:
         try:
             config, normalized_yaml = self._load_draft_config(case_name, draft_yaml=draft_yaml, patch=patch)
-        except Exception as exc:  # noqa: BLE001 - surfaced as validation feedback for the UI.
+        except Exception as exc:
             return DraftValidationResponse(valid=False, message=str(exc))
         return DraftValidationResponse(
             valid=True,
@@ -131,7 +139,9 @@ class WebRepository:
         bundle = create_result_bundle(self.repo_root, config.name, run_id)
         (bundle.root / CASE_SNAPSHOT_NAME).write_text(normalized_yaml, encoding="utf-8")
 
-        benchmark_path = resolve_benchmark_path(self.repo_root, config.data) or resolve_benchmark_path(self.repo_root, base_config.data)
+        benchmark_path = resolve_benchmark_path(self.repo_root, config.data) or resolve_benchmark_path(
+            self.repo_root, base_config.data
+        )
         if benchmark_path and benchmark_path.exists():
             shutil.copy2(benchmark_path, bundle.root / BENCHMARK_SNAPSHOT_NAME)
 
@@ -156,7 +166,11 @@ class WebRepository:
         if not results_root.exists():
             return records
         for case_dir in sorted([path for path in results_root.iterdir() if path.is_dir()]):
-            for run_dir in sorted([path for path in case_dir.iterdir() if path.is_dir()], key=lambda path: path.stat().st_mtime, reverse=True):
+            for run_dir in sorted(
+                [path for path in case_dir.iterdir() if path.is_dir()],
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            ):
                 try:
                     records.append(self._run_summary_record(case_dir.name, run_dir.name, run_dir))
                 except ValueError:
@@ -347,7 +361,12 @@ class WebRepository:
         simulation = as_mapping(neutronics.get("simulation"))
         feedback = as_mapping(physics_neutronics.get("feedback_coefficients"))
         metrics = output_metrics(
-            ("k-effective", first_present(physics_neutronics.get("k_eff"), neutronics.get("k_eff")), "delta-k/k", "number"),
+            (
+                "k-effective",
+                first_present(physics_neutronics.get("k_eff"), neutronics.get("k_eff")),
+                "delta-k/k",
+                "number",
+            ),
             ("Beta effective", physics_neutronics.get("beta_eff"), "fraction", "number"),
             ("Energy groups", physics_neutronics.get("group_count"), "count", "number"),
             ("Particles", simulation.get("particles"), "histories", "number"),
@@ -380,7 +399,9 @@ class WebRepository:
                     f"k-effective {format_value(first_present(physics_neutronics.get('k_eff'), neutronics.get('k_eff')))}"
                     if first_present(physics_neutronics.get("k_eff"), neutronics.get("k_eff")) is not None
                     else None,
-                    f"{physics_neutronics.get('group_count')} groups" if physics_neutronics.get("group_count") is not None else None,
+                    f"{physics_neutronics.get('group_count')} groups"
+                    if physics_neutronics.get("group_count") is not None
+                    else None,
                     f"OpenMC {neutronics.get('status')}" if neutronics.get("status") else None,
                 ]
             ),
@@ -394,9 +415,26 @@ class WebRepository:
             return
 
         metrics = output_metrics(
-            ("Thermal power", first_present(bop.get("thermal_power_mw"), get_path(plant, "design_basis.thermal_power_mw")), "MWth", "number"),
-            ("Electric power", first_present(bop.get("electric_power_mw"), get_path(plant, "design_basis.net_electric_power_mwe")), "MWe", "number"),
-            ("Steam generator duty", first_present(bop.get("steam_generator_duty_mw"), get_path(plant, "design_basis.steam_generator_duty_mw")), "MW", "number"),
+            (
+                "Thermal power",
+                first_present(bop.get("thermal_power_mw"), get_path(plant, "design_basis.thermal_power_mw")),
+                "MWth",
+                "number",
+            ),
+            (
+                "Electric power",
+                first_present(bop.get("electric_power_mw"), get_path(plant, "design_basis.net_electric_power_mwe")),
+                "MWe",
+                "number",
+            ),
+            (
+                "Steam generator duty",
+                first_present(
+                    bop.get("steam_generator_duty_mw"), get_path(plant, "design_basis.steam_generator_duty_mw")
+                ),
+                "MW",
+                "number",
+            ),
             ("Steam cycle usable duty", bop.get("steam_cycle_usable_duty_mw"), "MW", "number"),
             ("Condenser duty", bop.get("condenser_duty_mw"), "MW", "number"),
             ("Primary mass flow", bop.get("primary_mass_flow_kg_s"), "kg/s", "number"),
@@ -418,7 +456,9 @@ class WebRepository:
                 [
                     f"{format_value(first_present(bop.get('electric_power_mw'), get_path(plant, 'design_basis.net_electric_power_mwe')))} MWe",
                     f"from {format_value(first_present(bop.get('thermal_power_mw'), get_path(plant, 'design_basis.thermal_power_mw')))} MWth",
-                    f"across {format_value(bop.get('primary_delta_t_c'))} C primary delta T" if bop.get("primary_delta_t_c") is not None else None,
+                    f"across {format_value(bop.get('primary_delta_t_c'))} C primary delta T"
+                    if bop.get("primary_delta_t_c") is not None
+                    else None,
                 ]
             ),
             notes=notes,
@@ -439,22 +479,69 @@ class WebRepository:
         thermal_hx = as_mapping(thermal.get("heat_exchanger"))
         thermal_momentum = as_mapping(thermal.get("momentum_balance"))
         metrics = output_metrics(
-            ("Primary mass flow", first_present(primary.get("primary_mass_flow_kg_s"), reduced.get("primary_mass_flow_kg_s"), get_path(thermal, "boundary_conditions.mass_flow_kg_s")), "kg/s", "number"),
-            ("Volumetric flow", first_present(primary.get("primary_volumetric_flow_m3_s"), active_flow.get("total_volumetric_flow_m3_s")), "m3/s", "number"),
-            ("Representative velocity", first_present(active_flow.get("representative_velocity_m_s"), loop.get("limiting_velocity_m_s")), "m/s", "number"),
+            (
+                "Primary mass flow",
+                first_present(
+                    primary.get("primary_mass_flow_kg_s"),
+                    reduced.get("primary_mass_flow_kg_s"),
+                    get_path(thermal, "boundary_conditions.mass_flow_kg_s"),
+                ),
+                "kg/s",
+                "number",
+            ),
+            (
+                "Volumetric flow",
+                first_present(
+                    primary.get("primary_volumetric_flow_m3_s"), active_flow.get("total_volumetric_flow_m3_s")
+                ),
+                "m3/s",
+                "number",
+            ),
+            (
+                "Representative velocity",
+                first_present(active_flow.get("representative_velocity_m_s"), loop.get("limiting_velocity_m_s")),
+                "m/s",
+                "number",
+            ),
             ("Core residence time", active_flow.get("representative_residence_time_s"), "s", "number"),
             ("Fuel salt inventory", get_path(primary, "inventory.fuel_salt.total_m3"), "m3", "number"),
-            ("Pump pressure", first_present(loop.get("required_pump_pressure_kpa"), get_path(thermal, "pump_curve.nominal_pressure_kpa")), "kPa", "number"),
+            (
+                "Pump pressure",
+                first_present(
+                    loop.get("required_pump_pressure_kpa"), get_path(thermal, "pump_curve.nominal_pressure_kpa")
+                ),
+                "kPa",
+                "number",
+            ),
             ("Pump shaft power", loop.get("pump_shaft_power_kw"), "kW", "number"),
-            ("Max Reynolds number", first_present(loop.get("max_reynolds_number"), thermal_momentum.get("reynolds_number")), "Re", "number"),
-            ("Heat exchanger area", first_present(heat_exchanger.get("required_area_m2"), thermal_hx.get("area_m2")), "m2", "number"),
-            ("Heat exchanger duty", first_present(heat_exchanger.get("duty_mw"), thermal_profile.get("required_heat_exchanger_duty_mw")), "MW", "number"),
+            (
+                "Max Reynolds number",
+                first_present(loop.get("max_reynolds_number"), thermal_momentum.get("reynolds_number")),
+                "Re",
+                "number",
+            ),
+            (
+                "Heat exchanger area",
+                first_present(heat_exchanger.get("required_area_m2"), thermal_hx.get("area_m2")),
+                "m2",
+                "number",
+            ),
+            (
+                "Heat exchanger duty",
+                first_present(heat_exchanger.get("duty_mw"), thermal_profile.get("required_heat_exchanger_duty_mw")),
+                "MW",
+                "number",
+            ),
             ("Secondary mass flow", heat_exchanger.get("secondary_mass_flow_kg_s"), "kg/s", "number"),
             ("Pipe heat loss", thermal_profile.get("total_pipe_heat_loss_kw"), "kW", "number"),
             ("Flow reversal margin", thermal_momentum.get("flow_reversal_margin_kpa"), "kPa", "number"),
         )
         notes = []
-        for model in (primary.get("model"), thermal.get("model"), reduced.get("core_model", {}).get("kind") if isinstance(reduced.get("core_model"), Mapping) else None):
+        for model in (
+            primary.get("model"),
+            thermal.get("model"),
+            reduced.get("core_model", {}).get("kind") if isinstance(reduced.get("core_model"), Mapping) else None,
+        ):
             if model:
                 notes.append(f"Model: {model}")
         if thermal_momentum.get("flow_reversal_predicted") is True:
@@ -537,7 +624,12 @@ class WebRepository:
             ("Peak fuel temperature", transient.get("peak_fuel_temperature_c"), "C", "number"),
             ("Peak coolant temperature", transient.get("peak_coolant_temperature_c"), "C", "number"),
             ("Peak graphite temperature", transient.get("peak_graphite_temperature_c"), "C", "number"),
-            ("Precursor transport loss", transient.get("final_precursor_transport_loss_fraction"), "fraction", "number"),
+            (
+                "Precursor transport loss",
+                transient.get("final_precursor_transport_loss_fraction"),
+                "fraction",
+                "number",
+            ),
             ("Peak corrosion index", transient.get("peak_corrosion_index"), "index", "number"),
             ("Final redox state", transient.get("final_redox_state_ev"), "eV", "number"),
         )
@@ -662,7 +754,12 @@ class WebRepository:
             ("Graphite margin", graphite.get("lifetime_margin"), "fraction", "number"),
         )
         notes = []
-        for source in (fuel_cycle.get("depletion_model"), chemistry.get("model"), tritium.get("basis"), graphite.get("basis")):
+        for source in (
+            fuel_cycle.get("depletion_model"),
+            chemistry.get("model"),
+            tritium.get("basis"),
+            graphite.get("basis"),
+        ):
             if source:
                 notes.append(str(source))
         self._append_section(
@@ -685,9 +782,13 @@ class WebRepository:
             notes=dedupe(notes[:4]),
         )
 
-    def _add_validation_section(self, sections: list[OutputSection], summary: Mapping[str, Any], validation: Mapping[str, Any]) -> None:
+    def _add_validation_section(
+        self, sections: list[OutputSection], summary: Mapping[str, Any], validation: Mapping[str, Any]
+    ) -> None:
         traceability = as_mapping(summary.get("benchmark_traceability"))
-        maturity = as_mapping(first_present(summary.get("validation_maturity"), traceability.get("validation_maturity")))
+        maturity = as_mapping(
+            first_present(summary.get("validation_maturity"), traceability.get("validation_maturity"))
+        )
         quality = as_mapping(first_present(summary.get("benchmark_quality"), traceability.get("benchmark_quality")))
         checks = validation.get("checks") if isinstance(validation.get("checks"), list) else []
         if not traceability and not maturity and not checks:
@@ -711,14 +812,25 @@ class WebRepository:
             ("Checks passed", status_counts.get("pass"), "count", "number"),
             ("Checks pending", status_counts.get("pending"), "count", "number"),
             ("Checks failed", status_counts.get("fail"), "count", "number"),
-            ("Datasets", len(traceability.get("datasets")) if isinstance(traceability.get("datasets"), list) else None, "count", "number"),
+            (
+                "Datasets",
+                len(traceability.get("datasets")) if isinstance(traceability.get("datasets"), list) else None,
+                "count",
+                "number",
+            ),
             ("High confidence items", confidence.get("high"), "count", "number"),
             ("Medium confidence items", confidence.get("medium"), "count", "number"),
             ("Structured targets", target_coverage.get("linked"), "linked", "number"),
             ("Targets with evidence", evidence_coverage.get("linked"), "linked", "number"),
         )
         notes = []
-        for gap in (maturity.get("gaps") if isinstance(maturity.get("gaps"), list) else traceability.get("gaps") if isinstance(traceability.get("gaps"), list) else []):
+        for gap in (
+            maturity.get("gaps")
+            if isinstance(maturity.get("gaps"), list)
+            else traceability.get("gaps")
+            if isinstance(traceability.get("gaps"), list)
+            else []
+        ):
             notes.append(str(gap))
         quality_blockers = quality.get("promotion_blockers")
         if isinstance(quality_blockers, list):
@@ -729,7 +841,12 @@ class WebRepository:
             "validation_maturity",
             "Validation and benchmark maturity",
             metrics=metrics,
-            status=first_present(quality.get("quality_stage"), maturity.get("validation_maturity_stage"), traceability.get("maturity_stage"), "validation"),
+            status=first_present(
+                quality.get("quality_stage"),
+                maturity.get("validation_maturity_stage"),
+                traceability.get("maturity_stage"),
+                "validation",
+            ),
             summary=make_sentence(
                 [
                     f"{format_value(traceability.get('traceability_score'))} traceability score"
@@ -771,7 +888,11 @@ class WebRepository:
             ("Commercial operation", schedule.get("commercial_operation_date"), None, "text"),
         )
         notes = []
-        for value in (finance.get("planning_basis"), get_path(finance, "provenance.caveat"), schedule.get("planning_basis")):
+        for value in (
+            finance.get("planning_basis"),
+            get_path(finance, "provenance.caveat"),
+            schedule.get("planning_basis"),
+        ):
             if value:
                 notes.append(str(value))
         self._append_section(
@@ -782,11 +903,15 @@ class WebRepository:
             status=first_present(finance.get("status"), schedule.get("status")),
             summary=make_sentence(
                 [
-                    f"{format_value(outputs.get('lcoe_usd_per_mwh'))} USD/MWh LCOE" if outputs.get("lcoe_usd_per_mwh") is not None else None,
+                    f"{format_value(outputs.get('lcoe_usd_per_mwh'))} USD/MWh LCOE"
+                    if outputs.get("lcoe_usd_per_mwh") is not None
+                    else None,
                     f"{format_value(schedule.get('total_years_to_commercial_operation'))} years to commercial operation"
                     if schedule.get("total_years_to_commercial_operation") is not None
                     else None,
-                    str(schedule.get("commercial_operation_date")) if schedule.get("commercial_operation_date") else None,
+                    str(schedule.get("commercial_operation_date"))
+                    if schedule.get("commercial_operation_date")
+                    else None,
                 ]
             ),
             notes=dedupe(notes),
@@ -798,7 +923,9 @@ class WebRepository:
             return
 
         assets = as_mapping(visualization.get("assets"))
-        available_views = visualization.get("available_views") if isinstance(visualization.get("available_views"), list) else []
+        available_views = (
+            visualization.get("available_views") if isinstance(visualization.get("available_views"), list) else []
+        )
         metrics = output_metrics(
             ("Geometry description", visualization.get("has_geometry_description"), None, "boolean"),
             ("Render assets", visualization.get("has_render_assets"), None, "boolean"),
@@ -850,7 +977,9 @@ class WebRepository:
     def _summary_artifacts_for_run(self, case_name: str, run_id: str, run_dir: Path) -> list[ArtifactRef]:
         refs: dict[str, ArtifactRef] = {}
         for path in self._viewable_geometry_paths(run_dir):
-            ref = self._artifact_ref(path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=path.name, kind="geometry")
+            ref = self._artifact_ref(
+                path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=path.name, kind="geometry"
+            )
             refs[ref.path] = ref
         return sorted(refs.values(), key=lambda ref: ref.label)
 
@@ -883,12 +1012,16 @@ class WebRepository:
         for name in RAW_ARTIFACTS:
             path = run_dir / name
             if path.exists() and path.is_file():
-                ref = self._artifact_ref(path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=name, kind=artifact_kind(path))
+                ref = self._artifact_ref(
+                    path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=name, kind=artifact_kind(path)
+                )
                 refs[ref.path] = ref
 
         for path in sorted(run_dir.iterdir()):
             if path.is_file() and path.suffix.lower() in TOP_LEVEL_ARTIFACT_EXTENSIONS:
-                ref = self._artifact_ref(path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=path.name, kind=artifact_kind(path))
+                ref = self._artifact_ref(
+                    path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=path.name, kind=artifact_kind(path)
+                )
                 refs[ref.path] = ref
 
         for manifest_name, kind in (("plots_manifest.json", "plot"), ("render_assets.json", "geometry")):
@@ -897,14 +1030,33 @@ class WebRepository:
                 for label, raw_path in manifest.items():
                     path = self._resolve_recorded_path(raw_path, run_dir=run_dir)
                     if path and path.exists() and path.is_file():
-                        ref = self._artifact_ref(path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=str(label), kind=kind)
+                        ref = self._artifact_ref(
+                            path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=str(label), kind=kind
+                        )
                         refs[ref.path] = ref
 
         exports_dir = run_dir / "geometry" / "exports"
         if exports_dir.exists():
             for path in sorted(exports_dir.glob("*")):
-                if path.is_file() and path.suffix.lower() in {".gltf", ".bin", ".obj", ".stl", ".png", ".svg", ".json", ".mp4", ".gif"}:
-                    ref = self._artifact_ref(path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=path.name, kind=artifact_kind(path))
+                if path.is_file() and path.suffix.lower() in {
+                    ".gltf",
+                    ".bin",
+                    ".obj",
+                    ".stl",
+                    ".png",
+                    ".svg",
+                    ".json",
+                    ".mp4",
+                    ".gif",
+                }:
+                    ref = self._artifact_ref(
+                        path,
+                        run_dir=run_dir,
+                        case_name=case_name,
+                        run_id=run_id,
+                        label=path.name,
+                        kind=artifact_kind(path),
+                    )
                     refs[ref.path] = ref
 
         for asset_dir_name in ("plots", "images"):
@@ -913,11 +1065,20 @@ class WebRepository:
                 continue
             for path in sorted(asset_dir.glob("*")):
                 if path.is_file() and path.suffix.lower() in VISUAL_ARTIFACT_EXTENSIONS:
-                    ref = self._artifact_ref(path, run_dir=run_dir, case_name=case_name, run_id=run_id, label=path.name, kind=artifact_kind(path))
+                    ref = self._artifact_ref(
+                        path,
+                        run_dir=run_dir,
+                        case_name=case_name,
+                        run_id=run_id,
+                        label=path.name,
+                        kind=artifact_kind(path),
+                    )
                     refs[ref.path] = ref
         return sorted(refs.values(), key=lambda ref: (ref.kind, ref.label))
 
-    def _artifact_ref(self, path: Path, *, run_dir: Path, case_name: str, run_id: str, label: str, kind: str) -> ArtifactRef:
+    def _artifact_ref(
+        self, path: Path, *, run_dir: Path, case_name: str, run_id: str, label: str, kind: str
+    ) -> ArtifactRef:
         resolved = path.resolve()
         run_root = run_dir.resolve()
         if not resolved.is_relative_to(run_root):
@@ -949,7 +1110,9 @@ class WebRepository:
             return resolved if resolved.is_relative_to(run_dir.resolve()) else None
         return self._artifact_candidate_within_run(self.repo_root / normalized, run_dir)
 
-    def _load_draft_config(self, case_name: str, *, draft_yaml: str | None, patch: Mapping[str, Any]) -> tuple[CaseConfig, str]:
+    def _load_draft_config(
+        self, case_name: str, *, draft_yaml: str | None, patch: Mapping[str, Any]
+    ) -> tuple[CaseConfig, str]:
         safe_case_name = safe_segment(case_name)
         base_path = case_config_path(self.repo_root, safe_case_name)
         if not base_path.exists():
@@ -984,7 +1147,18 @@ class WebRepository:
     def _editable_parameters(self, config: CaseConfig) -> list[EditableParameter]:
         parameters: list[EditableParameter] = []
 
-        def add(path: str, label: str, group: str, kind: str, *, unit: str | None = None, minimum: float | None = None, maximum: float | None = None, step: float | None = None, options: list[str] | None = None) -> None:
+        def add(
+            path: str,
+            label: str,
+            group: str,
+            kind: str,
+            *,
+            unit: str | None = None,
+            minimum: float | None = None,
+            maximum: float | None = None,
+            step: float | None = None,
+            options: list[str] | None = None,
+        ) -> None:
             value = get_path(config.data, path)
             if value is None:
                 return
@@ -1003,13 +1177,53 @@ class WebRepository:
                 )
             )
 
-        add("reactor.design_power_mwth", "Design thermal power", "Reactor", "number", unit="MWth", minimum=0.001, step=1.0)
+        add(
+            "reactor.design_power_mwth",
+            "Design thermal power",
+            "Reactor",
+            "number",
+            unit="MWth",
+            minimum=0.001,
+            step=1.0,
+        )
         add("reactor.hot_leg_temp_c", "Hot leg temperature", "Reactor", "number", unit="C", step=1.0)
         add("reactor.cold_leg_temp_c", "Cold leg temperature", "Reactor", "number", unit="C", step=1.0)
-        add("reactor.primary_cp_kj_kgk", "Primary heat capacity", "Reactor", "number", unit="kJ/kg-K", minimum=0.001, step=0.01)
-        add("reactor.steam_generator_effectiveness", "Steam generator effectiveness", "Balance of plant", "number", minimum=0.0, maximum=1.0, step=0.01)
-        add("reactor.turbine_efficiency", "Turbine efficiency", "Balance of plant", "number", minimum=0.0, maximum=1.0, step=0.01)
-        add("reactor.generator_efficiency", "Generator efficiency", "Balance of plant", "number", minimum=0.0, maximum=1.0, step=0.01)
+        add(
+            "reactor.primary_cp_kj_kgk",
+            "Primary heat capacity",
+            "Reactor",
+            "number",
+            unit="kJ/kg-K",
+            minimum=0.001,
+            step=0.01,
+        )
+        add(
+            "reactor.steam_generator_effectiveness",
+            "Steam generator effectiveness",
+            "Balance of plant",
+            "number",
+            minimum=0.0,
+            maximum=1.0,
+            step=0.01,
+        )
+        add(
+            "reactor.turbine_efficiency",
+            "Turbine efficiency",
+            "Balance of plant",
+            "number",
+            minimum=0.0,
+            maximum=1.0,
+            step=0.01,
+        )
+        add(
+            "reactor.generator_efficiency",
+            "Generator efficiency",
+            "Balance of plant",
+            "number",
+            minimum=0.0,
+            maximum=1.0,
+            step=0.01,
+        )
         add("simulation.particles", "Particles per generation", "Neutronics", "integer", minimum=1, step=1000)
         add("simulation.batches", "Total batches", "Neutronics", "integer", minimum=1, step=1)
         add("simulation.inactive", "Inactive batches", "Neutronics", "integer", minimum=0, step=1)
@@ -1018,14 +1232,75 @@ class WebRepository:
         add("simulation.source.parameters.2", "Source Z", "Neutronics", "number", unit="cm", step=0.1)
         add("transient.duration_s", "Transient duration", "Transient", "number", unit="s", minimum=0.1, step=1.0)
         add("transient.time_step_s", "Transient time step", "Transient", "number", unit="s", minimum=0.001, step=0.1)
-        add("transient.fuel_temperature_feedback_pcm_per_c", "Fuel temperature feedback", "Transient", "number", unit="pcm/C", step=0.1)
-        add("transient.graphite_temperature_feedback_pcm_per_c", "Graphite temperature feedback", "Transient", "number", unit="pcm/C", step=0.1)
-        add("transient.coolant_temperature_feedback_pcm_per_c", "Coolant temperature feedback", "Transient", "number", unit="pcm/C", step=0.1)
-        add("property_uncertainty.density_uncertainty_95_fraction", "Density uncertainty 95%", "Uncertainty", "number", minimum=0.0, maximum=1.0, step=0.01)
-        add("property_uncertainty.cp_uncertainty_95_fraction", "Heat capacity uncertainty 95%", "Uncertainty", "number", minimum=0.0, maximum=1.0, step=0.01)
-        add("property_uncertainty.thermal_conductivity_uncertainty_95_fraction", "Conductivity uncertainty 95%", "Uncertainty", "number", minimum=0.0, maximum=1.0, step=0.01)
-        add("property_uncertainty.dynamic_viscosity_uncertainty_95_fraction", "Viscosity uncertainty 95%", "Uncertainty", "number", minimum=0.0, maximum=1.0, step=0.01)
-        add("property_uncertainty.core_outlet_temperature_uncertainty_95_c", "Outlet temperature uncertainty 95%", "Uncertainty", "number", unit="C", minimum=0.0, step=1.0)
+        add(
+            "transient.fuel_temperature_feedback_pcm_per_c",
+            "Fuel temperature feedback",
+            "Transient",
+            "number",
+            unit="pcm/C",
+            step=0.1,
+        )
+        add(
+            "transient.graphite_temperature_feedback_pcm_per_c",
+            "Graphite temperature feedback",
+            "Transient",
+            "number",
+            unit="pcm/C",
+            step=0.1,
+        )
+        add(
+            "transient.coolant_temperature_feedback_pcm_per_c",
+            "Coolant temperature feedback",
+            "Transient",
+            "number",
+            unit="pcm/C",
+            step=0.1,
+        )
+        add(
+            "property_uncertainty.density_uncertainty_95_fraction",
+            "Density uncertainty 95%",
+            "Uncertainty",
+            "number",
+            minimum=0.0,
+            maximum=1.0,
+            step=0.01,
+        )
+        add(
+            "property_uncertainty.cp_uncertainty_95_fraction",
+            "Heat capacity uncertainty 95%",
+            "Uncertainty",
+            "number",
+            minimum=0.0,
+            maximum=1.0,
+            step=0.01,
+        )
+        add(
+            "property_uncertainty.thermal_conductivity_uncertainty_95_fraction",
+            "Conductivity uncertainty 95%",
+            "Uncertainty",
+            "number",
+            minimum=0.0,
+            maximum=1.0,
+            step=0.01,
+        )
+        add(
+            "property_uncertainty.dynamic_viscosity_uncertainty_95_fraction",
+            "Viscosity uncertainty 95%",
+            "Uncertainty",
+            "number",
+            minimum=0.0,
+            maximum=1.0,
+            step=0.01,
+        )
+        add(
+            "property_uncertainty.core_outlet_temperature_uncertainty_95_c",
+            "Outlet temperature uncertainty 95%",
+            "Uncertainty",
+            "number",
+            unit="C",
+            minimum=0.0,
+            step=1.0,
+        )
 
         for material_name, spec in config.materials.items():
             if not isinstance(spec, Mapping):
@@ -1035,7 +1310,11 @@ class WebRepository:
                 if not isinstance(property_spec, Mapping):
                     continue
                 units = str(property_spec.get("units", "")) or None
-                for field_name, label_suffix in (("value", "value"), ("reference_value", "reference value"), ("slope_per_c", "slope")):
+                for field_name, label_suffix in (
+                    ("value", "value"),
+                    ("reference_value", "reference value"),
+                    ("slope_per_c", "slope"),
+                ):
                     path = f"materials.{material_name}.{property_name}.{field_name}"
                     if get_path(config.data, path) is not None:
                         add(
@@ -1050,11 +1329,19 @@ class WebRepository:
 
     def _docs_for_case(self, config: CaseConfig) -> list[dict[str, str]]:
         docs = self.list_docs()
-        needles = {config.name.lower(), str(config.reactor.get("family", "")).lower(), str(config.reactor.get("mode", "")).lower()}
+        needles = {
+            config.name.lower(),
+            str(config.reactor.get("family", "")).lower(),
+            str(config.reactor.get("mode", "")).lower(),
+        }
         selected: list[dict[str, str]] = []
         for doc in docs:
             haystack = f"{doc.slug} {doc.title}".lower()
-            if any(needle and needle in haystack for needle in needles) or doc.slug in {"readme", "current-model-equations", "thermal-hydraulics-modeling-strategy"}:
+            if any(needle and needle in haystack for needle in needles) or doc.slug in {
+                "readme",
+                "current-model-equations",
+                "thermal-hydraulics-modeling-strategy",
+            }:
                 selected.append({"slug": doc.slug, "title": doc.title})
         return selected
 
@@ -1099,7 +1386,7 @@ def normalize_artifact_path(artifact_path: str) -> Path:
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def read_json(path: Path, fallback: Any) -> Any:
@@ -1205,7 +1492,7 @@ def dedupe(values: Iterable[str]) -> list[str]:
 
 
 def timestamp_from_path(path: Path) -> str:
-    return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat().replace("+00:00", "Z")
 
 
 def infer_status(run_dir: Path, summary: Mapping[str, Any], validation: Mapping[str, Any]) -> str:
@@ -1217,7 +1504,11 @@ def infer_status(run_dir: Path, summary: Mapping[str, Any], validation: Mapping[
 
 
 def infer_status_from_files(run_dir: Path) -> str:
-    if (run_dir / "summary.json").exists() or (run_dir / "validation.json").exists() or (run_dir / "report.md").exists():
+    if (
+        (run_dir / "summary.json").exists()
+        or (run_dir / "validation.json").exists()
+        or (run_dir / "report.md").exists()
+    ):
         return "completed"
     if (run_dir / "build_manifest.json").exists():
         return "built"

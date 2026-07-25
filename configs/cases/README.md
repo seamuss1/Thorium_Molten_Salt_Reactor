@@ -33,7 +33,7 @@ The schema is intentionally plain YAML. Most fields are optional, but these sect
 | `geometry` | Procedural CSG parameters, ring layout, channel layers, special channel families, and optional plant render layout | build, validate, render, 3D viewer |
 | `simulation` | OpenMC mode, batches, particles, source, and tallies | build, run, benchmark, reports |
 | `flow` | Core-flow model, active/stagnant channel families, allocation rule, and reduced-order hydraulic assumptions | steady-state and transient models |
-| `transient` | Reduced-order transient constants, feedback coefficients, precursor groups, and named event scenarios | `transient`, `transient-sweep`, runtime benchmarks |
+| `transient` | Reduced-order transient constants, feedback coefficients, precursor groups, and named event scenarios | `transient`, `transient-sweep` |
 | `economics` | Cost basis and scenario modifiers | `economics` for commercial cases |
 | `project_schedule` | Planning phases, durations, and dependencies | `economics` schedule outputs |
 | `validation_targets` | Acceptance bands mapped to metrics or build-manifest fields | `validate`, `report`, web status |

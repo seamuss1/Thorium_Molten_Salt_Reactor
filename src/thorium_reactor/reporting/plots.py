@@ -768,8 +768,8 @@ def _write_bar_chart_svg(
   <text x="{left}" y="38" font-size="24" font-weight="700" fill="#0f172a">{escape(title)}</text>
   <line x1="{left}" y1="{baseline_y:.2f}" x2="{width - right}" y2="{baseline_y:.2f}" stroke="#475569" stroke-width="1.5" />
   <line x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" stroke="#475569" stroke-width="1.5" />
-  {''.join(grid_lines)}
-  {''.join(bars)}
+  {"".join(grid_lines)}
+  {"".join(bars)}
 </svg>
 """
     output_path.write_text(svg, encoding="utf-8")
@@ -861,8 +861,8 @@ def _write_xy_line_chart_svg(
   <text x="{left}" y="38" font-size="24" font-weight="700" fill="#0f172a">{escape(title)}</text>
   <line x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" stroke="#475569" stroke-width="1.5" />
   <line x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" stroke="#475569" stroke-width="1.5" />
-  {''.join(grid_lines)}
-  {''.join(x_ticks)}
+  {"".join(grid_lines)}
+  {"".join(x_ticks)}
   <polyline fill="none" stroke="#1d4ed8" stroke-width="3" points="{polyline_points}" />
   <text x="{width / 2:.2f}" y="{height - 26}" text-anchor="middle" font-size="13" fill="#334155">{escape(x_label)}</text>
   <text x="24" y="{height / 2:.2f}" text-anchor="middle" font-size="13" fill="#334155" transform="rotate(-90 24 {height / 2:.2f})">{escape(y_label)}</text>
@@ -917,9 +917,15 @@ def _write_uncertainty_band_chart_svg(
     def value_to_x(value: float) -> float:
         return left + ((value - min_x) / x_span) * chart_width
 
-    lower_polyline = " ".join(f"{value_to_x(x_value):.2f},{value_to_y(y_value):.2f}" for x_value, y_value in lower_points)
-    median_polyline = " ".join(f"{value_to_x(x_value):.2f},{value_to_y(y_value):.2f}" for x_value, y_value in median_points)
-    upper_polyline = " ".join(f"{value_to_x(x_value):.2f},{value_to_y(y_value):.2f}" for x_value, y_value in upper_points)
+    lower_polyline = " ".join(
+        f"{value_to_x(x_value):.2f},{value_to_y(y_value):.2f}" for x_value, y_value in lower_points
+    )
+    median_polyline = " ".join(
+        f"{value_to_x(x_value):.2f},{value_to_y(y_value):.2f}" for x_value, y_value in median_points
+    )
+    upper_polyline = " ".join(
+        f"{value_to_x(x_value):.2f},{value_to_y(y_value):.2f}" for x_value, y_value in upper_points
+    )
     band_polygon = " ".join(
         [
             *(f"{value_to_x(x_value):.2f},{value_to_y(y_value):.2f}" for x_value, y_value in upper_points),
@@ -956,8 +962,8 @@ def _write_uncertainty_band_chart_svg(
   <text x="{left}" y="38" font-size="24" font-weight="700" fill="#0f172a">{escape(title)}</text>
   <line x1="{left}" y1="{top}" x2="{left}" y2="{height - bottom}" stroke="#475569" stroke-width="1.5" />
   <line x1="{left}" y1="{height - bottom}" x2="{width - right}" y2="{height - bottom}" stroke="#475569" stroke-width="1.5" />
-  {''.join(grid_lines)}
-  {''.join(x_ticks)}
+  {"".join(grid_lines)}
+  {"".join(x_ticks)}
   <polygon points="{band_polygon}" fill="#93c5fd" fill-opacity="0.42" />
   <polyline fill="none" stroke="#60a5fa" stroke-width="2" points="{lower_polyline}" />
   <polyline fill="none" stroke="#1d4ed8" stroke-width="3" points="{median_polyline}" />
@@ -1007,14 +1013,12 @@ def _write_schedule_gantt_svg(phases: list[dict[str, Any]], output_path: Path, *
         color = colors.get(str(phase.get("category", "project")), "#475569")
         rows.append(
             f'<text x="{left - 14}" y="{y + 22}" text-anchor="end" font-size="12" fill="#334155">'
-            f'{escape(str(phase.get("name", phase.get("id", "phase"))))}</text>'
+            f"{escape(str(phase.get('name', phase.get('id', 'phase'))))}</text>"
         )
-        rows.append(
-            f'<rect x="{x:.2f}" y="{y + 5}" width="{bar_width:.2f}" height="22" rx="4" fill="{color}" />'
-        )
+        rows.append(f'<rect x="{x:.2f}" y="{y + 5}" width="{bar_width:.2f}" height="22" rx="4" fill="{color}" />')
         rows.append(
             f'<text x="{x + bar_width + 8:.2f}" y="{y + 22}" font-size="11" fill="#475569">'
-            f'{escape(str(phase.get("duration_months", "")))} mo</text>'
+            f"{escape(str(phase.get('duration_months', '')))} mo</text>"
         )
 
     year_lines: list[str] = []
@@ -1030,8 +1034,8 @@ def _write_schedule_gantt_svg(phases: list[dict[str, Any]], output_path: Path, *
   <rect width="{width}" height="{height}" fill="#f8fafc" />
   <text x="{left}" y="38" font-size="24" font-weight="700" fill="#0f172a">{escape(title)}</text>
   <text x="{left}" y="58" font-size="12" fill="#475569">Planning-grade schedule from project start to commercial operation</text>
-  {''.join(year_lines)}
-  {''.join(rows)}
+  {"".join(year_lines)}
+  {"".join(rows)}
 </svg>
 """
     output_path.write_text(svg, encoding="utf-8")

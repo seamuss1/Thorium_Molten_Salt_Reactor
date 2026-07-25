@@ -32,7 +32,9 @@ def build_state_store(
         "input_provenance": json.loads(json.dumps(provenance or {})),
         "benchmark": {
             "title": benchmark.get("title") if isinstance(benchmark, dict) else None,
-            "dataset_count": len(benchmark.get("datasets", [])) if isinstance(benchmark, dict) and isinstance(benchmark.get("datasets"), list) else 0,
+            "dataset_count": len(benchmark.get("datasets", []))
+            if isinstance(benchmark, dict) and isinstance(benchmark.get("datasets"), list)
+            else 0,
         },
         "loop_segments": _build_loop_segments(config, summary),
         "fields": {
@@ -76,8 +78,18 @@ def _build_loop_segments(config: Any, summary: dict[str, Any]) -> list[dict[str,
     core_fraction = max(0.0, min(core_fraction, 1.0))
     residence_time_s = float(active_flow.get("representative_residence_time_s", 1.0) or 1.0)
     return [
-        {"id": "core", "label": "Core", "residence_fraction": round(core_fraction, 6), "residence_time_s": round(residence_time_s, 6)},
-        {"id": "external_loop", "label": "External Loop", "residence_fraction": round(1.0 - core_fraction, 6), "residence_time_s": round(max(residence_time_s * 4.0, 1.0), 6)},
+        {
+            "id": "core",
+            "label": "Core",
+            "residence_fraction": round(core_fraction, 6),
+            "residence_time_s": round(residence_time_s, 6),
+        },
+        {
+            "id": "external_loop",
+            "label": "External Loop",
+            "residence_fraction": round(1.0 - core_fraction, 6),
+            "residence_time_s": round(max(residence_time_s * 4.0, 1.0), 6),
+        },
         {"id": "offgas", "label": "Off-Gas", "residence_fraction": 0.0, "residence_time_s": 0.0},
         {"id": "drain_tank", "label": "Drain Tank", "residence_fraction": 0.0, "residence_time_s": 0.0},
     ]

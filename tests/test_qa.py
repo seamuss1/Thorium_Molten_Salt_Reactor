@@ -7,14 +7,13 @@ from thorium_reactor.cli import build_parser, main
 from thorium_reactor.qa import (
     REQUIRED_MATRIX_COLUMNS,
     REQUIRED_NONCONFORMANCE_FIELDS,
-    build_requirements_traceability_index,
     build_requirements_summary,
+    build_requirements_traceability_index,
     load_requirement_records,
     load_traceability_matrix,
     validate_nonconformance_log,
     validate_requirements_traceability,
 )
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -38,9 +37,7 @@ def _make_nonconformance_row(**overrides: str) -> str:
 def _write_nonconformance_log(repo_root: Path, row: str) -> Path:
     docs_dir = repo_root / "docs"
     docs_dir.mkdir()
-    record_format_rows = "\n".join(
-        f"| {field} | Required {field}. |" for field in REQUIRED_NONCONFORMANCE_FIELDS
-    )
+    record_format_rows = "\n".join(f"| {field} | Required {field}. |" for field in REQUIRED_NONCONFORMANCE_FIELDS)
     open_header = "| " + " | ".join(REQUIRED_NONCONFORMANCE_FIELDS) + " |"
     open_separator = "| " + " | ".join("---" for _ in REQUIRED_NONCONFORMANCE_FIELDS) + " |"
     markdown = f"""# Nonconformance And Corrective-Action Log

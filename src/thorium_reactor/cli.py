@@ -4,25 +4,25 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from json import JSONDecodeError
 from pathlib import Path
 
-from thorium_reactor.capabilities import get_case_capabilities
-from thorium_reactor.benchmarking import get_docker_runtime_status, run_solver_backed_benchmark
 from thorium_reactor.benchmark_evidence import (
     materialize_benchmark_evidence,
     merge_benchmark_evidence_into_quality,
 )
+from thorium_reactor.benchmarking import get_docker_runtime_status, run_solver_backed_benchmark
 from thorium_reactor.bundle_inputs import ensure_bundle_inputs, load_bundle_inputs
+from thorium_reactor.capabilities import get_case_capabilities
 from thorium_reactor.config import load_case_config
 from thorium_reactor.economics import run_economics_case
+from thorium_reactor.evidence import build_evidence_status, load_canonical_artifact_status
 from thorium_reactor.geometry.exporters import export_geometry
 from thorium_reactor.integrations import (
     persist_integration_result,
-    run_moose_integration,
     run_moltres_integration,
-    run_named_integration,
+    run_moose_integration,
     run_saltproc_integration,
     run_scale_integration,
     run_thermochimica_integration,
@@ -41,7 +41,6 @@ from thorium_reactor.paths import (
     refresh_bundle_artifact_statuses,
     snapshot_bundle_artifacts,
 )
-from thorium_reactor.evidence import build_evidence_status, load_canonical_artifact_status
 from thorium_reactor.qa import build_requirements_summary
 from thorium_reactor.reporting.plots import generate_summary_plots, generate_validation_plot, load_plot_manifest
 from thorium_reactor.reporting.reports import build_presentation_qa, generate_report
@@ -49,14 +48,12 @@ from thorium_reactor.sidecar_schemas import validate_bundle_sidecars
 from thorium_reactor.transient_sweep import DEFAULT_TRANSIENT_SWEEP_SAMPLES
 from thorium_reactor.uncertainty import DEFAULT_UNCERTAINTY_SWEEP_SAMPLES
 
-
 INTEGRATION_COMMANDS = ("moose", "scale", "thermochimica", "saltproc", "moltres")
 NATIVE_ADVANCED_COMMANDS = ("transport", "deplete")
 UNCERTAINTY_COMMANDS = ("uncertainty-sweep",)
 EXTEND_EXISTING_RUN_COMMANDS = (
     "transient",
     "transient-sweep",
-    "runtime-benchmark",
     "economics",
     *UNCERTAINTY_COMMANDS,
     *NATIVE_ADVANCED_COMMANDS,
@@ -83,7 +80,6 @@ def build_parser() -> argparse.ArgumentParser:
         "transient",
         "transient-sweep",
         *UNCERTAINTY_COMMANDS,
-        "runtime-benchmark",
         *NATIVE_ADVANCED_COMMANDS,
         "economics",
         *INTEGRATION_COMMANDS,
@@ -106,8 +102,15 @@ def build_parser() -> argparse.ArgumentParser:
             )
             command.add_argument("--seed", type=int, default=42, help="Random seed for the ensemble perturbations.")
             command.add_argument("--prefer-gpu", action="store_true", help="Deprecated alias for --backend auto.")
-            command.add_argument("--backend", default="auto", choices=["auto", "python", "numpy", "torch-cpu", "torch-xpu"], help="Array backend for transient ensemble integration.")
-            command.add_argument("--dtype", default="float32", choices=["float32", "float64"], help="Array dtype for vector backends.")
+            command.add_argument(
+                "--backend",
+                default="auto",
+                choices=["auto", "python", "numpy", "torch-cpu", "torch-xpu"],
+                help="Array backend for transient ensemble integration.",
+            )
+            command.add_argument(
+                "--dtype", default="float32", choices=["float32", "float64"], help="Array dtype for vector backends."
+            )
         if command_name == "uncertainty-sweep":
             command.add_argument(
                 "--samples",
@@ -129,13 +132,6 @@ def build_parser() -> argparse.ArgumentParser:
                 action="store_true",
                 help="Run the full uncertainty sweep inside the Docker Compose openmc service.",
             )
-        if command_name == "runtime-benchmark":
-            command.add_argument("--scenario", default=None, help="Named transient scenario from the case config.")
-            command.add_argument("--samples", type=int, default=1048576, help="Number of ensemble trajectories per backend.")
-            command.add_argument("--seed", type=int, default=42, help="Random seed for identical backend ensembles.")
-            command.add_argument("--backends", default="python,numpy,torch-xpu", help="Comma-separated backends to benchmark.")
-            command.add_argument("--dtype", default="float32", choices=["float32", "float64"], help="Array dtype for vector backends.")
-            command.add_argument("--fail-on-gpu-fallback", action="store_true", help="Fail if a GPU backend reports PyTorch XPU fallback enabled.")
         if command_name == "economics":
             command.add_argument("--scenario", default=None, help="Named economics scenario from the case config.")
             command.add_argument("--project-start", default=None, help="Project start date in YYYY-MM-DD format.")
@@ -145,7 +141,11 @@ def build_parser() -> argparse.ArgumentParser:
                 help="Calculate commercial economics even when the case is not marked reactor.mode=commercial_grid.",
             )
         if command_name in INTEGRATION_COMMANDS:
-            command.add_argument("--run-external", action="store_true", help="Attempt to execute the external code after exporting the input deck.")
+            command.add_argument(
+                "--run-external",
+                action="store_true",
+                help="Attempt to execute the external code after exporting the input deck.",
+            )
         if command_name == "benchmark":
             command.add_argument(
                 "--docker-openmc",
@@ -200,12 +200,28 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_case_config(case_config_path(repo_root, args.case))
 
-    if args.command in {"build", "run", "benchmark", "transient", "transient-sweep", "runtime-benchmark", "economics", *UNCERTAINTY_COMMANDS, *NATIVE_ADVANCED_COMMANDS, *INTEGRATION_COMMANDS}:
-        allow_existing = bool(args.reuse_run_id or (args.run_id is not None and args.command in EXTEND_EXISTING_RUN_COMMANDS))
+    if args.command in {
+        "build",
+        "run",
+        "benchmark",
+        "transient",
+        "transient-sweep",
+        "economics",
+        *UNCERTAINTY_COMMANDS,
+        *NATIVE_ADVANCED_COMMANDS,
+        *INTEGRATION_COMMANDS,
+    }:
+        allow_existing = bool(
+            args.reuse_run_id or (args.run_id is not None and args.command in EXTEND_EXISTING_RUN_COMMANDS)
+        )
         bundle = _load_or_create_bundle(repo_root, config.name, args.run_id, allow_existing=allow_existing)
         inputs = ensure_bundle_inputs(repo_root, bundle, config)
     else:
-        bundle = latest_result_bundle(repo_root, config.name) if args.run_id is None else _load_existing_bundle(repo_root, config.name, args.run_id)
+        bundle = (
+            latest_result_bundle(repo_root, config.name)
+            if args.run_id is None
+            else _load_existing_bundle(repo_root, config.name, args.run_id)
+        )
         inputs = load_bundle_inputs(repo_root, bundle, config)
 
     config = inputs.config
@@ -229,7 +245,15 @@ def main(argv: list[str] | None = None) -> int:
             artifact_status = refresh_bundle_artifact_statuses(bundle, summary={"neutronics": {"status": "dry-run"}})
             build_manifest["artifact_status"] = artifact_status
             bundle.write_json("build_manifest.json", build_manifest)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=build_manifest)
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=build_manifest,
+            )
             print(bundle.root)
             return 0
 
@@ -246,7 +270,15 @@ def main(argv: list[str] | None = None) -> int:
             print(summary["neutronics"]["status"])
             if summary["neutronics"].get("message"):
                 print(summary["neutronics"]["message"])
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+            )
             return 0
 
         if args.command == "transient":
@@ -274,7 +306,15 @@ def main(argv: list[str] | None = None) -> int:
             bundle.write_json("summary.json", summary)
             generate_summary_plots(bundle, summary)
             refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+            )
             print(bundle.root)
             print(transient["metrics"]["peak_power_fraction"])
             return 0
@@ -309,7 +349,15 @@ def main(argv: list[str] | None = None) -> int:
             bundle.write_json("summary.json", summary)
             generate_summary_plots(bundle, summary)
             refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+            )
             print(bundle.root)
             print(transient_sweep["backend"])
             print(transient_sweep["metrics"]["peak_power_fraction_p95"])
@@ -382,43 +430,18 @@ def main(argv: list[str] | None = None) -> int:
                 provenance=provenance,
             )
             bundle.write_text("report.md", report)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+                repo_root=repo_root,
+            )
             print(bundle.root)
             print(summary.get("uncertainty_sweep", {}).get("coverage_status", "missing"))
-            return 0
-
-        if args.command == "runtime-benchmark":
-            from thorium_reactor.runtime_benchmark import parse_backend_list, run_runtime_benchmark_case
-
-            summary_path = bundle.root / "summary.json"
-            if summary_path.exists():
-                summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            else:
-                summary = run_case(
-                    config,
-                    bundle,
-                    benchmark=benchmark,
-                    solver_enabled=False,
-                    provenance=provenance,
-                    repo_root=repo_root,
-                )
-            runtime_benchmark = run_runtime_benchmark_case(
-                config,
-                bundle,
-                summary,
-                scenario_name=args.scenario,
-                samples=args.samples,
-                seed=args.seed,
-                backends=parse_backend_list(args.backends),
-                dtype=args.dtype,
-                fail_on_gpu_fallback=args.fail_on_gpu_fallback,
-                provenance=provenance,
-            )
-            refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
-            print(bundle.root)
-            print(runtime_benchmark["recommendation"].get("backend"))
-            print(runtime_benchmark["recommendation"].get("speedup_vs_reference"))
             return 0
 
         if args.command == "transport":
@@ -439,7 +462,15 @@ def main(argv: list[str] | None = None) -> int:
             transport = run_transport_case(config, bundle, summary)
             generate_summary_plots(bundle, summary)
             refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+            )
             print(bundle.root)
             print(transport["status"])
             print(transport["conservation_residual"])
@@ -463,7 +494,15 @@ def main(argv: list[str] | None = None) -> int:
             depletion = run_depletion_case(config, bundle, summary)
             generate_summary_plots(bundle, summary)
             refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+            )
             print(bundle.root)
             print(depletion["status"])
             print(depletion["atom_balance_residual"])
@@ -503,7 +542,16 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 summary["artifact_status"] = refresh_bundle_artifact_statuses(bundle, summary=summary)
                 bundle.write_json("summary.json", summary)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+                repo_root=repo_root,
+            )
             print(bundle.root)
             print(plan["status"])
             if plan["finance"].get("status") == "completed":
@@ -524,7 +572,16 @@ def main(argv: list[str] | None = None) -> int:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             persist_integration_result(bundle, summary, "moose", result)
             refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+                status=result.get("status", "completed"),
+            )
             print(bundle.root)
             print(result["status"])
             return 0
@@ -542,7 +599,16 @@ def main(argv: list[str] | None = None) -> int:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             persist_integration_result(bundle, summary, "scale", result)
             refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+                status=result.get("status", "completed"),
+            )
             print(bundle.root)
             print(result["status"])
             return 0
@@ -560,7 +626,16 @@ def main(argv: list[str] | None = None) -> int:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             persist_integration_result(bundle, summary, "thermochimica", result)
             refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+                status=result.get("status", "completed"),
+            )
             print(bundle.root)
             print(result["status"])
             return 0
@@ -578,7 +653,16 @@ def main(argv: list[str] | None = None) -> int:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             persist_integration_result(bundle, summary, "saltproc", result)
             refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+                status=result.get("status", "completed"),
+            )
             print(bundle.root)
             print(result["status"])
             return 0
@@ -596,7 +680,16 @@ def main(argv: list[str] | None = None) -> int:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             persist_integration_result(bundle, summary, "moltres", result)
             refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status=result.get("status", "completed"))
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+                status=result.get("status", "completed"),
+            )
             print(bundle.root)
             print(result["status"])
             return 0
@@ -606,7 +699,16 @@ def main(argv: list[str] | None = None) -> int:
             summary_path = bundle.root / "summary.json"
             summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else {}
             refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, status="completed" if result.get("passed") else "failed")
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+                status="completed" if result.get("passed") else "failed",
+            )
             print(result["passed"])
             return 0
 
@@ -650,7 +752,15 @@ def main(argv: list[str] | None = None) -> int:
                 bundle.write_json("build_manifest.json", build_manifest)
             else:
                 refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary)
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+            )
             print(json.dumps(assets, indent=2))
             return 0
 
@@ -709,7 +819,16 @@ def main(argv: list[str] | None = None) -> int:
                 provenance=provenance,
             )
             report_path = bundle.write_text("report.md", report)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+                repo_root=repo_root,
+            )
             print(report_path)
             return 0
 
@@ -787,7 +906,16 @@ def main(argv: list[str] | None = None) -> int:
                 provenance=provenance,
             )
             bundle.write_text("report.md", report)
-            _finish_cli_stage(bundle, args.command, stage_command, stage_started_utc, stage_artifacts_before, provenance, summary=summary, repo_root=repo_root)
+            _finish_cli_stage(
+                bundle,
+                args.command,
+                stage_command,
+                stage_started_utc,
+                stage_artifacts_before,
+                provenance,
+                summary=summary,
+                repo_root=repo_root,
+            )
             print(bundle.root)
             return 0
 
@@ -803,7 +931,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except SystemExit:
         raise
-    except Exception as exc:  # noqa: BLE001 - record a failed stage then re-raise.
+    except Exception as exc:
         try:
             _finish_cli_stage(
                 bundle,
@@ -816,7 +944,7 @@ def main(argv: list[str] | None = None) -> int:
                 repo_root=repo_root,
                 message=str(exc),
             )
-        except Exception:  # noqa: BLE001 - never mask the original failure.
+        except Exception:
             pass
         raise
 
@@ -924,6 +1052,7 @@ def _replace_validation_benchmark_quality_checks(
     validation["passed"] = all(check.get("status") == "pass" for check in checks)
     bundle.write_json("validation.json", validation)
 
+
 def _verify_bundle_evidence_contract(bundle: ResultBundle) -> list[str]:
     """Return trust-contract failures for a generated bundle (empty means OK).
 
@@ -961,7 +1090,9 @@ def _verify_bundle_evidence_contract(bundle: ResultBundle) -> list[str]:
     return failures
 
 
-def _load_or_create_bundle(repo_root: Path, case_name: str, run_id: str | None, *, allow_existing: bool = False) -> ResultBundle:
+def _load_or_create_bundle(
+    repo_root: Path, case_name: str, run_id: str | None, *, allow_existing: bool = False
+) -> ResultBundle:
     if run_id is None:
         return create_result_bundle(repo_root, case_name)
     if allow_existing:
@@ -1088,7 +1219,7 @@ def _method_tier_from_summary(summary: dict[str, object]) -> str:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 if __name__ == "__main__":

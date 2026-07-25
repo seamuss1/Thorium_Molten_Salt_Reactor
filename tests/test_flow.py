@@ -5,17 +5,21 @@ import pytest
 
 from thorium_reactor.bop.steady_state import BOPInputs, run_steady_state_bop
 from thorium_reactor.config import load_case_config
-from thorium_reactor.flow.properties import average_primary_temperature_c, evaluate_fluid_properties, primary_coolant_cp_kj_kgk, property_reference_temperature_c
 from thorium_reactor.flow.primary_system import (
-    _darcy_friction_factor,
     _build_pump_demand_summary,
+    _darcy_friction_factor,
     _internal_nusselt_number,
     _log_mean_temperature_difference,
     build_primary_system_summary,
 )
+from thorium_reactor.flow.properties import (
+    average_primary_temperature_c,
+    evaluate_fluid_properties,
+    primary_coolant_cp_kj_kgk,
+    property_reference_temperature_c,
+)
 from thorium_reactor.flow.reduced_order import build_reduced_order_flow_summary
 from thorium_reactor.neutronics.workflows import build_case
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -74,13 +78,14 @@ def test_reduced_order_flow_uses_only_plenum_connected_salt_channels() -> None:
     assert built.manifest["flow_summary"]["interface_metrics"]["reflector_backed_salt_volume_cm3"] > 0.0
 
     variant_summary = {item["variant"]: item for item in reduced_order["variant_summary"]}
-    assert variant_summary["fuel"]["allocated_mass_flow_kg_s"] > variant_summary["control_guides"]["allocated_mass_flow_kg_s"]
+    assert (
+        variant_summary["fuel"]["allocated_mass_flow_kg_s"]
+        > variant_summary["control_guides"]["allocated_mass_flow_kg_s"]
+    )
 
     center_channel = next(channel for channel in reduced_order["active_channels"] if channel["name"] == "fuel_0.00_0")
     control_channel = next(
-        channel
-        for channel in reduced_order["active_channels"]
-        if channel["name"] == "control_guides_18.06_0"
+        channel for channel in reduced_order["active_channels"] if channel["name"] == "control_guides_18.06_0"
     )
     assert center_channel["allocated_mass_flow_kg_s"] > control_channel["allocated_mass_flow_kg_s"]
     assert center_channel["velocity_m_s"] > 12.0
@@ -289,11 +294,14 @@ def test_average_primary_temperature_uses_leg_temperatures() -> None:
 
 
 def test_modeled_property_reference_temperature_can_be_required() -> None:
-    assert property_reference_temperature_c(
-        {"property_reference_temperature_c": 600.0},
-        {"model": "linear", "reference_temperature_c": 580.0},
-        require_declared=True,
-    ) == 580.0
+    assert (
+        property_reference_temperature_c(
+            {"property_reference_temperature_c": 600.0},
+            {"model": "linear", "reference_temperature_c": 580.0},
+            require_declared=True,
+        )
+        == 580.0
+    )
 
 
 def test_pressure_budget_includes_buoyancy_assist() -> None:
@@ -446,9 +454,7 @@ def test_branch_flow_split_favors_lower_resistance_path() -> None:
         {"id": "mix_to_core", "from": "mix_header", "to": "core", "leg": "cold_leg"},
         {"id": "core_to_hx", "from": "core", "to": "heat_exchanger", "leg": "hot_leg"},
     ]
-    primary_loop["pipes"] = [
-        pipe for pipe in primary_loop["pipes"] if pipe["id"] in {"hx_to_pump", "core_to_hx"}
-    ] + [
+    primary_loop["pipes"] = [pipe for pipe in primary_loop["pipes"] if pipe["id"] in {"hx_to_pump", "core_to_hx"}] + [
         {
             "id": "pump_to_core_a",
             "radius_cm": 2.1,
@@ -502,7 +508,10 @@ def test_branch_flow_split_favors_lower_resistance_path() -> None:
     thermal_segments = {segment["name"]: segment for segment in primary_system["thermal_profile"]["segments"]}
 
     assert branch_summary["pump_to_core_a"]["flow_fraction"] > branch_summary["pump_to_core_b"]["flow_fraction"]
-    assert branch_summary["pump_to_core_a"]["volumetric_flow_m3_s"] > branch_summary["pump_to_core_b"]["volumetric_flow_m3_s"]
+    assert (
+        branch_summary["pump_to_core_a"]["volumetric_flow_m3_s"]
+        > branch_summary["pump_to_core_b"]["volumetric_flow_m3_s"]
+    )
     assert branch_summary["pump_to_core_a"]["path_pressure_drop_kpa"] == pytest.approx(
         branch_summary["pump_to_core_b"]["path_pressure_drop_kpa"],
         rel=1.0e-3,
@@ -519,12 +528,22 @@ def test_heat_exchanger_summary_uses_branch_resolved_hot_leg_inlets() -> None:
     primary_loop["connections"] = [
         {"id": "hx_to_pump", "from": "heat_exchanger", "to": "pump", "leg": "cold_leg"},
         {"id": "pump_to_core", "from": "pump", "to": "core", "leg": "cold_leg"},
-        {"id": "core_to_hx_a", "from": "core", "to": "heat_exchanger", "leg": "hot_leg", "heat_exchanger_area_fraction": 0.7},
-        {"id": "core_to_hx_b", "from": "core", "to": "heat_exchanger", "leg": "hot_leg", "heat_exchanger_area_fraction": 0.3},
+        {
+            "id": "core_to_hx_a",
+            "from": "core",
+            "to": "heat_exchanger",
+            "leg": "hot_leg",
+            "heat_exchanger_area_fraction": 0.7,
+        },
+        {
+            "id": "core_to_hx_b",
+            "from": "core",
+            "to": "heat_exchanger",
+            "leg": "hot_leg",
+            "heat_exchanger_area_fraction": 0.3,
+        },
     ]
-    primary_loop["pipes"] = [
-        pipe for pipe in primary_loop["pipes"] if pipe["id"] == "hx_to_pump"
-    ] + [
+    primary_loop["pipes"] = [pipe for pipe in primary_loop["pipes"] if pipe["id"] == "hx_to_pump"] + [
         {
             "id": "pump_to_core",
             "radius_cm": 2.0,

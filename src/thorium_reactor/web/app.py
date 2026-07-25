@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -53,33 +53,43 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     ) -> AccessUser:
         return controller.require_admin(user)
 
+    # Every /api route requires a verified identity. The controller resolves
+    # to the local dev identity when THORIUM_REACTOR_ACCESS_REQUIRED is off,
+    # so this is transparent for local use and fails closed in a deployment.
+    # Adding a route to this router opts it into auth by default; anything
+    # deliberately public has to be registered on `app` below, in the open.
+    api = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
+
+    # Public: liveness must answer before an identity exists. Because it is
+    # public it must not disclose anything about the host -- it previously
+    # returned the absolute repo path to any unauthenticated caller.
     @app.get("/api/health", response_model=HealthResponse)
     def health() -> HealthResponse:
-        return HealthResponse(status="ok", repo_root=str(repository.repo_root))
+        return HealthResponse(status="ok")
 
-    @app.get("/api/me", response_model=AuthSession)
+    @api.get("/me", response_model=AuthSession)
     def get_me(
         user: AccessUser = Depends(current_user),
         controller: AccessController = Depends(access),
     ) -> AuthSession:
         return controller.session_for(user)
 
-    @app.get("/api/cases", response_model=list[CaseSummary])
+    @api.get("/cases", response_model=list[CaseSummary])
     def list_cases() -> list[CaseSummary]:
         return repository.list_cases()
 
-    @app.get("/api/cases/{case_name}", response_model=CaseDetail)
+    @api.get("/cases/{case_name}", response_model=CaseDetail)
     def get_case(case_name: str) -> CaseDetail:
         try:
             return repository.get_case(case_name)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @app.post("/api/cases/{case_name}/validate-draft", response_model=DraftValidationResponse)
+    @api.post("/cases/{case_name}/validate-draft", response_model=DraftValidationResponse)
     def validate_draft(case_name: str, request: DraftValidationRequest) -> DraftValidationResponse:
         return repository.validate_draft(case_name, draft_yaml=request.draft_yaml, patch=request.patch)
 
-    @app.post("/api/runs", response_model=RunRecord, status_code=202)
+    @api.post("/runs", response_model=RunRecord, status_code=202)
     def create_run(
         draft: SimulationDraft,
         user: AccessUser = Depends(current_user),
@@ -88,16 +98,16 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         claimed = controller.claim_run_start(user)
         try:
             return jobs.submit(draft)
-        except Exception as exc:  # noqa: BLE001 - converted into browser-safe feedback.
+        except Exception as exc:
             if claimed is not None:
                 controller.release_run_start(user)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.get("/api/runs", response_model=list[RunRecord])
+    @api.get("/runs", response_model=list[RunRecord])
     def list_runs() -> list[RunRecord]:
         return repository.list_runs()
 
-    @app.get("/api/runs/{case_name}/{run_id}", response_model=RunRecord)
+    @api.get("/runs/{case_name}/{run_id}", response_model=RunRecord)
     def get_run(case_name: str, run_id: str) -> RunRecord:
         try:
             return repository.get_run(case_name, run_id)
@@ -106,7 +116,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.get("/api/runs/{case_name}/{run_id}/events")
+    @api.get("/runs/{case_name}/{run_id}/events")
     async def stream_events(case_name: str, run_id: str) -> StreamingResponse:
         async def event_stream():
             offset = 0
@@ -115,7 +125,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
                     events, offset = repository.read_events_from(case_name, run_id, offset)
                     status = repository.run_status(case_name, run_id)
                 except FileNotFoundError:
-                    yield "event: error\ndata: {\"message\":\"Run not found\"}\n\n"
+                    yield 'event: error\ndata: {"message":"Run not found"}\n\n'
                     return
                 for event in events:
                     yield f"event: run\ndata: {json.dumps(model_to_dict(event))}\n\n"
@@ -125,7 +135,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
-    @app.get("/api/runs/{case_name}/{run_id}/artifacts/{artifact_path:path}")
+    @api.get("/runs/{case_name}/{run_id}/artifacts/{artifact_path:path}")
     def get_artifact(case_name: str, run_id: str, artifact_path: str) -> FileResponse:
         try:
             path = repository.resolve_artifact_path(case_name, run_id, artifact_path)
@@ -135,31 +145,34 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return FileResponse(path)
 
-    @app.get("/api/docs", response_model=list[DocSummary])
+    @api.get("/docs", response_model=list[DocSummary])
     def list_docs() -> list[DocSummary]:
         return repository.list_docs()
 
-    @app.get("/api/docs/{slug}", response_model=DocRecord)
+    @api.get("/docs/{slug}", response_model=DocRecord)
     def get_doc(slug: str) -> DocRecord:
         try:
             return repository.get_doc(slug)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @app.get("/api/admin/rate-limits", response_model=list[RateLimitRecord])
+    @api.get("/admin/rate-limits", response_model=list[RateLimitRecord])
     def list_rate_limits(
         _admin: AccessUser = Depends(current_admin),
         controller: AccessController = Depends(access),
     ) -> list[RateLimitRecord]:
         return controller.store.list_records()
 
-    @app.post("/api/admin/rate-limits/{email:path}/reset", response_model=RateLimitRecord)
+    @api.post("/admin/rate-limits/{email:path}/reset", response_model=RateLimitRecord)
     def reset_rate_limit(
         email: str,
         admin: AccessUser = Depends(current_admin),
         controller: AccessController = Depends(access),
     ) -> RateLimitRecord:
         return controller.store.reset(email, reset_by=admin.email)
+
+    # Registered before the SPA catch-all below so /api/* always wins.
+    app.include_router(api)
 
     dist_dir = repository.repo_root / "web" / "ui" / "dist"
     if dist_dir.exists():

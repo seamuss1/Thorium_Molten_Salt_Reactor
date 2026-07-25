@@ -3,15 +3,15 @@ from __future__ import annotations
 import json
 import math
 from calendar import monthrange
+from collections.abc import Mapping
 from datetime import date
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import yaml
 
 from thorium_reactor.capabilities import COMMERCIAL_PLANNING, CapabilityConfigurationError, validate_case_capability
 from thorium_reactor.config import CaseConfig
-
 
 DEFAULT_PROJECT_START = "2026-05-02"
 
@@ -81,12 +81,8 @@ def build_commercial_plan(
             cost_basis["overnight_capital_cost_usd_per_kwe"],
         )
     )
-    fixed_om_usd_per_kw_year = float(
-        scenario.get("fixed_om_usd_per_kw_year", cost_basis["fixed_om_usd_per_kw_year"])
-    )
-    variable_om_usd_per_mwh = float(
-        scenario.get("variable_om_usd_per_mwh", cost_basis["variable_om_usd_per_mwh"])
-    )
+    fixed_om_usd_per_kw_year = float(scenario.get("fixed_om_usd_per_kw_year", cost_basis["fixed_om_usd_per_kw_year"]))
+    variable_om_usd_per_mwh = float(scenario.get("variable_om_usd_per_mwh", cost_basis["variable_om_usd_per_mwh"]))
     fuel_usd_per_mwh = float(scenario.get("fuel_usd_per_mwh", cost_basis["fuel_usd_per_mwh"]))
     source_construction_months = int(cost_basis["construction_months"])
     construction_duration_multiplier = float(scenario.get("construction_duration_multiplier", 1.0))
@@ -267,7 +263,11 @@ def build_schedule(
     construction_phase = next(
         (phase for phase in phases if phase["id"] == "nuclear_construction"),
         next(
-            (phase for phase in phases if phase["category"] == "construction" and phase["duration_months"] == construction_months),
+            (
+                phase
+                for phase in phases
+                if phase["category"] == "construction" and phase["duration_months"] == construction_months
+            ),
             phases[-1],
         ),
     )
@@ -298,8 +298,7 @@ def build_construction_cash_flow(
         raise ValueError("Construction months must be positive.")
     monthly_rate = (1.0 + annual_discount_rate) ** (1.0 / 12.0) - 1.0
     weights = [
-        max(math.sin(math.pi * (index + 0.5) / construction_months), 0.01)
-        for index in range(construction_months)
+        max(math.sin(math.pi * (index + 0.5) / construction_months), 0.01) for index in range(construction_months)
     ]
     total_weight = sum(weights)
     rows: list[dict[str, Any]] = []

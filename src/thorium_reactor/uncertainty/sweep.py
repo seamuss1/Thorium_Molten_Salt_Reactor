@@ -5,10 +5,11 @@ import json
 import math
 import subprocess
 import time
+from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any
 
 import numpy as np
 import yaml
@@ -18,7 +19,6 @@ from scipy.stats import qmc
 from thorium_reactor.benchmarking import PCM_PER_DELTA_K, build_benchmark_residuals
 from thorium_reactor.config import CaseConfig, ConfigError, load_case_config, load_yaml
 from thorium_reactor.paths import ResultBundle, safe_path_segment
-
 
 DEFAULT_UNCERTAINTY_SWEEP_MODEL = "solver_backed_geometry_material_uq_v1"
 DEFAULT_UNCERTAINTY_SWEEP_SAMPLES = 32
@@ -224,8 +224,7 @@ def build_uncertainty_samples(
     z_values = stats.norm.ppf(unit_samples)
     for row_index, row in enumerate(z_values, start=1):
         standardized = {
-            parameter.id: float(np.clip(row[column], -3.0, 3.0))
-            for column, parameter in enumerate(parameter_list)
+            parameter.id: float(np.clip(row[column], -3.0, 3.0)) for column, parameter in enumerate(parameter_list)
         }
         definitions.append(
             _sample_definition(
@@ -293,10 +292,15 @@ def build_uncertainty_budget(
         interval = {"p02_5": None, "p50": None, "p97_5": None}
     contributors = _dominant_contributors(parameter_list, sample_definitions, result_by_id)
     coverage = _coverage_summary(parameter_list, completed, failed)
-    complete = not failed and bool(completed) and result_by_id.get("nominal", {}).get("status") in {
-        "completed",
-        "skipped_existing",
-    }
+    complete = (
+        not failed
+        and bool(completed)
+        and result_by_id.get("nominal", {}).get("status")
+        in {
+            "completed",
+            "skipped_existing",
+        }
+    )
     coverage_status = "quantified" if complete and coverage["all_required_source_backed"] else "partial"
     if coverage["assumption_backed_enabled_count"] and not coverage["source_backed_enabled_count"]:
         coverage_status = "assumption_backed"
@@ -313,7 +317,9 @@ def build_uncertainty_budget(
         "coverage": {
             **coverage,
             "status": coverage_status,
-            "required_for_benchmark_ready": [parameter.id for parameter in parameter_list if parameter.required_for_benchmark_ready],
+            "required_for_benchmark_ready": [
+                parameter.id for parameter in parameter_list if parameter.required_for_benchmark_ready
+            ],
         },
         "target": target,
         "observables": {
@@ -631,7 +637,9 @@ def _build_root_summary(
         "uncertainty_keff_combined_uncertainty_pcm": keff.get("combined_uncertainty_pcm"),
         "uncertainty_keff_input_interval_width_pcm": keff.get("input_interval_width_pcm"),
         "uncertainty_source_backed_parameter_count": budget.get("coverage", {}).get("source_backed_enabled_count"),
-        "uncertainty_assumption_backed_parameter_count": budget.get("coverage", {}).get("assumption_backed_enabled_count"),
+        "uncertainty_assumption_backed_parameter_count": budget.get("coverage", {}).get(
+            "assumption_backed_enabled_count"
+        ),
     }
     summary["metrics"].update({key: value for key, value in metric_updates.items() if value is not None})
     residuals = build_benchmark_residuals(config, summary, benchmark)
@@ -681,7 +689,9 @@ def _update_benchmark_quality(summary: dict[str, Any], budget: dict[str, Any]) -
             seen = True
             break
     if not seen:
-        gates.append({"id": "uncertainty_propagated", "status": "pass" if pass_uncertainty else "fail", "message": message})
+        gates.append(
+            {"id": "uncertainty_propagated", "status": "pass" if pass_uncertainty else "fail", "message": message}
+        )
     passed = sum(1 for gate in gates if gate.get("status") == "pass")
     failed = [gate for gate in gates if gate.get("status") != "pass"]
     quality["passed_gate_count"] = passed
@@ -706,7 +716,9 @@ def _sample_result(
     metrics = summary.get("metrics", {}) if isinstance(summary, dict) else {}
     neutronics = summary.get("neutronics", {}) if isinstance(summary, dict) else {}
     keff = _coerce_float(metrics.get("keff"))
-    resolved_status = status or ("completed" if keff is not None and neutronics.get("status") == "completed" else "failed")
+    resolved_status = status or (
+        "completed" if keff is not None and neutronics.get("status") == "completed" else "failed"
+    )
     result = {
         "index": sample["index"],
         "sample_id": sample["id"],
@@ -720,7 +732,9 @@ def _sample_result(
         "standardized": sample["standardized"],
     }
     if resolved_status == "failed":
-        result["error"] = neutronics.get("error") or neutronics.get("message") or "Sample did not produce solver-backed keff."
+        result["error"] = (
+            neutronics.get("error") or neutronics.get("message") or "Sample did not produce solver-backed keff."
+        )
     return result
 
 
@@ -819,10 +833,7 @@ def _dominant_contributors(
         if len(rows) == len(y_values) and len(rows) > len(parameters):
             centered_y = (y_values - float(np.mean(y_values))) * PCM_PER_DELTA_K
             coefficients, *_ = np.linalg.lstsq(rows, centered_y, rcond=None)
-            regression_scores = {
-                parameter.id: float(coefficients[index])
-                for index, parameter in enumerate(parameters)
-            }
+            regression_scores = {parameter.id: float(coefficients[index]) for index, parameter in enumerate(parameters)}
 
     contributors = []
     for parameter in parameters:
@@ -984,7 +995,11 @@ def _scale_radial_layer_thickness(data: dict[str, Any], parameter: UncertaintyPa
         raise ConfigError(f"Parameter {parameter.id} layers_path must resolve to a list.")
     layer_name = str(parameter.metadata.get("layer", ""))
     target_index = next(
-        (index for index, layer in enumerate(layers) if isinstance(layer, dict) and str(layer.get("name")) == layer_name),
+        (
+            index
+            for index, layer in enumerate(layers)
+            if isinstance(layer, dict) and str(layer.get("name")) == layer_name
+        ),
         None,
     )
     if target_index is None:
@@ -1140,6 +1155,6 @@ def _tornado_svg(contributors: list[dict[str, Any]]) -> str:
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <rect width="{width}" height="{height}" fill="#ffffff"/>
   <text x="24" y="28" font-size="16" font-family="Arial">Dominant geometry/material uncertainty contributors</text>
-  {''.join(rows)}
+  {"".join(rows)}
 </svg>
 """

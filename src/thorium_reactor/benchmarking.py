@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
+import math
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
 from thorium_reactor.config import CaseConfig
-
 
 CONFIDENCE_LEVELS = ("high", "medium", "low")
 DATASET_STATUSES = {"planned", "numerical_validation", "context_only", "literature_backed"}
@@ -39,17 +38,17 @@ def assess_benchmark_traceability(
     reactor, validation_targets = _extract_config_parts(config)
 
     evidence = [_normalize_evidence(item, index) for index, item in enumerate(benchmark.get("evidence", []), start=1)]
-    assumptions = [_normalize_assumption(item, index) for index, item in enumerate(benchmark.get("assumptions", []), start=1)]
+    assumptions = [
+        _normalize_assumption(item, index) for index, item in enumerate(benchmark.get("assumptions", []), start=1)
+    ]
     targets = _collect_benchmark_targets(benchmark)
     datasets = [_normalize_dataset(item, index) for index, item in enumerate(benchmark.get("datasets", []), start=1)]
 
     evidence_complete_count = sum(1 for item in evidence if item["complete"])
     assumption_structured_count = sum(1 for item in assumptions if item["structured"])
     assumption_linked_count = sum(1 for item in assumptions if item["evidence_refs"])
-    assumption_confidence_count = sum(1 for item in assumptions if item["confidence"] is not None)
     target_structured_count = sum(1 for item in targets if item["structured"])
     target_linked_count = sum(1 for item in targets if item["evidence_refs"])
-    target_confidence_count = sum(1 for item in targets if item["confidence"] is not None)
     surrogate_target_count = sum(1 for item in targets if item["status"] == "surrogate")
     literature_target_count = sum(1 for item in targets if item["status"] == "literature-backed")
 
@@ -82,7 +81,7 @@ def assess_benchmark_traceability(
             }
         )
 
-    confidence_summary = {level: 0 for level in CONFIDENCE_LEVELS}
+    confidence_summary = dict.fromkeys(CONFIDENCE_LEVELS, 0)
     confidence_summary["unspecified"] = 0
     for item in [*evidence, *assumptions, *targets]:
         confidence = item.get("confidence")
@@ -135,16 +134,16 @@ def assess_benchmark_traceability(
         gaps.append("Some benchmark targets are not linked to evidence records.")
     if surrogate_target_count:
         gaps.append(f"{surrogate_target_count} benchmark target(s) are still marked surrogate.")
-    missing_reactor_links = [item["label"] for item in reactor_parameter_links if item["present"] and not item["linked"]]
+    missing_reactor_links = [
+        item["label"] for item in reactor_parameter_links if item["present"] and not item["linked"]
+    ]
     if missing_reactor_links:
         gaps.append(
             "Some reactor operating parameters are not mapped into benchmark targets: "
             + ", ".join(missing_reactor_links)
             + "."
         )
-    missing_validation_links = [
-        item["validation_target"] for item in physics_validation_links if not item["linked"]
-    ]
+    missing_validation_links = [item["validation_target"] for item in physics_validation_links if not item["linked"]]
     if missing_validation_links:
         gaps.append(
             "Some physics-facing validation targets are not benchmark-linked: "
@@ -378,7 +377,9 @@ def _normalize_target(name: str, spec: Any) -> dict[str, Any]:
         "status": spec.get("status"),
         "confidence": _normalize_confidence(spec.get("confidence")),
         "evidence_refs": [str(value) for value in spec.get("evidence_refs", [])],
-        "structured": bool(spec.get("units") or spec.get("status") or spec.get("confidence") or spec.get("evidence_refs")),
+        "structured": bool(
+            spec.get("units") or spec.get("status") or spec.get("confidence") or spec.get("evidence_refs")
+        ),
         "note": spec.get("note"),
         "uncertainty": spec.get("uncertainty"),
         "uncertainty_pcm": spec.get("uncertainty_pcm"),
@@ -470,7 +471,9 @@ def _assess_validation_maturity(benchmark: dict[str, Any], targets: list[dict[st
     cross_code_checks_raw = validation.get("cross_code_checks", [])
     if not isinstance(cross_code_checks_raw, list):
         cross_code_checks_raw = []
-    cross_code_checks = [_normalize_cross_code_check(index, item) for index, item in enumerate(cross_code_checks_raw, start=1)]
+    cross_code_checks = [
+        _normalize_cross_code_check(index, item) for index, item in enumerate(cross_code_checks_raw, start=1)
+    ]
     completed_cross_code = sum(1 for item in cross_code_checks if item["status"] == "completed")
 
     uncertainty_coverage = validation.get("uncertainty_coverage", {})
@@ -565,8 +568,7 @@ def _assess_benchmark_quality(
     gates: list[dict[str, Any]] = []
 
     source_dossier_complete = isinstance(source_dossier, dict) and all(
-        str(source_dossier.get(key, "")).strip()
-        for key in ("source_index", "parameter_table", "assumption_log")
+        str(source_dossier.get(key, "")).strip() for key in ("source_index", "parameter_table", "assumption_log")
     )
     gates.append(
         _quality_gate(
@@ -628,9 +630,7 @@ def _assess_benchmark_quality(
     )
 
     completed_cross_code = [
-        item
-        for item in validation_maturity.get("cross_code_checks", [])
-        if item.get("status") == "completed"
+        item for item in validation_maturity.get("cross_code_checks", []) if item.get("status") == "completed"
     ]
     declared_cross_code = validation_maturity.get("cross_code_checks", [])
     gates.append(
@@ -676,11 +676,7 @@ def _assess_benchmark_quality(
         )
     )
 
-    promotion_blockers = [
-        str(item)
-        for item in benchmark_model.get("promotion_blockers", [])
-        if str(item).strip()
-    ]
+    promotion_blockers = [str(item) for item in benchmark_model.get("promotion_blockers", []) if str(item).strip()]
     gates.append(
         _quality_gate(
             "promotion_blockers_cleared",
@@ -843,11 +839,7 @@ def _summarize_residual_items(items: list[dict[str, Any]]) -> dict[str, Any]:
         for item in physics_items
         if item.get("primary_physics_metric") and item.get("status") not in {"pass", "fail"}
     ]
-    blockers = [
-        str(item.get("message"))
-        for item in items
-        if item.get("benchmark_blocker") and item.get("message")
-    ]
+    blockers = [str(item.get("message")) for item in items if item.get("benchmark_blocker") and item.get("message")]
     if primary_gaps and not blockers:
         blockers.extend(str(item.get("message")) for item in primary_gaps if item.get("message"))
 
@@ -1147,6 +1139,10 @@ def _coerce_float(value: Any) -> float | None:
     if isinstance(value, bool) or value is None:
         return None
     try:
-        return float(value)
+        result = float(value)
     except (TypeError, ValueError):
         return None
+    # Non-finite values must not survive: json.dumps writes them as bare
+    # Infinity/NaN, which is not valid JSON and fails JSON.parse in the
+    # browser, taking out the whole bundle rather than one metric.
+    return result if math.isfinite(result) else None

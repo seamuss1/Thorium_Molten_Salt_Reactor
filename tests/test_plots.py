@@ -20,19 +20,13 @@ def _svg_root(path: Path) -> ET.Element:
 def _axis_tick_labels(path: Path, axis: str) -> list[str]:
     root = _svg_root(path)
     return [
-        element.text or ""
-        for element in root.findall(".//svg:text", SVG_NS)
-        if element.attrib.get("data-axis") == axis
+        element.text or "" for element in root.findall(".//svg:text", SVG_NS) if element.attrib.get("data-axis") == axis
     ]
 
 
 def _axis_tick_marks(path: Path, axis: str) -> list[ET.Element]:
     root = _svg_root(path)
-    return [
-        element
-        for element in root.findall(".//svg:line", SVG_NS)
-        if element.attrib.get("data-axis") == axis
-    ]
+    return [element for element in root.findall(".//svg:line", SVG_NS) if element.attrib.get("data-axis") == axis]
 
 
 def test_generate_summary_plots_populates_plots_dir(tmp_path: Path) -> None:
@@ -173,9 +167,7 @@ def test_generate_validation_plot_colors_blocked_status_separately(tmp_path: Pat
     assets = generate_validation_plot(bundle, validation)
     root = _svg_root(Path(assets["validation_summary"]))
     bar_rects = [
-        element
-        for element in root.findall(".//svg:rect", SVG_NS)
-        if element.attrib.get("data-series") == "bar"
+        element for element in root.findall(".//svg:rect", SVG_NS) if element.attrib.get("data-series") == "bar"
     ]
     text_values = [element.text or "" for element in root.findall(".//svg:text", SVG_NS)]
 
@@ -372,11 +364,7 @@ def test_zero_valued_bar_entries_do_not_render_filled_bar_rects(tmp_path: Path) 
 
     assets = generate_validation_plot(bundle, validation)
     root = _svg_root(Path(assets["validation_summary"]))
-    bar_rects = [
-        element
-        for element in root.findall(".//svg:rect", SVG_NS)
-        if element.attrib.get("rx") == "6"
-    ]
+    bar_rects = [element for element in root.findall(".//svg:rect", SVG_NS) if element.attrib.get("rx") == "6"]
     text_values = [element.text or "" for element in root.findall(".//svg:text", SVG_NS)]
 
     assert len(bar_rects) == 1

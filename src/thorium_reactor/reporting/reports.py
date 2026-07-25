@@ -39,7 +39,9 @@ def generate_report(
     effective_provenance = provenance if provenance is not None else summary.get("input_provenance")
     if not isinstance(effective_provenance, dict):
         effective_provenance = None
-    benchmark_traceability = summary.get("benchmark_traceability") or (assess_benchmark_traceability(config, benchmark) if benchmark else {})
+    benchmark_traceability = summary.get("benchmark_traceability") or (
+        assess_benchmark_traceability(config, benchmark) if benchmark else {}
+    )
     if validation_path and validation_path.exists():
         try:
             validation = json.loads(validation_path.read_text(encoding="utf-8"))
@@ -52,7 +54,9 @@ def generate_report(
     validation_summary = _materialize_validation_summary_artifacts(summary_path.parent, validation, benchmark_quality)
     limitations_matrix = _ensure_limitations_matrix(summary, validation, benchmark_quality, validation_maturity)
     design_readiness = _classify_design_readiness(summary, validation, benchmark_quality)
-    result_claims = _materialize_result_claims(summary_path.parent, config, summary, validation_summary, limitations_matrix, design_readiness)
+    result_claims = _materialize_result_claims(
+        summary_path.parent, config, summary, validation_summary, limitations_matrix, design_readiness
+    )
     summary["limitations_matrix"] = limitations_matrix
     summary["design_readiness"] = design_readiness
     summary["result_claims"] = result_claims
@@ -249,8 +253,12 @@ def generate_report(
         for gap in benchmark_traceability.get("gaps", []):
             lines.append(f"- Traceability gap: {gap}")
         if validation_maturity:
-            lines.append(f"- Validation maturity score: `{validation_maturity.get('validation_maturity_score', 'n/a')}`")
-            lines.append(f"- Validation maturity stage: `{validation_maturity.get('validation_maturity_stage', 'n/a')}`")
+            lines.append(
+                f"- Validation maturity score: `{validation_maturity.get('validation_maturity_score', 'n/a')}`"
+            )
+            lines.append(
+                f"- Validation maturity stage: `{validation_maturity.get('validation_maturity_stage', 'n/a')}`"
+            )
             lines.append(
                 f"- Operating-point source: `{validation_maturity.get('operating_point_source', {}).get('status', 'n/a')}`"
             )
@@ -270,8 +278,7 @@ def generate_report(
             for gate in benchmark_quality.get("gates", []):
                 lines.append(
                     f"- Gate `{gate.get('id', 'gate')}`: "
-                    f"`{gate.get('status', 'pending')}`"
-                    + (f" ({gate.get('message')})" if gate.get("message") else "")
+                    f"`{gate.get('status', 'pending')}`" + (f" ({gate.get('message')})" if gate.get("message") else "")
                 )
 
     lines.extend(_build_key_metrics_lines(config, summary, benchmark_traceability, validation_maturity))
@@ -341,7 +348,9 @@ def generate_report(
             lines.append(f"- Annual total cost (USD/yr): `{annual_costs.get('total', 'n/a')}`")
             lines.append(f"- LCOE ($/MWh): `{outputs.get('lcoe_usd_per_mwh', 'n/a')}`")
             lines.append(f"- LCOE (cents/kWh): `{outputs.get('lcoe_cents_per_kwh', 'n/a')}`")
-            lines.append("- Caveat: Planning-grade estimate, not a vendor quote, EPC bid, or investment recommendation.")
+            lines.append(
+                "- Caveat: Planning-grade estimate, not a vendor quote, EPC bid, or investment recommendation."
+            )
         elif finance.get("reason"):
             lines.append(f"- Reason: {finance.get('reason')}")
 
@@ -417,9 +426,7 @@ def generate_report(
                 ]
                 if source.get("formula"):
                     source_parts.append(f"formula={source.get('formula')}")
-                lines.append(
-                    f"- {key} source: `{', '.join(source_parts)}`"
-                )
+                lines.append(f"- {key} source: `{', '.join(source_parts)}`")
 
     property_audit = summary.get("property_audit", {})
     if property_audit:
@@ -450,7 +457,9 @@ def generate_report(
         lines.append(f"- Active through-flow channels: `{active_flow.get('channel_count', 'n/a')}`")
         lines.append(f"- Active flow area (cm2): `{active_flow.get('total_flow_area_cm2', 'n/a')}`")
         lines.append(f"- Representative velocity (m/s): `{active_flow.get('representative_velocity_m_s', 'n/a')}`")
-        lines.append(f"- Representative residence time (s): `{active_flow.get('representative_residence_time_s', 'n/a')}`")
+        lines.append(
+            f"- Representative residence time (s): `{active_flow.get('representative_residence_time_s', 'n/a')}`"
+        )
         lines.append(f"- Disconnected salt inventory channels: `{disconnected_inventory.get('channel_count', 'n/a')}`")
 
     msre_pump_transient = summary.get("msre_pump_transient_benchmark", {})
@@ -482,7 +491,9 @@ def generate_report(
     physics_core = summary.get("physics_core", {})
     if physics_core:
         precursor_transport = physics_core.get("precursor_transport", {})
-        decay_heat = precursor_transport.get("decay_heat_precursors", {}) if isinstance(precursor_transport, dict) else {}
+        decay_heat = (
+            precursor_transport.get("decay_heat_precursors", {}) if isinstance(precursor_transport, dict) else {}
+        )
         if precursor_transport or decay_heat:
             lines.extend(["", "## Physics Core Transport", ""])
             lines.append(f"- Precursor model: `{precursor_transport.get('model', 'n/a')}`")
@@ -496,8 +507,7 @@ def generate_report(
                 dominant_loop_segment = decay_heat.get("dominant_loop_segment", {})
                 lines.append(f"- Decay-heat precursor model: `{decay_heat.get('model', 'n/a')}`")
                 lines.append(
-                    "- Core decay-heat source fraction: "
-                    f"`{decay_heat.get('core_decay_heat_source_fraction', 'n/a')}`"
+                    f"- Core decay-heat source fraction: `{decay_heat.get('core_decay_heat_source_fraction', 'n/a')}`"
                 )
                 lines.append(
                     "- External-loop decay-heat source fraction: "
@@ -525,15 +535,16 @@ def generate_report(
             f"p=`{transport_solver.get('polynomial_order', 'n/a')}`"
         )
         lines.append(f"- Time integration: `{transport_solver.get('time_integration', 'n/a')}`")
-        lines.append(f"- Time step/CFL: `{transport_solver.get('time_step_s', 'n/a')}` s / `{transport_solver.get('cfl', 'n/a')}`")
+        lines.append(
+            f"- Time step/CFL: `{transport_solver.get('time_step_s', 'n/a')}` s / `{transport_solver.get('cfl', 'n/a')}`"
+        )
         lines.append(f"- Conservation residual: `{transport_solver.get('conservation_residual', 'n/a')}`")
         lines.append(f"- Minimum field value: `{transport_solver.get('minimum_field_value', 'n/a')}`")
         fraction_items = source_fractions.items() if isinstance(source_fractions, dict) else []
         for group_name, fractions in fraction_items:
             if isinstance(fractions, dict):
                 lines.append(
-                    f"- {group_name} outlet source fraction: "
-                    f"`{fractions.get('outlet_source_fraction', 'n/a')}`"
+                    f"- {group_name} outlet source fraction: `{fractions.get('outlet_source_fraction', 'n/a')}`"
                 )
         artifacts = transport_solver.get("artifacts", {})
         if artifacts:
@@ -544,16 +555,26 @@ def generate_report(
         lines.extend(["", "## Native Sparse Depletion", ""])
         lines.append(f"- Model: `{depletion_matrix.get('model', 'n/a')}`")
         lines.append(f"- Backend: `{depletion_matrix.get('backend', 'n/a')}`")
-        lines.append(f"- Chain: `{depletion_matrix.get('chain_name', 'n/a')}` from `{depletion_matrix.get('chain_format', 'n/a')}`")
-        lines.append(f"- Isotopes/zones: `{depletion_matrix.get('isotope_count', 'n/a')}` / `{depletion_matrix.get('zone_count', 'n/a')}`")
-        lines.append(f"- Matrix shape/nonzeros: `{depletion_matrix.get('matrix_shape', 'n/a')}` / `{depletion_matrix.get('matrix_nonzero_entries', 'n/a')}`")
-        lines.append(f"- Step count/time step days: `{depletion_matrix.get('steps', 'n/a')}` / `{depletion_matrix.get('time_step_days', 'n/a')}`")
+        lines.append(
+            f"- Chain: `{depletion_matrix.get('chain_name', 'n/a')}` from `{depletion_matrix.get('chain_format', 'n/a')}`"
+        )
+        lines.append(
+            f"- Isotopes/zones: `{depletion_matrix.get('isotope_count', 'n/a')}` / `{depletion_matrix.get('zone_count', 'n/a')}`"
+        )
+        lines.append(
+            f"- Matrix shape/nonzeros: `{depletion_matrix.get('matrix_shape', 'n/a')}` / `{depletion_matrix.get('matrix_nonzero_entries', 'n/a')}`"
+        )
+        lines.append(
+            f"- Step count/time step days: `{depletion_matrix.get('steps', 'n/a')}` / `{depletion_matrix.get('time_step_days', 'n/a')}`"
+        )
         lines.append(f"- Inventory delta fraction: `{depletion_matrix.get('inventory_delta_fraction', 'n/a')}`")
         lines.append(f"- Feed total atoms: `{depletion_matrix.get('feed_total_atoms', 'n/a')}`")
         lines.append(f"- Atom-balance residual: `{depletion_matrix.get('atom_balance_residual', 'n/a')}`")
         artifacts = depletion_matrix.get("artifacts", {})
         if artifacts:
-            lines.append(f"- Matrix/history artifacts: `{artifacts.get('matrix_path', 'n/a')}`, `{artifacts.get('history_path', 'n/a')}`")
+            lines.append(
+                f"- Matrix/history artifacts: `{artifacts.get('matrix_path', 'n/a')}`, `{artifacts.get('history_path', 'n/a')}`"
+            )
 
     primary_system = summary.get("primary_system", {})
     if primary_system:
@@ -569,11 +590,17 @@ def generate_report(
         lines.append(f"- Hot-leg density (kg/m3): `{primary_system.get('hot_leg_density_kg_m3', 'n/a')}`")
         lines.append(f"- Cold-leg density (kg/m3): `{primary_system.get('cold_leg_density_kg_m3', 'n/a')}`")
         lines.append(f"- Salt dynamic viscosity (Pa-s): `{primary_system.get('dynamic_viscosity_pa_s', 'n/a')}`")
-        lines.append(f"- Required pump pressure (kPa): `{loop_hydraulics.get('required_pump_pressure_kpa', loop_hydraulics.get('total_pressure_drop_kpa', 'n/a'))}`")
+        lines.append(
+            f"- Required pump pressure (kPa): `{loop_hydraulics.get('required_pump_pressure_kpa', loop_hydraulics.get('total_pressure_drop_kpa', 'n/a'))}`"
+        )
         lines.append(f"- Net resistive pressure (kPa): `{loop_hydraulics.get('net_resistive_pressure_kpa', 'n/a')}`")
         lines.append(f"- Loop pressure drop (kPa): `{loop_hydraulics.get('total_pressure_drop_kpa', 'n/a')}`")
-        lines.append(f"- Hydrostatic pressure change (kPa): `{loop_hydraulics.get('hydrostatic_pressure_change_kpa', 'n/a')}`")
-        lines.append(f"- Buoyancy driving pressure (kPa): `{loop_hydraulics.get('buoyancy_driving_pressure_kpa', 'n/a')}`")
+        lines.append(
+            f"- Hydrostatic pressure change (kPa): `{loop_hydraulics.get('hydrostatic_pressure_change_kpa', 'n/a')}`"
+        )
+        lines.append(
+            f"- Buoyancy driving pressure (kPa): `{loop_hydraulics.get('buoyancy_driving_pressure_kpa', 'n/a')}`"
+        )
         lines.append(f"- Thermal expansion head (m): `{loop_hydraulics.get('thermal_expansion_head_m', 'n/a')}`")
         lines.append(f"- Pump head (m): `{loop_hydraulics.get('pump_head_m', 'n/a')}`")
         lines.append(f"- Pump shaft power (kW): `{loop_hydraulics.get('pump_shaft_power_kw', 'n/a')}`")
@@ -582,9 +609,13 @@ def generate_report(
         lines.append(f"- Heat exchanger area (m2): `{heat_exchanger.get('required_area_m2', 'n/a')}`")
         lines.append(f"- Heat exchanger LMTD (C): `{heat_exchanger.get('lmtd_c', 'n/a')}`")
         lines.append(f"- Heat exchanger configured U (W/m2-K): `{heat_exchanger.get('overall_u_w_m2k', 'n/a')}`")
-        lines.append(f"- Heat exchanger estimated clean U (W/m2-K): `{heat_exchanger.get('estimated_clean_u_w_m2k', 'n/a')}`")
+        lines.append(
+            f"- Heat exchanger estimated clean U (W/m2-K): `{heat_exchanger.get('estimated_clean_u_w_m2k', 'n/a')}`"
+        )
         lines.append(f"- Estimated hot leg temperature (C): `{thermal_profile.get('estimated_hot_leg_temp_c', 'n/a')}`")
-        lines.append(f"- Estimated cold leg temperature (C): `{thermal_profile.get('estimated_cold_leg_temp_c', 'n/a')}`")
+        lines.append(
+            f"- Estimated cold leg temperature (C): `{thermal_profile.get('estimated_cold_leg_temp_c', 'n/a')}`"
+        )
         lines.append(f"- Estimated pipe heat loss (kW): `{thermal_profile.get('total_pipe_heat_loss_kw', 'n/a')}`")
         lines.append(f"- Fuel salt inventory (m3): `{fuel_salt.get('total_m3', 'n/a')}`")
         lines.append(f"- Coolant salt inventory (m3): `{coolant_salt.get('net_pool_inventory_m3', 'n/a')}`")
@@ -620,8 +651,7 @@ def generate_report(
         lines.append(f"- Fuel volume fraction: `{graphite_lifetime.get('fuel_volume_fraction', 'n/a')}`")
         lines.append(f"- Fast-flux peaking factor: `{graphite_lifetime.get('fast_flux_peaking_factor', 'n/a')}`")
         lines.append(
-            "- Nominal maximum fast flux (n/cm2-s): "
-            f"`{graphite_lifetime.get('nominal_max_fast_flux_n_cm2_s', 'n/a')}`"
+            f"- Nominal maximum fast flux (n/cm2-s): `{graphite_lifetime.get('nominal_max_fast_flux_n_cm2_s', 'n/a')}`"
         )
         lines.append(f"- Estimated lifespan (years): `{graphite_lifetime.get('estimated_lifespan_years', 'n/a')}`")
         lines.append(f"- Lifetime margin: `{graphite_lifetime.get('lifetime_margin', 'n/a')}`")
@@ -640,13 +670,21 @@ def generate_report(
         lines.append(f"- Xenon generation rate (atoms/s): `{fuel_cycle.get('xenon_generation_rate_atoms_s', 'n/a')}`")
         lines.append(f"- Xenon removal fraction: `{fuel_cycle.get('xenon_removal_fraction', 'n/a')}`")
         lines.append(f"- Protactinium holdup (days): `{fuel_cycle.get('protactinium_holdup_days', 'n/a')}`")
-        lines.append(f"- Fissile burn fraction per day: `{fuel_cycle.get('fissile_burn_fraction_per_day_full_power', 'n/a')}`")
+        lines.append(
+            f"- Fissile burn fraction per day: `{fuel_cycle.get('fissile_burn_fraction_per_day_full_power', 'n/a')}`"
+        )
         lines.append(f"- Breeding gain fraction per day: `{fuel_cycle.get('breeding_gain_fraction_per_day', 'n/a')}`")
-        lines.append(f"- Net fissile change fraction per day: `{fuel_cycle.get('net_fissile_change_fraction_per_day', 'n/a')}`")
-        lines.append(f"- Equilibrium protactinium inventory fraction: `{fuel_cycle.get('equilibrium_protactinium_inventory_fraction', 'n/a')}`")
+        lines.append(
+            f"- Net fissile change fraction per day: `{fuel_cycle.get('net_fissile_change_fraction_per_day', 'n/a')}`"
+        )
+        lines.append(
+            f"- Equilibrium protactinium inventory fraction: `{fuel_cycle.get('equilibrium_protactinium_inventory_fraction', 'n/a')}`"
+        )
         depletion_assumptions = fuel_cycle.get("depletion_assumptions", {})
         if depletion_assumptions:
-            lines.append(f"- Volatile removal efficiency: `{depletion_assumptions.get('volatile_removal_efficiency', 'n/a')}`")
+            lines.append(
+                f"- Volatile removal efficiency: `{depletion_assumptions.get('volatile_removal_efficiency', 'n/a')}`"
+            )
 
     transient = summary.get("transient", {})
     if transient:
@@ -674,8 +712,12 @@ def generate_report(
         lines.append(f"- Final total reactivity (pcm): `{transient.get('final_total_reactivity_pcm', 'n/a')}`")
         lines.append(f"- Depletion chain: `{transient.get('depletion_chain', 'n/a')}`")
         lines.append(f"- Cleanup scenario: `{transient.get('cleanup_scenario', 'n/a')}`")
-        lines.append(f"- Final fissile inventory fraction: `{transient.get('final_fissile_inventory_fraction', 'n/a')}`")
-        lines.append(f"- Peak protactinium inventory fraction: `{transient.get('peak_protactinium_inventory_fraction', 'n/a')}`")
+        lines.append(
+            f"- Final fissile inventory fraction: `{transient.get('final_fissile_inventory_fraction', 'n/a')}`"
+        )
+        lines.append(
+            f"- Peak protactinium inventory fraction: `{transient.get('peak_protactinium_inventory_fraction', 'n/a')}`"
+        )
         lines.append(f"- Final redox state (eV): `{transient.get('final_redox_state_ev', 'n/a')}`")
         lines.append(f"- Peak corrosion index: `{transient.get('peak_corrosion_index', 'n/a')}`")
         lines.append(f"- Transient history: `{transient.get('history_path', 'n/a')}`")
@@ -693,8 +735,12 @@ def generate_report(
         if isinstance(ensemble_definition, dict):
             lines.append(f"- Ensemble meaning: `{ensemble_definition.get('ensemble_meaning', 'stress_test_envelope')}`")
             lines.append(f"- Sampler: `{ensemble_definition.get('sampler', 'independent_normal_perturbations')}`")
-            lines.append(f"- Correlation assumptions: `{ensemble_definition.get('correlation_assumptions', 'independent perturbations')}`")
-            lines.append(f"- Percentile definitions: `{ensemble_definition.get('percentile_definitions', 'sample percentiles by time step')}`")
+            lines.append(
+                f"- Correlation assumptions: `{ensemble_definition.get('correlation_assumptions', 'independent perturbations')}`"
+            )
+            lines.append(
+                f"- Percentile definitions: `{ensemble_definition.get('percentile_definitions', 'sample percentiles by time step')}`"
+            )
             for parameter in ensemble_definition.get("varied_parameters", [])[:8]:
                 if isinstance(parameter, dict):
                     lines.append(
@@ -711,8 +757,12 @@ def generate_report(
         lines.append(f"- Peak fuel temperature max (C): `{transient_sweep.get('peak_fuel_temperature_c_max', 'n/a')}`")
         lines.append(f"- Final power fraction p50: `{transient_sweep.get('final_power_fraction_p50', 'n/a')}`")
         lines.append(f"- Final power fraction p95: `{transient_sweep.get('final_power_fraction_p95', 'n/a')}`")
-        lines.append(f"- Final total reactivity p50 (pcm): `{transient_sweep.get('final_total_reactivity_pcm_p50', 'n/a')}`")
-        lines.append(f"- Final total reactivity p95 (pcm): `{transient_sweep.get('final_total_reactivity_pcm_p95', 'n/a')}`")
+        lines.append(
+            f"- Final total reactivity p50 (pcm): `{transient_sweep.get('final_total_reactivity_pcm_p50', 'n/a')}`"
+        )
+        lines.append(
+            f"- Final total reactivity p95 (pcm): `{transient_sweep.get('final_total_reactivity_pcm_p95', 'n/a')}`"
+        )
         lines.append(
             "- Final core delayed neutron source fraction p50: "
             f"`{transient_sweep.get('final_core_delayed_neutron_source_fraction_p50', 'n/a')}`"
@@ -863,7 +913,9 @@ def generate_report(
         for track in benchmark["novelty_tracks"]:
             lines.append(f"- {track.get('name', 'untitled')}: {track.get('summary', '')}")
     else:
-        lines.append("- No novelty-track claims were completed in this run; future-work language remains separated from generated results.")
+        lines.append(
+            "- No novelty-track claims were completed in this run; future-work language remains separated from generated results."
+        )
     lines.extend(["", "## Novelty Tracks", "", "- See Future Work / Novelty Tracks for proposed or future work items."])
 
     if geometry_assets:
@@ -1004,7 +1056,9 @@ def _materialize_validation_summary_artifacts(
             "group": group,
             "status": status,
             "benchmark_critical": benchmark_critical,
-            "blocker_importance": "high" if benchmark_critical and status in {"fail", "pending", "blocked"} else "normal",
+            "blocker_importance": "high"
+            if benchmark_critical and status in {"fail", "pending", "blocked"}
+            else "normal",
             "message": check.get("message", ""),
         }
         rows.append(row)
@@ -1112,7 +1166,9 @@ def _ensure_limitations_matrix(
         ),
         _limitation_row(
             "surrogate_targets",
-            "watch" if validation_maturity.get("validation_maturity_stage") in {"screening_backed", "benchmark_ready"} else "major_concern",
+            "watch"
+            if validation_maturity.get("validation_maturity_stage") in {"screening_backed", "benchmark_ready"}
+            else "major_concern",
             "benchmark metadata",
             "Some targets may remain surrogate or context-only.",
             "Retire surrogate targets with literature-backed or solver-backed observables.",
@@ -1140,7 +1196,9 @@ def _ensure_limitations_matrix(
         ),
         _limitation_row(
             "cross_code_validation",
-            "nominal" if validation_maturity.get("cross_code_checks") and not validation_maturity.get("gaps") else "major_concern",
+            "nominal"
+            if validation_maturity.get("cross_code_checks") and not validation_maturity.get("gaps")
+            else "major_concern",
             "benchmark metadata",
             "Cross-code validation is incomplete or not declared.",
             "Complete declared cross-code checks and record source artifacts.",
@@ -1149,14 +1207,20 @@ def _ensure_limitations_matrix(
             "benchmark_quality",
             "nominal" if benchmark_quality else "not_applicable",
             "benchmark metadata",
-            "Benchmark quality gates are populated." if benchmark_quality else "No benchmark quality gates apply or were declared for this non-benchmark bundle.",
-            "Declare benchmark quality gates when promoting benchmark or validation claims." if not benchmark_quality else "Keep quality gates synchronized with evidence.",
+            "Benchmark quality gates are populated."
+            if benchmark_quality
+            else "No benchmark quality gates apply or were declared for this non-benchmark bundle.",
+            "Declare benchmark quality gates when promoting benchmark or validation claims."
+            if not benchmark_quality
+            else "Keep quality gates synchronized with evidence.",
         ),
     ]
     return rows
 
 
-def _limitation_row(area: str, severity: str, evidence_artifact: str, consequence: str, next_action: str) -> dict[str, Any]:
+def _limitation_row(
+    area: str, severity: str, evidence_artifact: str, consequence: str, next_action: str
+) -> dict[str, Any]:
     return {
         "area": area,
         "severity": severity,
@@ -1190,15 +1254,25 @@ def _classify_design_readiness(
             findings,
             "benchmark_quality",
             "nominal" if benchmark_quality.get("benchmark_ready") is True else "major_concern",
-            "Benchmark gates are not ready." if benchmark_quality.get("benchmark_ready") is not True else "Benchmark gates are ready.",
+            "Benchmark gates are not ready."
+            if benchmark_quality.get("benchmark_ready") is not True
+            else "Benchmark gates are ready.",
             "benchmark metadata",
         )
     model_validity = summary.get("model_validity", {})
     if isinstance(model_validity, dict) and model_validity.get("status") == "invalid":
-        _add_readiness_finding(findings, "model_validity", "major_concern", "Model validity checks failed.", "summary.json")
+        _add_readiness_finding(
+            findings, "model_validity", "major_concern", "Model validity checks failed.", "summary.json"
+        )
     for check in validation.get("checks", []) if isinstance(validation, dict) else []:
         if isinstance(check, dict) and str(check.get("status", "")).lower() == "fail":
-            _add_readiness_finding(findings, str(check.get("name", "validation")), "major_concern", str(check.get("message", "Validation check failed.")), "validation.json")
+            _add_readiness_finding(
+                findings,
+                str(check.get("name", "validation")),
+                "major_concern",
+                str(check.get("message", "Validation check failed.")),
+                "validation.json",
+            )
     chemistry = summary.get("chemistry", {})
     if isinstance(chemistry, dict):
         risk = str(chemistry.get("corrosion_risk", "")).lower()
@@ -1214,13 +1288,13 @@ def _classify_design_readiness(
         estimated_years = _as_float(graphite.get("estimated_lifespan_years"))
         lifetime_margin = _as_float(graphite.get("lifetime_margin"))
         graphite_severity = "nominal"
-        if estimated_years is not None and estimated_years < 1.0:
+        if (estimated_years is not None and estimated_years < 1.0) or (
+            lifetime_margin is not None and lifetime_margin < 0.25
+        ):
             graphite_severity = "disqualifying_for_claimed_use"
-        elif lifetime_margin is not None and lifetime_margin < 0.25:
-            graphite_severity = "disqualifying_for_claimed_use"
-        elif estimated_years is not None and estimated_years < 8.0:
-            graphite_severity = "major_concern"
-        elif lifetime_margin is not None and lifetime_margin < 1.0:
+        elif (estimated_years is not None and estimated_years < 8.0) or (
+            lifetime_margin is not None and lifetime_margin < 1.0
+        ):
             graphite_severity = "major_concern"
         elif graphite.get("screening_status") == "watch":
             graphite_severity = "watch"
@@ -1234,7 +1308,9 @@ def _classify_design_readiness(
     flow = summary.get("flow", {}).get("reduced_order", {}) if isinstance(summary.get("flow"), dict) else {}
     active_flow = flow.get("active_flow", {}) if isinstance(flow, dict) else {}
     metrics = summary.get("metrics", {}) if isinstance(summary.get("metrics"), dict) else {}
-    channel_count = _first_available(metrics.get("channel_count"), flow.get("channel_count") if isinstance(flow, dict) else None)
+    channel_count = _first_available(
+        metrics.get("channel_count"), flow.get("channel_count") if isinstance(flow, dict) else None
+    )
     active_channel_count = active_flow.get("channel_count") if isinstance(active_flow, dict) else None
     if isinstance(active_channel_count, (int, float)) and isinstance(channel_count, (int, float)):
         if int(active_channel_count) <= 1 and int(channel_count) > 1:
@@ -1248,7 +1324,9 @@ def _classify_design_readiness(
     velocity = active_flow.get("representative_velocity_m_s") if isinstance(active_flow, dict) else None
     if isinstance(velocity, (int, float)):
         severity = "major_concern" if float(velocity) > 12.0 else "nominal"
-        _add_readiness_finding(findings, "active_channel_velocity", severity, "Representative velocity screening envelope.", "summary.json")
+        _add_readiness_finding(
+            findings, "active_channel_velocity", severity, "Representative velocity screening envelope.", "summary.json"
+        )
     primary_system = summary.get("primary_system", {}) if isinstance(summary.get("primary_system"), dict) else {}
     inventory = primary_system.get("inventory", {}) if isinstance(primary_system.get("inventory"), dict) else {}
     coolant_salt = inventory.get("coolant_salt", {}) if isinstance(inventory.get("coolant_salt"), dict) else {}
@@ -1277,7 +1355,12 @@ def _classify_design_readiness(
             "Specific power is screened against heavy-metal inventory plausibility for design-readiness claims.",
             "summary.json",
         )
-    order = {severity: index for index, severity in enumerate(("not_applicable", "nominal", "watch", "major_concern", "disqualifying_for_claimed_use"))}
+    order = {
+        severity: index
+        for index, severity in enumerate(
+            ("not_applicable", "nominal", "watch", "major_concern", "disqualifying_for_claimed_use")
+        )
+    }
     top = max((item["severity"] for item in findings), key=lambda value: order.get(value, 0), default="not_applicable")
     severe = [item for item in findings if item["severity"] in {"major_concern", "disqualifying_for_claimed_use"}]
     return {
@@ -1288,7 +1371,9 @@ def _classify_design_readiness(
     }
 
 
-def _add_readiness_finding(findings: list[dict[str, Any]], metric: str, severity: str, basis: str, evidence_artifact: str) -> None:
+def _add_readiness_finding(
+    findings: list[dict[str, Any]], metric: str, severity: str, basis: str, evidence_artifact: str
+) -> None:
     if severity == "not_applicable":
         return
     findings.append(
@@ -1363,8 +1448,12 @@ def _materialize_result_claims(
         )
     path = bundle_dir / "result_claims.json"
     path.write_text(json.dumps(claims, indent=2, sort_keys=True), encoding="utf-8")
-    (bundle_dir / "limitations_matrix.json").write_text(json.dumps(limitations_matrix, indent=2, sort_keys=True), encoding="utf-8")
-    (bundle_dir / "design_readiness.json").write_text(json.dumps(design_readiness, indent=2, sort_keys=True), encoding="utf-8")
+    (bundle_dir / "limitations_matrix.json").write_text(
+        json.dumps(limitations_matrix, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    (bundle_dir / "design_readiness.json").write_text(
+        json.dumps(design_readiness, indent=2, sort_keys=True), encoding="utf-8"
+    )
     return claims
 
 
@@ -1491,7 +1580,9 @@ def _build_validation_and_blocker_lines(
     else:
         lines.append("- No failed, pending, or blocked benchmark-critical validation checks were found.")
     if validation_summary.get("details_json"):
-        lines.append(f"- Full detail artifacts: `{validation_summary.get('details_json')}`, `{validation_summary.get('details_csv')}`")
+        lines.append(
+            f"- Full detail artifacts: `{validation_summary.get('details_json')}`, `{validation_summary.get('details_csv')}`"
+        )
     lines.append("")
     return lines
 
@@ -1504,11 +1595,17 @@ def _build_interpretation_lines(
 ) -> list[str]:
     lines = ["## Interpretation", ""]
     if _is_solver_backed_neutronics(summary):
-        lines.append("- Neutronics interpretation may use solver-backed result language for artifacts present in this bundle.")
+        lines.append(
+            "- Neutronics interpretation may use solver-backed result language for artifacts present in this bundle."
+        )
     else:
-        lines.append("- Neutronics interpretation is limited to dry-run/proxy diagnostics; no solver-backed OpenMC physics result is present.")
+        lines.append(
+            "- Neutronics interpretation is limited to dry-run/proxy diagnostics; no solver-backed OpenMC physics result is present."
+        )
     if validation_summary.get("blockers"):
-        lines.append("- Benchmark-critical blockers take precedence over pass counts from construction or diagnostic checks.")
+        lines.append(
+            "- Benchmark-critical blockers take precedence over pass counts from construction or diagnostic checks."
+        )
     if benchmark_quality and benchmark_quality.get("benchmark_ready") is not True:
         lines.append("- Benchmark quality gates prevent benchmark-ready interpretation.")
     if design_readiness.get("severe_finding_count", 0):
@@ -1570,7 +1667,9 @@ def _build_method_card_lines(summary: dict[str, Any]) -> list[str]:
         cards.append(
             {
                 "name": "Tritium screen",
-                "model": str(summary["tritium"].get("model", summary["tritium"].get("basis", "tritium_distribution_screen"))),
+                "model": str(
+                    summary["tritium"].get("model", summary["tritium"].get("basis", "tritium_distribution_screen"))
+                ),
                 "equation": "release = production * environmental_release_fraction after removal and retention partitions",
                 "inputs": "relative production, removal fraction, graphite retention fraction, release fraction",
                 "basis": "literature-backed distribution screen and configured chemistry removal assumptions",
@@ -1584,7 +1683,11 @@ def _build_method_card_lines(summary: dict[str, Any]) -> list[str]:
         cards.append(
             {
                 "name": "Fuel-cycle proxy",
-                "model": str(summary["fuel_cycle"].get("depletion_chain", summary["fuel_cycle"].get("depletion_model", "thorium_cleanup_proxy"))),
+                "model": str(
+                    summary["fuel_cycle"].get(
+                        "depletion_chain", summary["fuel_cycle"].get("depletion_model", "thorium_cleanup_proxy")
+                    )
+                ),
                 "equation": "net fissile change = breeding gain - burnup - cleanup/removal penalties",
                 "inputs": "heavy-metal inventory (kg), fissile inventory (kg), cleanup turnover (days), removal efficiency",
                 "basis": "configured depletion/cleanup proxy or native sparse depletion artifact when present",
@@ -1693,7 +1796,8 @@ def _qa_figure_manifest(checks: list[dict[str, Any]], bundle_dir: Path) -> None:
     mixed_primary = [
         plot_id
         for plot_id, entry in catalog.items()
-        if entry.get("report_section") == "primary" and any("mixed" in str(value).lower() for value in entry.get("units", {}).values())
+        if entry.get("report_section") == "primary"
+        and any("mixed" in str(value).lower() for value in entry.get("units", {}).values())
     ]
     nonportable = [
         plot_id
@@ -1725,7 +1829,9 @@ def _qa_status_contradictions(checks: list[dict[str, Any]], bundle_dir: Path, re
     claims_build_candidate = "Build candidate: `true`" in report_text or "Build candidate: `True`" in report_text
     claims_benchmark_ready = "Benchmark ready: `true`" in report_text or "Benchmark ready: `True`" in report_text
     if claims_solver_backed and not evidence["can_use_solver_backed_language"]:
-        contradictions.append("report claims solver-backed evidence without a completed statepoint-backed OpenMC artifact state")
+        contradictions.append(
+            "report claims solver-backed evidence without a completed statepoint-backed OpenMC artifact state"
+        )
     if claims_build_candidate and not evidence["can_use_build_candidate_language"]:
         contradictions.append("build candidate true while evidence gates block build-candidate language")
     if claims_benchmark_ready and not evidence["can_use_benchmark_ready_language"]:
@@ -1765,9 +1871,7 @@ def _is_nonportable_manifest_path(path_text: str, bundle_dir: Path) -> bool:
     if re.match(r"^[A-Za-z]:[\\/]", path_text) or path_text.startswith("\\\\"):
         return True
     path = Path(path_text)
-    if not path.is_absolute():
-        return False
-    return True
+    return path.is_absolute()
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -1821,11 +1925,16 @@ def _build_artifact_index_lines(
             _append_artifact(target, f"{_humanize_label(name)} plot", path, description)
     if geometry_assets:
         for name, path in sorted(geometry_assets.items()):
-            _append_artifact(primary, f"{_humanize_label(name)} geometry", path, "rendered geometry evidence for reader inspection.")
+            _append_artifact(
+                primary, f"{_humanize_label(name)} geometry", path, "rendered geometry evidence for reader inspection."
+            )
     for artifact, description in (
         ("benchmark_evidence.json", "compiled fail-closed benchmark evidence gates for this bundle."),
         ("nuclear_data_provenance.json", "OpenMC nuclear-data library provenance and path/hash evidence."),
-        ("source_convergence_diagnostics.json", "OpenMC batch, particle, statepoint, and source convergence diagnostics."),
+        (
+            "source_convergence_diagnostics.json",
+            "OpenMC batch, particle, statepoint, and source convergence diagnostics.",
+        ),
         ("cross_code_comparison.json", "OpenMC residuals against declared Serpent/SCALE-style references."),
         ("uncertainty_budget.json", "geometry/material uncertainty propagation budget."),
     ):
@@ -1891,9 +2000,7 @@ def _is_primary_plot(plot_id: str, entry: dict[str, Any]) -> bool:
         if entry.get("report_section") != "primary":
             return False
         units = entry.get("units", {})
-        if isinstance(units, dict) and any("mixed" in str(value).lower() for value in units.values()):
-            return False
-        return True
+        return not (isinstance(units, dict) and any("mixed" in str(value).lower() for value in units.values()))
     return plot_id not in {"metrics_overview", "bop_balance", "transient_redox_state", "transient_fissile_inventory"}
 
 
@@ -1944,8 +2051,7 @@ def _build_evidence_status_lines(
         lines.append("- Neutronics evidence: `solver-backed OpenMC result`")
     else:
         lines.append(
-            f"- Neutronics evidence: `{neutronics_status}` dry-run/proxy; "
-            "not a solver-backed OpenMC physics result."
+            f"- Neutronics evidence: `{neutronics_status}` dry-run/proxy; not a solver-backed OpenMC physics result."
         )
     artifact_status = summary.get("artifact_status", {})
     artifact_blocker_count = 0
@@ -2002,7 +2108,9 @@ def _build_key_metrics_lines(
 
     metric_lines: list[str] = []
     _append_value_line(metric_lines, "Design thermal power", reactor.get("design_power_mwth"), "MWth")
-    _append_value_line(metric_lines, "Neutronics status", neutronics.get("status") if isinstance(neutronics, dict) else None)
+    _append_value_line(
+        metric_lines, "Neutronics status", neutronics.get("status") if isinstance(neutronics, dict) else None
+    )
     if not _is_solver_backed_neutronics(summary):
         metric_lines.append(
             "- Neutronics metric evidence scope: `dry-run/proxy diagnostics; no solver-backed OpenMC result`"
@@ -2010,7 +2118,9 @@ def _build_key_metrics_lines(
     _append_value_line(
         metric_lines,
         "Effective multiplication factor",
-        _first_available(metrics.get("keff"), uncertainty_sweep.get("nominal_keff") if isinstance(uncertainty_sweep, dict) else None),
+        _first_available(
+            metrics.get("keff"), uncertainty_sweep.get("nominal_keff") if isinstance(uncertainty_sweep, dict) else None
+        ),
         sig_digits=6,
     )
     _append_value_line(
@@ -2033,16 +2143,25 @@ def _build_key_metrics_lines(
     _append_value_line(
         metric_lines,
         "Validation maturity score",
-        _first_available(metrics.get("validation_maturity_score"), validation_maturity.get("validation_maturity_score")),
+        _first_available(
+            metrics.get("validation_maturity_score"), validation_maturity.get("validation_maturity_score")
+        ),
     )
     _append_value_line(metric_lines, "Channel count", metrics.get("channel_count"))
     _append_value_line(
         metric_lines,
         "Active flow channels",
-        _first_available(metrics.get("active_flow_channel_count"), active_flow.get("channel_count") if isinstance(active_flow, dict) else None),
+        _first_available(
+            metrics.get("active_flow_channel_count"),
+            active_flow.get("channel_count") if isinstance(active_flow, dict) else None,
+        ),
     )
-    _append_value_line(metric_lines, "Thermal power", bop.get("thermal_power_mw") if isinstance(bop, dict) else None, "MW")
-    _append_value_line(metric_lines, "Electric power", bop.get("electric_power_mw") if isinstance(bop, dict) else None, "MW")
+    _append_value_line(
+        metric_lines, "Thermal power", bop.get("thermal_power_mw") if isinstance(bop, dict) else None, "MW"
+    )
+    _append_value_line(
+        metric_lines, "Electric power", bop.get("electric_power_mw") if isinstance(bop, dict) else None, "MW"
+    )
     _append_value_line(
         metric_lines,
         "Primary mass flow",
@@ -2202,7 +2321,9 @@ def _format_report_value(value: Any, unit: str | None = None, *, sig_digits: int
     elif isinstance(value, float):
         formatted = _format_float(value, sig_digits=sig_digits)
     elif isinstance(value, (list, tuple)):
-        formatted = ", ".join(_format_report_value(item, sig_digits=sig_digits) for item in value if _has_reader_value(item))
+        formatted = ", ".join(
+            _format_report_value(item, sig_digits=sig_digits) for item in value if _has_reader_value(item)
+        )
     elif isinstance(value, dict):
         formatted = ", ".join(
             f"{_humanize_label(str(key))}={_format_report_value(item, sig_digits=sig_digits)}"
@@ -2390,7 +2511,11 @@ def _format_numeric_code_literals(line: str) -> str:
         token = match.group(1)
         if not _NUMERIC_COMPOSITE_RE.fullmatch(token):
             return match.group(0)
-        return "`" + _NUMERIC_TOKEN_RE.sub(lambda item: _format_float(float(item.group(0)), sig_digits=sig_digits), token) + "`"
+        return (
+            "`"
+            + _NUMERIC_TOKEN_RE.sub(lambda item: _format_float(float(item.group(0)), sig_digits=sig_digits), token)
+            + "`"
+        )
 
     return _CODE_LITERAL_RE.sub(replace_composite, formatted)
 

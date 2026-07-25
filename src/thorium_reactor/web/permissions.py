@@ -7,10 +7,11 @@ import json
 import os
 import threading
 import time as time_module
+from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta, tzinfo
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException, Request
@@ -305,12 +306,16 @@ def configured_store_path(repo_root: Path) -> Path:
     return repo_root / ".tmp" / "web-rate-limits.json"
 
 
-def configured_timezone() -> ZoneInfo:
+def configured_timezone() -> tzinfo:
     raw = os.environ.get("THORIUM_REACTOR_RATE_LIMIT_TIMEZONE", "America/New_York")
     try:
         return ZoneInfo(raw)
-    except ZoneInfoNotFoundError:
-        return ZoneInfo("UTC")
+    except (ZoneInfoNotFoundError, KeyError):
+        # datetime.UTC, not ZoneInfo("UTC"): where the tz database is absent
+        # entirely -- a plain Windows install without the tzdata package --
+        # the ZoneInfo fallback raises the same error it is catching here and
+        # the app cannot start at all.
+        return UTC
 
 
 def normalize_email(email: Any) -> str:

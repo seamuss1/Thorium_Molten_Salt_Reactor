@@ -1,19 +1,19 @@
 from __future__ import annotations
 
+import itertools
 import json
 import os
-from dataclasses import dataclass
-from math import cos, pi, sin
-from pathlib import Path
 import shutil
 import struct
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
+from math import cos, pi, sin
+from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageFont
-
 
 SVG_COLORS = {
     "uo2": "#c77d1c",
@@ -320,8 +320,9 @@ def render_gif(description: dict[str, Any], output_path: Path) -> Path | None:
     frame_count = max(int(animation.get("frame_count", 24)), 2)
     fps = max(int(animation.get("fps", 12)), 1)
     frames = [
-        _render_detailed_reactor_frame(description, animation_phase=index / frame_count)
-        .convert("P", palette=Image.ADAPTIVE, colors=255)
+        _render_detailed_reactor_frame(description, animation_phase=index / frame_count).convert(
+            "P", palette=Image.ADAPTIVE, colors=255
+        )
         for index in range(frame_count)
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -356,7 +357,9 @@ def render_mp4(description: dict[str, Any], output_path: Path) -> Path | None:
     try:
         for index in range(frame_count):
             frame_path = frames_root / f"frame_{index:04d}.png"
-            _render_detailed_reactor_frame(description, animation_phase=index / frame_count).convert("RGB").save(frame_path)
+            _render_detailed_reactor_frame(description, animation_phase=index / frame_count).convert("RGB").save(
+                frame_path
+            )
 
         frame_pattern = str(frames_root / "frame_%04d.png")
         commands = [
@@ -675,8 +678,7 @@ def _draw_animation_overlay(
             if len(packet_points) < 2:
                 continue
             packet_projected = [
-                _project(x_value, y_value, z_value, scale, center)
-                for x_value, y_value, z_value in packet_points
+                _project(x_value, y_value, z_value, scale, center) for x_value, y_value, z_value in packet_points
             ]
             glow_draw.line(packet_projected, fill=_shade_color(style["glow"], 1.0, glow_alpha), width=width_px + 10)
             flow_draw.line(packet_projected, fill=_shade_color(style["edge"], 1.04, 228), width=width_px + 1)
@@ -699,7 +701,7 @@ def _draw_particle_head(
 
 
 def _polyline_total_length(points: list[tuple[float, float, float]]) -> float:
-    return sum(_segment_length(start, stop) for start, stop in zip(points, points[1:]))
+    return sum(_segment_length(start, stop) for start, stop in itertools.pairwise(points))
 
 
 def _sample_polyline_window(
@@ -729,7 +731,7 @@ def _sample_polyline_point(
     distance: float,
 ) -> tuple[float, float, float]:
     traversed = 0.0
-    for start, stop in zip(points, points[1:]):
+    for start, stop in itertools.pairwise(points):
         segment_length = _segment_length(start, stop)
         if segment_length <= 0.0:
             continue
@@ -748,11 +750,7 @@ def _segment_length(
     start: tuple[float, float, float],
     stop: tuple[float, float, float],
 ) -> float:
-    return (
-        (stop[0] - start[0]) ** 2
-        + (stop[1] - start[1]) ** 2
-        + (stop[2] - start[2]) ** 2
-    ) ** 0.5
+    return ((stop[0] - start[0]) ** 2 + (stop[1] - start[1]) ** 2 + (stop[2] - start[2]) ** 2) ** 0.5
 
 
 def _render_pin_svg(description: dict[str, Any]) -> str:
@@ -809,7 +807,7 @@ def _render_detailed_reactor_svg(description: dict[str, Any]) -> str:
     channel_counts = description["channel_variant_counts"]
 
     elements = [
-        '<defs>',
+        "<defs>",
         '<linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">',
         '<stop offset="0%" stop-color="#08111b" />',
         '<stop offset="100%" stop-color="#112235" />',
@@ -1152,7 +1150,7 @@ def _draw_ground_rings(
         for step in range(80):
             theta = 2.0 * pi * step / 80.0
             ring.append(_project(radius * cos(theta), radius * sin(theta), z_min - 6.0, scale, center))
-        draw.line(ring + [ring[0]], fill=(130, 182, 209, alpha), width=2)
+        draw.line([*ring, ring[0]], fill=(130, 182, 209, alpha), width=2)
 
 
 def _build_scene_faces(
@@ -1241,8 +1239,12 @@ def _build_cylinder_faces(
     outer_start = [_cylinder_point(axis, axis_min, center_a, center_b, outer_radius, theta) for theta in theta_values]
     outer_stop = [_cylinder_point(axis, axis_max, center_a, center_b, outer_radius, theta) for theta in theta_values]
     if inner_radius > 0.0:
-        inner_start = [_cylinder_point(axis, axis_min, center_a, center_b, inner_radius, theta) for theta in theta_values]
-        inner_stop = [_cylinder_point(axis, axis_max, center_a, center_b, inner_radius, theta) for theta in theta_values]
+        inner_start = [
+            _cylinder_point(axis, axis_min, center_a, center_b, inner_radius, theta) for theta in theta_values
+        ]
+        inner_stop = [
+            _cylinder_point(axis, axis_max, center_a, center_b, inner_radius, theta) for theta in theta_values
+        ]
     else:
         start_center = _cylinder_center(axis, axis_min, center_a, center_b)
         stop_center = _cylinder_center(axis, axis_max, center_a, center_b)
@@ -1325,7 +1327,9 @@ def _solid_depth_key(solid: dict[str, Any]) -> tuple[float, float]:
         + (bounds["y_min"] + bounds["y_max"]) * 0.5
         + (bounds["z_min"] + bounds["z_max"]) * 0.09
     )
-    size = (bounds["x_max"] - bounds["x_min"]) + (bounds["y_max"] - bounds["y_min"]) + (bounds["z_max"] - bounds["z_min"])
+    size = (
+        (bounds["x_max"] - bounds["x_min"]) + (bounds["y_max"] - bounds["y_min"]) + (bounds["z_max"] - bounds["z_min"])
+    )
     return (depth, size)
 
 
@@ -1497,7 +1501,16 @@ def _shade_color(hex_color: str, factor: float, alpha: int) -> tuple[int, int, i
 
 
 def _maybe_glow(hex_color: str, material: str, alpha: int) -> tuple[int, int, int, int] | None:
-    if alpha <= 0 or material not in {"fuel_salt", "coolant_salt", "secondary_salt", "steam", "water", "offgas", "electric_bus", "air"}:
+    if alpha <= 0 or material not in {
+        "fuel_salt",
+        "coolant_salt",
+        "secondary_salt",
+        "steam",
+        "water",
+        "offgas",
+        "electric_bus",
+        "air",
+    }:
         return None
     red, green, blue = ImageColor.getrgb(hex_color)
     return (red, green, blue, alpha)
@@ -1584,7 +1597,7 @@ from pathlib import Path
 CASE_NAME = {case_name!r}
 EXPORTS_DIR = Path(__file__).resolve().parent
 GLTF_PATH = EXPORTS_DIR / {gltf_path.name!r}
-OUTPUT_PATH = EXPORTS_DIR / {case_name + '_cycles.png'!r}
+OUTPUT_PATH = EXPORTS_DIR / {case_name + "_cycles.png"!r}
 
 
 def clear_scene() -> None:

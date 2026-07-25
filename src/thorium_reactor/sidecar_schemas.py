@@ -12,7 +12,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 SUPPORTED_ARTIFACT_STATUS_VERSIONS = {1}
 SUPPORTED_STAGE_MANIFEST_VERSIONS = {1}
 SUPPORTED_PROVENANCE_VERSIONS = {1}

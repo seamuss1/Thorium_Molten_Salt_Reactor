@@ -6,12 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from thorium_reactor.config import load_case_config
 from thorium_reactor.cli import main
+from thorium_reactor.config import load_case_config
 from thorium_reactor.economics import build_commercial_plan, capital_recovery_factor, run_economics_case
 from thorium_reactor.economics.finance import adjusted_overnight_cost_usd, annual_generation_mwh
 from thorium_reactor.paths import create_result_bundle
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from thorium_reactor.config import CaseConfig, load_case_config, load_yaml, resolve_benchmark_path
 from thorium_reactor.paths import ResultBundle
 from thorium_reactor.runtime_context import build_runtime_context
-
 
 CASE_SNAPSHOT_NAME = "case_snapshot.yaml"
 BENCHMARK_SNAPSHOT_NAME = "benchmark_snapshot.yaml"
@@ -63,7 +62,7 @@ def ensure_bundle_inputs(repo_root: Path, bundle: ResultBundle, live_config: Cas
             PROVENANCE_NAME,
             {
                 "case_name": live_config.name,
-                "created_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "created_utc": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                 "dependency_hash": runtime.get("dependency_hash"),
                 "dependency_summary": runtime.get("dependencies", {}),
                 "generator": PROVENANCE_GENERATOR,

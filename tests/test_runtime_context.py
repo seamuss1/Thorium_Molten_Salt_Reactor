@@ -1,7 +1,7 @@
-from pathlib import Path
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -31,6 +31,7 @@ def test_build_runtime_context_routes_git_commands_to_explicit_cwd(tmp_path: Pat
     assert set(git_cwds) == {tmp_path.resolve()}
 
 
+@pytest.mark.slow
 def test_git_worktree_status_hashes_untracked_only_changes(tmp_path: Path) -> None:
     if shutil.which("git") is None:
         pytest.skip("git executable is required for worktree status provenance")
@@ -52,6 +53,7 @@ def test_git_worktree_status_hashes_untracked_only_changes(tmp_path: Path) -> No
     assert changed_status["diff_hash"] != status["diff_hash"]
 
 
+@pytest.mark.slow
 def test_git_worktree_status_hashes_large_untracked_file_contents(tmp_path: Path) -> None:
     if shutil.which("git") is None:
         pytest.skip("git executable is required for worktree status provenance")
@@ -69,6 +71,7 @@ def test_git_worktree_status_hashes_large_untracked_file_contents(tmp_path: Path
     assert changed_status["diff_hash"] != status["diff_hash"]
 
 
+@pytest.mark.slow
 def test_git_worktree_status_hashes_untracked_paths_that_porcelain_would_quote(tmp_path: Path) -> None:
     if shutil.which("git") is None:
         pytest.skip("git executable is required for worktree status provenance")
@@ -87,6 +90,7 @@ def test_git_worktree_status_hashes_untracked_paths_that_porcelain_would_quote(t
     assert changed_status["diff_hash"] != status["diff_hash"]
 
 
+@pytest.mark.slow
 def test_git_worktree_status_hashes_untracked_paths_from_subdirectory_cwd(tmp_path: Path) -> None:
     if shutil.which("git") is None:
         pytest.skip("git executable is required for worktree status provenance")
@@ -108,6 +112,7 @@ def test_git_worktree_status_hashes_untracked_paths_from_subdirectory_cwd(tmp_pa
     assert changed_status["diff_hash"] != status["diff_hash"]
 
 
+@pytest.mark.slow
 def test_git_worktree_status_prefers_repo_root_for_untracked_status_paths(tmp_path: Path) -> None:
     if shutil.which("git") is None:
         pytest.skip("git executable is required for worktree status provenance")
@@ -131,6 +136,7 @@ def test_git_worktree_status_prefers_repo_root_for_untracked_status_paths(tmp_pa
     assert changed_status["diff_hash"] != status["diff_hash"]
 
 
+@pytest.mark.slow
 def test_git_worktree_status_hashes_tracked_trailing_whitespace(tmp_path: Path) -> None:
     if shutil.which("git") is None:
         pytest.skip("git executable is required for worktree status provenance")
@@ -157,6 +163,7 @@ def test_git_worktree_status_hashes_tracked_trailing_whitespace(tmp_path: Path) 
     assert changed_status["diff_hash"] != status["diff_hash"]
 
 
+@pytest.mark.slow
 def test_git_worktree_status_hashes_untracked_embedded_repo_contents(tmp_path: Path) -> None:
     if shutil.which("git") is None:
         pytest.skip("git executable is required for worktree status provenance")
@@ -178,6 +185,7 @@ def test_git_worktree_status_hashes_untracked_embedded_repo_contents(tmp_path: P
     assert changed_status["diff_hash"] != status["diff_hash"]
 
 
+@pytest.mark.slow
 def test_git_worktree_status_hashes_untracked_symlink_targets(tmp_path: Path) -> None:
     if shutil.which("git") is None:
         pytest.skip("git executable is required for worktree status provenance")
@@ -203,6 +211,7 @@ def test_git_worktree_status_hashes_untracked_symlink_targets(tmp_path: Path) ->
     assert changed_status["diff_hash"] != status["diff_hash"]
 
 
+@pytest.mark.slow
 def test_git_worktree_status_hashes_broken_untracked_symlink_targets(tmp_path: Path) -> None:
     if shutil.which("git") is None:
         pytest.skip("git executable is required for worktree status provenance")

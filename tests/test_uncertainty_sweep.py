@@ -13,7 +13,6 @@ from thorium_reactor.uncertainty.sweep import (
     run_uncertainty_sweep_case,
 )
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -86,7 +85,10 @@ def test_apply_sample_perturbs_materials_and_preserves_radial_stack() -> None:
     perturbed = apply_sample_to_case(config.data, parameters, sample)
 
     assert perturbed is not config.data
-    assert perturbed["materials"]["fuel_salt"]["density"]["values"] != config.data["materials"]["fuel_salt"]["density"]["values"]
+    assert (
+        perturbed["materials"]["fuel_salt"]["density"]["values"]
+        != config.data["materials"]["fuel_salt"]["density"]["values"]
+    )
     layers = perturbed["geometry"]["layers"]
     for index in range(1, len(layers)):
         assert float(layers[index]["outer_radius"]) > float(layers[index].get("inner_radius", 0.0))
