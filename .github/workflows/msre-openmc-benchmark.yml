@@ -16,9 +16,9 @@ permissions:
 
 jobs:
   preflight:
-    name: Tests, QA, and dry-run report
+    name: Containerized dry-run report
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
     env:
       CASE_NAME: msre_first_criticality
       PREFLIGHT_RUN_ID: msre-preflight-${{ github.run_id }}-${{ github.run_attempt }}
@@ -32,23 +32,25 @@ jobs:
           docker version
           docker compose version
 
-      - name: Run Python test suite in app container
-        shell: bash
-        run: docker compose run --build --rm app python -m pytest
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Run QA traceability check
-        shell: bash
-        run: docker compose run --rm app python -m thorium_reactor.cli qa --format json
+      # Build once with a persistent layer cache and tag it exactly as the
+      # compose services expect, so the `docker compose run` steps below reuse
+      # this image instead of rebuilding from scratch.
+      - name: Build app image (cached)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/app-runner.Dockerfile
+          tags: thorium-reactor-app:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Run readiness and provenance trust-contract tests
-        shell: bash
-        run: |
-          docker compose run --rm app python -m pytest \
-            tests/test_evidence_contract.py \
-            tests/test_reporting.py \
-            tests/test_paths.py \
-            tests/test_runtime_context.py -q
-
+      # The Python test suite and the QA traceability check run on plain
+      # runners in ci.yml. This job exists to prove the *containerized* CLI
+      # path still works end to end, so it only does what needs the image.
       - name: Generate dry-run MSRE report bundle
         shell: bash
         run: |
