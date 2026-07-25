@@ -114,12 +114,24 @@ in under ~5 minutes.
 
 ---
 
-## Phase 0.5 — Delete first (~2,000–2,500 LOC at low risk)
+## Phase 0.5 — Delete first (~6,200 LOC, and NOT low risk)
 
-New in v2. Every item below was verified dead or consumer-free by
-import/reference tracing. Deleting them first shrinks every later phase —
-the first draft was unknowingly scheduling three separate refactor treatments
-for `integrations.py` alone.
+New in v2. Deleting these first shrinks every later phase — the first draft
+was unknowingly scheduling three separate refactor treatments for
+`integrations.py` alone.
+
+> **Superseded in scope by
+> [`refactor-phase-0-5-verification.md`](refactor-phase-0-5-verification.md).**
+> Every target was re-traced at execution time as this plan requires. **None
+> came back safe to simply delete — all eight are `PARTIAL`.** Read that
+> document before touching any item below; it carries the corrected file
+> lists, the execution order, and five corrections to this plan. The
+> load-bearing surprise: `qa/requirements.yaml` names implementation files
+> and test functions that CI verifies still exist, so several of these
+> deletions break CI unless the QA artifacts are edited in the same commit.
+> Two claims below are outright wrong — `.runtime-env/`/`.mamba/` are live,
+> not dead, and dropping the `physics_core` validators removes real
+> validation rather than dead code.
 
 1. **The external-tool integration subsystem (~800 LOC).**
    `integrations.py` (570 LOC): all five `INTEGRATION_DEFINITIONS` are
@@ -207,7 +219,9 @@ parked rather than deleted).
    `tests/test_gpu_viability_experiments.py`.
 3. **Rewrite `.gitignore`**: drop stock-template sections (~90 lines), the
    duplicate `.pytest_cache/`, the dangerous global `lib/` and `*.xml`
-   ignores, dead `.runtime-env/`/`.mamba/`/`.pip-cache/` entries.
+   ignores, and the truly dead / entries. **Keep 
+   and ** -- verification found both are live and multi-GB on the dev
+   host;  is the interpreter the suite actually runs under.
 4. **Single-source dependencies.** All Dockerfiles switch to
    `pip install -e ".[dev]"` (also finally puts the `reactor` console script
    in containers); `environment*.yml` shrink to
