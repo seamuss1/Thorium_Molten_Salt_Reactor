@@ -21,7 +21,7 @@ is worth doing, but it is a careful multi-file refactor, not a delete.
 | Target | Verdict | LOC | Files to delete | Files to edit first |
 | --- | --- | --- | --- | --- |
 | External-tool integrations | PARTIAL | ~1,100 | 4 | **23** |
-| `msd_tp.py` | PARTIAL | ~1,001 | 3 | 10 |
+| `msd_tp.py` | **do not delete** | 0 | 0 | 0 |
 | `runtime_benchmark.py` + accelerators tail | PARTIAL | ~590 | 2 | 7 |
 | GPU viability experiments (Phase 1) | PARTIAL | ~3,061 | 9 | 3 |
 | Dead env/flag surface | PARTIAL | ~50 | 0 | **19** |
@@ -109,8 +109,31 @@ Ordered so that each step's blockers are already retired:
    the `.openmc` variant. No QA artifact edit was needed after all: the QA
    requirement names `test_container_workflow.py`, which stays. The QA gate
    still reports `passed: true` with 11 requirements.
-3. **`msd_tp.py`** — no production consumer; mind `tests/conftest.py`, whose
-   only fixture serves it.
+3. **`msd_tp.py` — REMOVED FROM THE DELETION LIST. Do not delete it.**
+
+   Every "dead by default" claim about this module is factually true and
+   entirely beside the point. `src/thorium_reactor/data/` does not exist, the
+   `THORIUM_REACTOR_MSD_TP_DATA_DIR` override is set nowhere, and zero
+   shipped cases select the `msd_tp*` providers (they use `evaluated_table`
+   ×12, `thermochemical_equilibrium` ×3, `legacy_correlation` ×2).
+
+   **That is deliberate, and `docs/msd-tp-thermophysical-data.md` says so.**
+   This is a public-safe provider for ORNL MSD-TP data that the repository
+   cannot redistribute: "the public repository does not bundle the extracted
+   MSD-TP CSV files until redistribution rights are confirmed", and "public
+   example cases keep configured properties so the repository remains
+   runnable without redistributed third-party data." The provider is
+   deliberately kept behind a user-supplied data path because the upstream
+   Saline project carries a non-standard license.
+
+   So the module is a working capability for anyone holding licensed access
+   to that data, and the missing data package is the licensing posture
+   working as intended — not rot. Deleting it would remove functionality and
+   quietly reverse a considered legal decision.
+
+   The plan, the adversarial review, and the automated verification pass all
+   independently classified this as dead weight. All three were looking at
+   reference counts; none opened the document that explains the absence.
 4. ~~**Dead env/flag surface incl. `--prefer-gpu`**~~ — **partly done.**
    `--prefer-gpu` is deleted end to end, Python and TypeScript in one commit
    because the frontend build type-checks against the schema.
