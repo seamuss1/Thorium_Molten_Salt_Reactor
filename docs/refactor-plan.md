@@ -219,9 +219,11 @@ parked rather than deleted).
    `tests/test_gpu_viability_experiments.py`.
 3. **Rewrite `.gitignore`**: drop stock-template sections (~90 lines), the
    duplicate `.pytest_cache/`, the dangerous global `lib/` and `*.xml`
-   ignores, and the truly dead / entries. **Keep 
-   and ** -- verification found both are live and multi-GB on the dev
-   host;  is the interpreter the suite actually runs under.
+   ignores, and the truly dead `.pip-cache/` and `.tools/` entries.
+   **Keep `.runtime-env/` and `.mamba/`** — verification found both are live
+   and multi-GB on the dev host, and `.runtime-env` is the interpreter the
+   test suite actually runs under. (v1 called them dead leftovers; that was
+   wrong, and acting on it would have started tracking gigabytes.)
 4. **Single-source dependencies.** All Dockerfiles switch to
    `pip install -e ".[dev]"` (also finally puts the `reactor` console script
    in containers); `environment*.yml` shrink to
