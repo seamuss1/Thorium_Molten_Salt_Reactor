@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import shutil
 import subprocess
 from pathlib import Path
@@ -1138,6 +1139,10 @@ def _coerce_float(value: Any) -> float | None:
     if isinstance(value, bool) or value is None:
         return None
     try:
-        return float(value)
+        result = float(value)
     except (TypeError, ValueError):
         return None
+    # Non-finite values must not survive: json.dumps writes them as bare
+    # Infinity/NaN, which is not valid JSON and fails JSON.parse in the
+    # browser, taking out the whole bundle rather than one metric.
+    return result if math.isfinite(result) else None
