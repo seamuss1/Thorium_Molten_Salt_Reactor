@@ -19,6 +19,9 @@ dependencies = [
   "numpy>=1.26",
   "Pillow>=10.0",
   "scipy>=1.12",
+  # Windows ships no tz database, so zoneinfo has nothing to read and the
+  # rate limiter's timezone lookup fails at import of the web app.
+  "tzdata; platform_system == 'Windows'",
   "uvicorn[standard]>=0.29",
 ]
 
