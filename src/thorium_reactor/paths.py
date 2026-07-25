@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
+import os
 import re
+import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,6 +18,31 @@ from thorium_reactor.runtime_context import build_runtime_context
 PATH_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 ARTIFACT_STATUS_SCHEMA_VERSION = 1
 STAGE_MANIFEST_SCHEMA_VERSION = 1
+
+
+def atomic_write_text(path: Path, contents: str) -> None:
+    """Write a bundle file so readers never observe a partial one.
+
+    The web process polls these files from another process while a CLI run is
+    writing them, so a plain write_text exposes a window where a reader sees a
+    truncated file. The web layer swallows the resulting JSONDecodeError and
+    renders the run as empty, which reads as data loss rather than a retry.
+
+    Writes to a temporary file in the same directory (so os.replace stays on
+    one filesystem and is atomic) and renames over the target.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(contents)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+    finally:
+        # A successful replace already moved the file, so this is a no-op then
+        # and a cleanup when anything above raised.
+        Path(temp_name).unlink(missing_ok=True)
 
 
 @dataclass(slots=True)
@@ -32,22 +61,25 @@ class ResultBundle:
 
     def write_text(self, name: str, contents: str) -> Path:
         path = self.root / name
-        path.write_text(contents, encoding="utf-8")
+        atomic_write_text(path, contents)
         return path
 
     def write_json(self, name: str, payload: object) -> Path:
-        import json
-
         path = self.root / name
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True))
         return path
 
     def write_metrics(self, metrics: dict[str, object]) -> Path:
         path = self.root / "metrics.csv"
-        lines = ["metric,value"]
+        buffer = io.StringIO()
+        # csv.writer, not manual joining: a metric key or value containing a
+        # comma or quote would otherwise emit a row that csv.DictReader (used
+        # by the web layer to read this file back) parses into the wrong keys.
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(["metric", "value"])
         for key, value in metrics.items():
-            lines.append(f"{key},{value}")
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            writer.writerow([key, value])
+        atomic_write_text(path, buffer.getvalue())
         return path
 
 
