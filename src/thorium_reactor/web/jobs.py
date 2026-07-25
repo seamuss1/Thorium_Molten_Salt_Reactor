@@ -59,6 +59,10 @@ class JobManager:
                     append_event(run_dir, "info", phase, f"Starting {phase}.", progress=progress)
                     self._run_phase(run_dir, draft, phase)
                     append_event(run_dir, "info", phase, f"Completed {phase}.", progress=index / len(phases))
+                # Persist the terminal status before emitting the closing event
+                # so a client that refetches when the SSE event arrives always
+                # observes the durable "completed" status, never a stale
+                # "running".
                 status.update({"status": "completed", "phase": "completed", "finished_at": utc_now(), "progress": 1.0})
                 write_status(run_dir, status)
                 append_event(run_dir, "info", "completed", "Run completed.", progress=1.0)
