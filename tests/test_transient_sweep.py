@@ -55,7 +55,6 @@ def test_run_transient_sweep_case_produces_accelerated_bundle(tmp_path: Path) ->
         scenario_name="partial_heat_sink_loss",
         samples=128,
         seed=7,
-        prefer_gpu=True,
     )
 
     assert payload["backend"] in {"python", "numpy", "torch-xpu"}

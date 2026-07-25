@@ -176,8 +176,6 @@ def build_cli_command(draft: SimulationDraft, phase: str) -> list[str]:
         if draft.scenario:
             command.extend(["--scenario", draft.scenario])
         command.extend(["--samples", str(draft.sweep_samples), "--seed", str(draft.sweep_seed)])
-        if draft.prefer_gpu:
-            command.append("--prefer-gpu")
     return command
 
 

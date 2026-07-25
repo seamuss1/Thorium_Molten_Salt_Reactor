@@ -98,7 +98,6 @@ export interface SimulationDraft {
   scenario?: string | null;
   sweep_samples: number;
   sweep_seed: number;
-  prefer_gpu: boolean;
 }
 
 export interface DraftValidationResponse {

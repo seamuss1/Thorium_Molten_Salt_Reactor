@@ -101,7 +101,6 @@ def test_cli_registers_transient_sweep_command() -> None:
             "1024",
             "--seed",
             "7",
-            "--prefer-gpu",
             "--backend",
             "numpy",
         ]
@@ -112,7 +111,6 @@ def test_cli_registers_transient_sweep_command() -> None:
     assert namespace.scenario == "partial_heat_sink_loss"
     assert namespace.samples == 1024
     assert namespace.seed == 7
-    assert namespace.prefer_gpu is True
     assert namespace.backend == "numpy"
 
 

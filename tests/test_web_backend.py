@@ -319,7 +319,6 @@ def test_web_fake_run_records_status_and_streams_events(monkeypatch) -> None:
                 "phases": ["run", "validate", "report"],
                 "sweep_samples": 8,
                 "sweep_seed": 1,
-                "prefer_gpu": False,
             },
         )
         assert response.status_code == 202

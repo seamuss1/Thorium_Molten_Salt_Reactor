@@ -101,7 +101,6 @@ def build_parser() -> argparse.ArgumentParser:
                 help="Number of ensemble trajectories to evaluate.",
             )
             command.add_argument("--seed", type=int, default=42, help="Random seed for the ensemble perturbations.")
-            command.add_argument("--prefer-gpu", action="store_true", help="Deprecated alias for --backend auto.")
             command.add_argument(
                 "--backend",
                 default="auto",
@@ -341,7 +340,6 @@ def main(argv: list[str] | None = None) -> int:
                 scenario_name=args.scenario,
                 samples=args.samples,
                 seed=args.seed,
-                prefer_gpu=args.prefer_gpu,
                 backend=args.backend,
                 dtype=args.dtype,
                 provenance=provenance,
