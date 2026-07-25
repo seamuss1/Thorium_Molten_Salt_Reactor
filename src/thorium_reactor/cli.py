@@ -54,7 +54,6 @@ UNCERTAINTY_COMMANDS = ("uncertainty-sweep",)
 EXTEND_EXISTING_RUN_COMMANDS = (
     "transient",
     "transient-sweep",
-    "runtime-benchmark",
     "economics",
     *UNCERTAINTY_COMMANDS,
     *NATIVE_ADVANCED_COMMANDS,
@@ -81,7 +80,6 @@ def build_parser() -> argparse.ArgumentParser:
         "transient",
         "transient-sweep",
         *UNCERTAINTY_COMMANDS,
-        "runtime-benchmark",
         *NATIVE_ADVANCED_COMMANDS,
         "economics",
         *INTEGRATION_COMMANDS,
@@ -133,23 +131,6 @@ def build_parser() -> argparse.ArgumentParser:
                 "--docker-openmc",
                 action="store_true",
                 help="Run the full uncertainty sweep inside the Docker Compose openmc service.",
-            )
-        if command_name == "runtime-benchmark":
-            command.add_argument("--scenario", default=None, help="Named transient scenario from the case config.")
-            command.add_argument(
-                "--samples", type=int, default=1048576, help="Number of ensemble trajectories per backend."
-            )
-            command.add_argument("--seed", type=int, default=42, help="Random seed for identical backend ensembles.")
-            command.add_argument(
-                "--backends", default="python,numpy,torch-xpu", help="Comma-separated backends to benchmark."
-            )
-            command.add_argument(
-                "--dtype", default="float32", choices=["float32", "float64"], help="Array dtype for vector backends."
-            )
-            command.add_argument(
-                "--fail-on-gpu-fallback",
-                action="store_true",
-                help="Fail if a GPU backend reports PyTorch XPU fallback enabled.",
             )
         if command_name == "economics":
             command.add_argument("--scenario", default=None, help="Named economics scenario from the case config.")
@@ -225,7 +206,6 @@ def main(argv: list[str] | None = None) -> int:
         "benchmark",
         "transient",
         "transient-sweep",
-        "runtime-benchmark",
         "economics",
         *UNCERTAINTY_COMMANDS,
         *NATIVE_ADVANCED_COMMANDS,
@@ -462,48 +442,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(bundle.root)
             print(summary.get("uncertainty_sweep", {}).get("coverage_status", "missing"))
-            return 0
-
-        if args.command == "runtime-benchmark":
-            from thorium_reactor.runtime_benchmark import parse_backend_list, run_runtime_benchmark_case
-
-            summary_path = bundle.root / "summary.json"
-            if summary_path.exists():
-                summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            else:
-                summary = run_case(
-                    config,
-                    bundle,
-                    benchmark=benchmark,
-                    solver_enabled=False,
-                    provenance=provenance,
-                    repo_root=repo_root,
-                )
-            runtime_benchmark = run_runtime_benchmark_case(
-                config,
-                bundle,
-                summary,
-                scenario_name=args.scenario,
-                samples=args.samples,
-                seed=args.seed,
-                backends=parse_backend_list(args.backends),
-                dtype=args.dtype,
-                fail_on_gpu_fallback=args.fail_on_gpu_fallback,
-                provenance=provenance,
-            )
-            refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(
-                bundle,
-                args.command,
-                stage_command,
-                stage_started_utc,
-                stage_artifacts_before,
-                provenance,
-                summary=summary,
-            )
-            print(bundle.root)
-            print(runtime_benchmark["recommendation"].get("backend"))
-            print(runtime_benchmark["recommendation"].get("speedup_vs_reference"))
             return 0
 
         if args.command == "transport":

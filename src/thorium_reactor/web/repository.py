@@ -64,7 +64,6 @@ RAW_ARTIFACTS = (
     "validation.json",
     "transient.json",
     "transient_sweep.json",
-    "runtime_benchmark.json",
     "uncertainty_manifest.json",
     "uncertainty_samples.json",
     "uncertainty_results.json",

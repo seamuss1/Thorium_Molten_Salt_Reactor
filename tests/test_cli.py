@@ -124,27 +124,6 @@ def test_cli_transient_sweep_defaults_to_gpu_sized_ensemble() -> None:
     assert namespace.backend == "auto"
 
 
-def test_cli_registers_runtime_benchmark_command() -> None:
-    parser = build_parser()
-    namespace = parser.parse_args(
-        [
-            "runtime-benchmark",
-            "immersed_pool_reference",
-            "--samples",
-            "128",
-            "--backends",
-            "python,numpy",
-            "--fail-on-gpu-fallback",
-        ]
-    )
-
-    assert namespace.command == "runtime-benchmark"
-    assert namespace.case == "immersed_pool_reference"
-    assert namespace.samples == 128
-    assert namespace.backends == "python,numpy"
-    assert namespace.fail_on_gpu_fallback is True
-
-
 def test_cli_registers_uncertainty_sweep_command() -> None:
     parser = build_parser()
     namespace = parser.parse_args(
