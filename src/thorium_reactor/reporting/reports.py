@@ -741,13 +741,22 @@ def generate_report(
             lines.append(
                 f"- Percentile definitions: `{ensemble_definition.get('percentile_definitions', 'sample percentiles by time step')}`"
             )
-            for parameter in ensemble_definition.get("varied_parameters", [])[:8]:
-                if isinstance(parameter, dict):
-                    lines.append(
-                        f"- Varied `{parameter.get('parameter')}`: unit=`{parameter.get('units')}`, "
-                        f"distribution=`{parameter.get('distribution')}`, bounds=`{parameter.get('bounds')}`, "
-                        f"basis={parameter.get('physical_basis')}"
-                    )
+            # Every varied parameter, not the first eight. The flagship ensemble
+            # perturbs eleven, so the old cap silently dropped three of the
+            # dimensions the sweep actually sampled from the document that
+            # describes the sweep.
+            varied_parameters = [
+                parameter
+                for parameter in ensemble_definition.get("varied_parameters", [])
+                if isinstance(parameter, dict)
+            ]
+            lines.append(f"- Varied parameter count: `{len(varied_parameters)}`")
+            for parameter in varied_parameters:
+                lines.append(
+                    f"- Varied `{parameter.get('parameter')}`: unit=`{parameter.get('units')}`, "
+                    f"distribution=`{parameter.get('distribution')}`, bounds=`{parameter.get('bounds')}`, "
+                    f"basis={parameter.get('physical_basis')}"
+                )
         lines.append(f"- Duration (s): `{transient_sweep.get('duration_s', 'n/a')}`")
         lines.append(f"- Time step (s): `{transient_sweep.get('time_step_s', 'n/a')}`")
         lines.append(f"- Event count: `{transient_sweep.get('event_count', 'n/a')}`")

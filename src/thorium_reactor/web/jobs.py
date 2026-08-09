@@ -176,9 +176,23 @@ def build_cli_command(draft: SimulationDraft, phase: str) -> list[str]:
         if draft.scenario:
             command.extend(["--scenario", draft.scenario])
         command.extend(["--samples", str(draft.sweep_samples), "--seed", str(draft.sweep_seed)])
-        if draft.prefer_gpu:
-            command.append("--prefer-gpu")
+        # Pass the backend explicitly. The old code sent --prefer-gpu, which is
+        # an alias for the "auto" that --backend already defaults to, so the
+        # browser's GPU control selected nothing at all.
+        command.extend(["--backend", resolve_draft_backend(draft), "--dtype", draft.sweep_dtype])
     return command
+
+
+def resolve_draft_backend(draft: SimulationDraft) -> str:
+    """The backend a draft asks for, honouring the deprecated ``prefer_gpu``.
+
+    ``sweep_backend`` wins whenever it is explicit. ``prefer_gpu`` only still
+    speaks for drafts that left the backend at "auto", so an old client that
+    unchecks it gets the CPU path it asked for instead of being ignored.
+    """
+    if draft.sweep_backend != "auto":
+        return draft.sweep_backend
+    return "auto" if draft.prefer_gpu else "numpy"
 
 
 def phase_timeout_seconds(phase: str) -> float:
@@ -225,7 +239,18 @@ def append_event(
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    """Write atomically.
+
+    A reader that catches this file mid-write sees invalid JSON, and the API's
+    read path falls back to inferring status from which files exist -- which
+    reports "completed" as soon as summary.json is present, long before a
+    multi-phase run is done. That torn read ends the SSE stream and detaches the
+    UI from a job that is still running, so the write must never be observable
+    in a partial state.
+    """
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(temporary, path)
 
 
 def is_terminal(status: str) -> bool:

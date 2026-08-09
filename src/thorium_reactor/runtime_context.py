@@ -41,6 +41,9 @@ def build_runtime_context(*, command: list[str] | None = None, cwd: Path | str |
         "backend": {
             "service": service,
             "device": os.environ.get("THORIUM_REACTOR_DEVICE", "host-cpu"),
+            # What the process could actually compute on. Without this a GPU
+            # bundle and a CPU bundle are indistinguishable in provenance.
+            "accelerator": _accelerator_summary(),
         },
         "dependencies": dependency_summary,
         "dependency_hash": _stable_hash(dependency_summary),
@@ -278,6 +281,11 @@ def _dependency_summary() -> dict[str, str]:
         "fastapi",
         "pydantic",
         "matplotlib",
+        # The accelerated transient sweep runs on torch, so its version is part
+        # of what produced the numbers and belongs in the dependency hash. Its
+        # absence made a CPU bundle and a GPU bundle hash identically.
+        "torch",
+        "intel-extension-for-pytorch",
     )
     summary: dict[str, str] = {}
     for name in package_names:
@@ -285,6 +293,31 @@ def _dependency_summary() -> dict[str, str]:
             summary[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
             continue
+    return summary
+
+
+def _accelerator_summary() -> dict[str, Any]:
+    """Describe available compute devices without importing torch to find out.
+
+    Importing torch here would make every CLI command pay the import cost and
+    would defeat the ordering guard in ``accelerators``; so this only reports
+    what is already loaded, plus the environment that selects a device.
+    """
+    summary: dict[str, Any] = {
+        "torch_imported": "torch" in sys.modules,
+        "oneapi_device_selector": os.environ.get("ONEAPI_DEVICE_SELECTOR"),
+        "pytorch_xpu_fallback": os.environ.get("PYTORCH_ENABLE_XPU_FALLBACK"),
+    }
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return summary
+    summary["torch_version"] = getattr(torch, "__version__", None)
+    try:
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            summary["xpu_device_count"] = int(torch.xpu.device_count())
+            summary["xpu_devices"] = [torch.xpu.get_device_name(i) for i in range(torch.xpu.device_count())]
+    except Exception:
+        summary["xpu_devices"] = None
     return summary
 
 

@@ -101,7 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
                 help="Number of ensemble trajectories to evaluate.",
             )
             command.add_argument("--seed", type=int, default=42, help="Random seed for the ensemble perturbations.")
-            command.add_argument("--prefer-gpu", action="store_true", help="Deprecated alias for --backend auto.")
+            command.add_argument(
+                "--prefer-gpu",
+                action="store_true",
+                help="Deprecated alias for --backend auto. Cannot be combined with an explicit --backend.",
+            )
             command.add_argument(
                 "--backend",
                 default="auto",
@@ -360,6 +364,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(bundle.root)
             print(transient_sweep["backend"])
+            device = (transient_sweep.get("backend_report") or {}).get("details") or {}
+            if device.get("device"):
+                print(f"{device['device']} ({device.get('dtype', '')})".strip())
             print(transient_sweep["metrics"]["peak_power_fraction_p95"])
             return 0
 
@@ -710,7 +717,15 @@ def main(argv: list[str] | None = None) -> int:
                 status="completed" if result.get("passed") else "failed",
             )
             print(result["passed"])
-            return 0
+            for check in result.get("checks", []):
+                if isinstance(check, dict) and check.get("status") != "pass":
+                    print(f"{check.get('status', 'unknown').upper()}: {check.get('name')}", file=sys.stderr)
+                    if check.get("message"):
+                        print(f"  {check['message']}", file=sys.stderr)
+            # Exit non-zero when the gate did not pass, so a script or CI job can
+            # act on it. `qa` already behaves this way; `validate` did not, which
+            # made a failing validation indistinguishable from a passing one.
+            return 0 if result.get("passed") else 1
 
         if args.command == "render":
             summary_path = bundle.root / "summary.json"

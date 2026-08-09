@@ -28,18 +28,30 @@ export function Runs() {
     enabled: Boolean(selected)
   });
 
+  // Depend on the run's identity and whether it is live -- not on `detail.data`,
+  // whose object identity changes on every refetch. The listener below triggers
+  // exactly those refetches, so depending on the data made the effect re-run on
+  // every event: each one tore down the EventSource, opened a new one, and
+  // replayed the whole event log from offset zero.
+  const caseName = detail.data?.case_name;
+  const runId = detail.data?.run_id;
+  const isLive = Boolean(detail.data && ["queued", "running"].includes(detail.data.status));
+
   useEffect(() => {
-    if (!detail.data || !["queued", "running"].includes(detail.data.status)) return;
-    const source = new EventSource(`/api/runs/${detail.data.case_name}/${detail.data.run_id}/events`);
+    if (!isLive || !caseName || !runId) return;
+    const source = new EventSource(`/api/runs/${caseName}/${runId}/events`);
     source.addEventListener("run", () => {
-      queryClient.invalidateQueries({ queryKey: ["run", detail.data?.case_name, detail.data?.run_id] });
+      queryClient.invalidateQueries({ queryKey: ["run", caseName, runId] });
       queryClient.invalidateQueries({ queryKey: ["runs"] });
     });
     return () => source.close();
-  }, [detail.data, queryClient]);
+  }, [isLive, caseName, runId, queryClient]);
 
-  const active = detail.data && ["queued", "running"].includes(detail.data.status);
-  const progress = detail.data?.latest_event?.progress;
+  const active = isLive;
+  // Progress comes from the run's own status, not from whichever event happened
+  // to arrive last: log lines carry no progress, so reading the latest event
+  // made the bar flip to indeterminate every time a phase printed a line.
+  const progress = detail.data?.progress ?? detail.data?.latest_event?.progress;
 
   return (
     <div className="page split-page">

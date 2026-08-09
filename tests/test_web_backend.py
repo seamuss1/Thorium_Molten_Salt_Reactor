@@ -14,10 +14,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from thorium_reactor.accelerators import GPU_EFFICIENT_SAMPLE_FLOOR
 from thorium_reactor.paths import create_result_bundle
+from thorium_reactor.transient_sweep import MAX_TRANSIENT_SWEEP_SAMPLES
 from thorium_reactor.web.app import create_app
-from thorium_reactor.web.jobs import append_event
+from thorium_reactor.web.jobs import append_event, build_cli_command
 from thorium_reactor.web.repository import WebRepository
+from thorium_reactor.web.schemas import SimulationDraft
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ADMIN_HEADERS = {"cf-access-authenticated-user-email": "seamusdgallagher@gmail.com"}
@@ -296,11 +299,60 @@ def test_web_transient_sweep_samples_are_bounded() -> None:
         json={
             "case_name": "example_pin",
             "phases": ["transient-sweep"],
-            "sweep_samples": 65_537,
+            "sweep_samples": MAX_TRANSIENT_SWEEP_SAMPLES + 1,
         },
     )
 
     assert response.status_code == 422
+
+
+def test_web_transient_sweep_allows_gpu_efficient_ensembles() -> None:
+    """The browser must be able to reach the regime the accelerator exists for.
+
+    The old ceiling was 65,536 -- exactly the size at which GPU offload has not
+    yet amortized its per-step overhead -- so a browser sweep could never ask
+    for an ensemble where the device is worth using.
+    """
+    assert MAX_TRANSIENT_SWEEP_SAMPLES > GPU_EFFICIENT_SAMPLE_FLOOR
+    draft = SimulationDraft(case_name="example_pin", sweep_samples=GPU_EFFICIENT_SAMPLE_FLOOR)
+
+    assert draft.sweep_samples == GPU_EFFICIENT_SAMPLE_FLOOR
+
+
+def test_web_sweep_backend_selection_reaches_the_cli() -> None:
+    """The browser's compute-backend control must actually select a backend."""
+    for requested in ("auto", "numpy", "torch-cpu", "torch-xpu"):
+        draft = SimulationDraft(case_name="example_pin", phases=["transient-sweep"], sweep_backend=requested)
+        command = build_cli_command(draft, "transient-sweep")
+
+        assert "--backend" in command
+        assert command[command.index("--backend") + 1] == requested
+        # The dead alias must not be forwarded alongside the real control.
+        assert "--prefer-gpu" not in command
+
+
+def test_web_sweep_rejects_unknown_backend() -> None:
+    client = TestClient(create_app(REPO_ROOT))
+
+    response = client.post(
+        "/api/runs",
+        json={"case_name": "example_pin", "phases": ["transient-sweep"], "sweep_backend": "cuda"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_web_legacy_prefer_gpu_false_selects_a_cpu_backend() -> None:
+    """An old client that unchecks "use GPU" must get a CPU backend.
+
+    Previously ``prefer_gpu`` mapped to ``--prefer-gpu``, an alias for the
+    ``auto`` that ``--backend`` already defaulted to, so unchecking it changed
+    nothing and the sweep still ran on the GPU.
+    """
+    draft = SimulationDraft(case_name="example_pin", phases=["transient-sweep"], prefer_gpu=False)
+    command = build_cli_command(draft, "transient-sweep")
+
+    assert command[command.index("--backend") + 1] == "numpy"
 
 
 def test_web_fake_run_records_status_and_streams_events(monkeypatch) -> None:

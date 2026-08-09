@@ -10,6 +10,38 @@ import type {
   SimulationDraft
 } from "./types";
 
+/**
+ * Render an error body as a sentence a person can act on.
+ *
+ * FastAPI answers a schema violation with `detail` as an array of objects, so
+ * assigning it straight to an Error message rendered as "[object Object]" and
+ * told the user nothing about which field was wrong.
+ */
+function formatErrorDetail(detail: unknown): string | null {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object") {
+        const entry = item as { loc?: unknown[]; msg?: string };
+        // Drop the leading "body" segment; the field path is what matters.
+        const field = Array.isArray(entry.loc)
+          ? entry.loc.filter((part) => part !== "body").join(".")
+          : "";
+        const message = entry.msg ?? "is invalid";
+        return field ? `${field}: ${message}` : message;
+      }
+      return String(item);
+    });
+    return messages.length ? messages.join("; ") : null;
+  }
+  if (detail && typeof detail === "object") {
+    const entry = detail as { msg?: string; message?: string };
+    return entry.msg ?? entry.message ?? JSON.stringify(detail);
+  }
+  return null;
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -19,7 +51,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     let detail = response.statusText;
     try {
       const payload = await response.json();
-      detail = payload.detail ?? detail;
+      detail = formatErrorDetail(payload.detail) ?? detail;
     } catch {
       // Keep the HTTP status text.
     }

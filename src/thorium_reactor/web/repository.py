@@ -8,6 +8,7 @@ import mimetypes
 import re
 import shutil
 import tempfile
+import time
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -222,9 +223,11 @@ class WebRepository:
         run_dir = self._run_dir(case_name, run_id)
         if not run_dir.exists():
             raise FileNotFoundError(f"Run '{run_id}' for case '{case_name}' was not found.")
-        status_payload = read_json(run_dir / "job_status.json", {})
+        status_payload = read_status_payload(run_dir)
         status = status_payload.get("status") if isinstance(status_payload, Mapping) else None
-        return str(status) if status else infer_status_from_files(run_dir)
+        if status:
+            return str(status)
+        return infer_status_from_files(run_dir)
 
     def list_docs(self) -> list[DocSummary]:
         docs: list[DocSummary] = []
@@ -312,6 +315,7 @@ class WebRepository:
             artifacts=self._artifacts_for_run(safe_case_name, safe_run_id, run_dir),
             output_sections=self._output_sections(summary, validation),
             latest_event=events[-1] if events else None,
+            progress=_coerce_progress(status_payload.get("progress")),
         )
 
     def _run_summary_record(self, case_name: str, run_id: str, run_dir: Path) -> RunRecord:
@@ -331,6 +335,7 @@ class WebRepository:
             finished_at=status_payload.get("finished_at"),
             metrics=metrics if isinstance(metrics, dict) else {},
             artifacts=self._summary_artifacts_for_run(safe_case_name, safe_run_id, run_dir),
+            progress=_coerce_progress(status_payload.get("progress")),
         )
 
     def _output_sections(self, summary: Any, validation: Any) -> list[OutputSection]:
@@ -657,9 +662,14 @@ class WebRepository:
         performance = as_mapping(sweep.get("runtime_performance"))
         checks = as_mapping(sweep.get("numerical_checks"))
         backend_report = as_mapping(sweep.get("backend_report"))
+        details = as_mapping(backend_report.get("details"))
         metrics = output_metrics(
             ("Samples", sweep.get("samples"), "count", "number"),
             ("Backend", first_present(sweep.get("backend"), backend_report.get("selected")), None, "text"),
+            # Which device did the work, and at what precision. Without these a
+            # reader cannot tell a GPU run from a CPU run in the browser.
+            ("Device", first_present(sweep.get("device"), details.get("device")), None, "text"),
+            ("Precision", first_present(sweep.get("dtype"), details.get("dtype")), None, "text"),
             ("Peak power p95", sweep.get("peak_power_fraction_p95"), "fraction", "number"),
             ("Peak power max", sweep.get("peak_power_fraction_max"), "fraction", "number"),
             ("Final power p50", sweep.get("final_power_fraction_p50"), "fraction", "number"),
@@ -672,7 +682,17 @@ class WebRepository:
         )
         notes = []
         if checks.get("status"):
-            notes.append(f"Numerical checks: {checks['status']}")
+            failures = checks.get("failures") or []
+            notes.append(
+                f"Numerical checks: {checks['status']}"
+                + (f" ({', '.join(str(item) for item in failures)})" if failures else "")
+            )
+        requested = sweep.get("requested_backend") or backend_report.get("requested")
+        selected = first_present(sweep.get("backend"), backend_report.get("selected"))
+        if requested and selected and requested != selected and requested != "auto":
+            # A run that asked for one backend and got another must say so
+            # rather than presenting the substitute as what was requested.
+            notes.append(f"Requested {requested}, ran on {selected}.")
         if backend_report.get("reason"):
             notes.append(str(backend_report["reason"]))
         self._append_section(
@@ -1389,6 +1409,31 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
+def read_status_payload(run_dir: Path) -> Any:
+    """Read job_status.json, tolerating a write that is in flight.
+
+    Writes are atomic, but a reader on a filesystem without atomic rename
+    semantics can still catch a partial file. One retry absorbs that; a file
+    that stays unparseable is genuinely corrupt, so we fall through to
+    inference rather than reporting the run live forever and leaving the event
+    stream open.
+    """
+    path = run_dir / "job_status.json"
+    if not path.exists():
+        return {}
+    payload = read_json(path, None)
+    if payload is None:
+        time.sleep(0.05)
+        payload = read_json(path, None)
+    return payload if payload is not None else {}
+
+
+def _coerce_progress(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return max(0.0, min(1.0, float(value)))
+
+
 def read_json(path: Path, fallback: Any) -> Any:
     if not path.exists():
         return fallback
@@ -1504,6 +1549,12 @@ def infer_status(run_dir: Path, summary: Mapping[str, Any], validation: Mapping[
 
 
 def infer_status_from_files(run_dir: Path) -> str:
+    # The stage manifest is the record of what actually happened. A CLI stage
+    # that raised (a sweep failing its numerical checks, say) leaves the
+    # summary.json an earlier stage wrote, which would otherwise read as a
+    # clean success.
+    if stage_manifest_last_status(run_dir) == "failed":
+        return "failed"
     if (
         (run_dir / "summary.json").exists()
         or (run_dir / "validation.json").exists()
@@ -1513,6 +1564,16 @@ def infer_status_from_files(run_dir: Path) -> str:
     if (run_dir / "build_manifest.json").exists():
         return "built"
     return "unknown"
+
+
+def stage_manifest_last_status(run_dir: Path) -> str | None:
+    """Status of the most recent recorded stage, or None if there is no manifest."""
+    manifest = read_json(run_dir / "stage_manifest.json", {})
+    stages = manifest.get("stages") if isinstance(manifest, Mapping) else None
+    if not isinstance(stages, list) or not stages:
+        return None
+    last = stages[-1]
+    return str(last.get("status")) if isinstance(last, Mapping) and last.get("status") else None
 
 
 def is_viewable_geometry_artifact_path(value: Any) -> bool:

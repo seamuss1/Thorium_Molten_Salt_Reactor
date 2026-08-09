@@ -4,6 +4,7 @@ import json
 import math
 import random
 import time
+from pathlib import Path
 from typing import Any
 
 from thorium_reactor.accelerators import (
@@ -12,6 +13,7 @@ from thorium_reactor.accelerators import (
     ArrayBackend,
     BackendUnavailable,
     backend_report_for_selection,
+    check_memory_budget,
     create_array_backend,
     resolve_runtime_backend,
 )
@@ -19,6 +21,7 @@ from thorium_reactor.capabilities import BALANCE_OF_PLANT, THERMAL_NETWORK, vali
 from thorium_reactor.chemistry import build_chemistry_assumptions
 from thorium_reactor.literature_models import build_property_uncertainty_summary
 from thorium_reactor.precursors import (
+    LOOP_SEGMENT_PRECURSOR_TRANSPORT_MODEL,
     build_initial_precursor_state,
     normalize_loop_segments,
     precursor_group_summary,
@@ -38,6 +41,19 @@ from thorium_reactor.transient import (
 DEFAULT_TRANSIENT_SWEEP_MODEL = "reduced_order_transient_proxy_ensemble"
 DEFAULT_TRANSIENT_SWEEP_SAMPLES = 65_536
 MIN_TRANSIENT_SWEEP_SAMPLES = 32
+#: Largest ensemble a browser-launched sweep may request. Well above the point
+#: where GPU offload pays off (see accelerators.GPU_EFFICIENT_SAMPLE_FLOOR), and
+#: still under a gigabyte of device state in float32.
+MAX_TRANSIENT_SWEEP_SAMPLES = 4_194_304
+
+
+class NumericalHealthError(RuntimeError):
+    """Raised when the integrated ensemble fails its own numerical checks."""
+
+    def __init__(self, checks: dict[str, Any]) -> None:
+        failures = ", ".join(checks.get("failures", [])) or "unknown"
+        super().__init__(f"Transient sweep numerical checks failed: {failures}.")
+        self.checks = checks
 
 
 def run_transient_sweep_case(
@@ -68,7 +84,7 @@ def run_transient_sweep_case(
         payload["provenance"] = json.loads(json.dumps(provenance))
 
     transient_path = bundle.write_json("transient_sweep.json", payload)
-    summary["transient_sweep"] = transient_sweep_summary(payload, history_path=str(transient_path))
+    summary["transient_sweep"] = transient_sweep_summary(payload, history_path=_bundle_relative_path(transient_path))
     summary.setdefault("metrics", {})
     summary["metrics"]["transient_sweep_peak_power_fraction_p95"] = payload["metrics"]["peak_power_fraction_p95"]
     summary["metrics"]["transient_sweep_peak_fuel_temperature_c_p95"] = payload["metrics"][
@@ -111,16 +127,14 @@ def build_transient_sweep_payload(
         transient_config,
         property_uncertainty=property_uncertainty,
     )
+    sample_count = max(int(samples), MIN_TRANSIENT_SWEEP_SAMPLES)
     ensemble_definition = _build_ensemble_definition(
         uncertainty_model,
         scenario=scenario,
         seed=int(seed),
-        requested_samples=max(int(samples), MIN_TRANSIENT_SWEEP_SAMPLES),
+        requested_samples=sample_count,
     )
-    sample_count = max(int(samples), MIN_TRANSIENT_SWEEP_SAMPLES)
-    requested_backend = "auto" if backend == "auto" else backend
-    if prefer_gpu and backend == "auto":
-        requested_backend = "auto"
+    requested_backend = _resolve_requested_backend(backend, prefer_gpu=prefer_gpu)
 
     (
         history,
@@ -137,16 +151,22 @@ def build_transient_sweep_payload(
         chemistry=chemistry,
         samples=sample_count,
         seed=int(seed),
-        prefer_gpu=prefer_gpu,
         uncertainty_model=uncertainty_model,
         backend_name=requested_backend,
         dtype=dtype,
     )
 
+    if numerical_checks.get("status") != "ok":
+        # The ensemble did not pass its own checks. Callers must not be able to
+        # publish a bundle that quietly records "failed" next to its metrics.
+        raise NumericalHealthError(numerical_checks)
+
     payload = {
         "case": config.name,
         "model": DEFAULT_TRANSIENT_SWEEP_MODEL,
         "backend": backend_label,
+        "requested_backend": requested_backend,
+        "dtype": backend_report.get("details", {}).get("dtype") if backend_report.get("details") else dtype,
         "samples": sample_count,
         "seed": int(seed),
         "scenario": scenario,
@@ -168,6 +188,58 @@ def build_transient_sweep_payload(
     return payload
 
 
+def _resolve_requested_backend(backend: str, *, prefer_gpu: bool) -> str:
+    """Map the CLI/web backend request onto a concrete accelerator request.
+
+    ``--prefer-gpu`` is the deprecated spelling of ``--backend auto``. It only
+    means anything when no explicit backend was given: asking for
+    ``--backend numpy --prefer-gpu`` must keep numpy rather than silently
+    upgrading to the GPU, and asking for ``--prefer-gpu`` alone must not be a
+    no-op just because ``--backend`` happens to default to ``auto``.
+    """
+    requested = (backend or "auto").strip().lower()
+    if requested == "auto":
+        return "auto"
+    if prefer_gpu:
+        raise BackendUnavailable(
+            f"--prefer-gpu is the deprecated spelling of --backend auto and conflicts with "
+            f"--backend {requested}. Pass only one of them."
+        )
+    return requested
+
+
+def _effective_loop_segments(
+    model_parameters: dict[str, Any], baseline: dict[str, Any]
+) -> list[dict[str, float | str]]:
+    """The loop segments the vectorized integrator will actually allocate.
+
+    Honours the configured precursor transport model, as the reference
+    integrator does. The two-region model is algebraically the single-segment
+    case of the segmented model -- same steady state, same implicit step -- so
+    collapsing the segment list reproduces it exactly.
+    """
+    transport_model = str(model_parameters["precursor_transport_model"])
+    if transport_model == LOOP_SEGMENT_PRECURSOR_TRANSPORT_MODEL:
+        return normalize_loop_segments(baseline.get("precursor_loop_segments"))
+    return normalize_loop_segments(None)
+
+
+def _bundle_relative_path(path: Any) -> str:
+    """Path recorded in the bundle, relative to the repository root.
+
+    Absolute host paths leak the machine layout into summary.json and report.md
+    and break the moment a bundle is copied or read from inside a container.
+    """
+    resolved = Path(path)
+    for parent in resolved.parents:
+        if parent.parent.name == "results" or parent.name == "results":
+            try:
+                return resolved.relative_to(parent.parent.parent).as_posix()
+            except ValueError:
+                break
+    return resolved.name
+
+
 def transient_sweep_summary(payload: dict[str, Any], *, history_path: str) -> dict[str, Any]:
     metrics = payload["metrics"]
     property_uncertainty = payload["property_uncertainty"]
@@ -175,6 +247,11 @@ def transient_sweep_summary(payload: dict[str, Any], *, history_path: str) -> di
         "status": "completed",
         "model": DEFAULT_TRANSIENT_SWEEP_MODEL,
         "backend": payload["backend"],
+        "requested_backend": payload.get("requested_backend"),
+        "device": (payload.get("backend_report") or {}).get("details", {}).get("device")
+        if (payload.get("backend_report") or {}).get("details")
+        else None,
+        "dtype": payload.get("dtype"),
         "samples": payload["samples"],
         "seed": payload["seed"],
         "scenario_name": payload["scenario"]["name"],
@@ -331,7 +408,6 @@ def _integrate_transient_ensemble(
     chemistry: dict[str, Any],
     samples: int,
     seed: int,
-    prefer_gpu: bool,
     uncertainty_model: dict[str, float],
     backend_name: str,
     dtype: str,
@@ -343,6 +419,7 @@ def _integrate_transient_ensemble(
         seed=seed,
     )
     if selection.selected == "python":
+        reference_backend = create_array_backend("python", dtype=selection.dtype, seed=seed)
         return _integrate_transient_ensemble_reference(
             baseline=baseline,
             scenario=scenario,
@@ -351,17 +428,32 @@ def _integrate_transient_ensemble(
             chemistry=chemistry,
             samples=samples,
             seed=seed,
-            prefer_gpu=prefer_gpu,
             uncertainty_model=uncertainty_model,
-            backend_report=backend_report_for_selection(selection, seed=seed),
+            backend_report=backend_report_for_selection(selection, seed=seed, backend=reference_backend),
         )
     if selection.selected not in VECTOR_ARRAY_BACKENDS:
         raise BackendUnavailable(f"Backend {selection.selected} cannot run the vectorized transient sweep.")
-    vector_backend = create_array_backend(selection.selected, dtype=dtype, seed=seed)
+    vector_backend = create_array_backend(selection.selected, dtype=selection.dtype, seed=seed)
     assert isinstance(vector_backend, ArrayBackend)
+    # Refuse an ensemble that cannot fit before spending minutes discovering it.
+    # Budget the segment count the integrator will actually allocate: the
+    # two-region model collapses to a single segment regardless of how many the
+    # case configures, so using the configured count would reject a run that fits.
+    memory_budget = check_memory_budget(
+        vector_backend,
+        samples=samples,
+        dtype=selection.dtype,
+        groups=len(list(model_parameters["delayed_neutron_precursor_groups"])),
+        loop_segments=len(_effective_loop_segments(model_parameters, baseline)),
+    )
     return _integrate_transient_ensemble_vectorized(
         array_backend=vector_backend,
-        backend_report=backend_report_for_selection(selection, seed=seed),
+        # Describe the instance we actually run on, rather than building a
+        # second device context purely to write the report.
+        backend_report={
+            **backend_report_for_selection(selection, seed=seed, backend=vector_backend),
+            "memory_budget": memory_budget,
+        },
         baseline=baseline,
         scenario=scenario,
         model_parameters=model_parameters,
@@ -382,11 +474,10 @@ def _integrate_transient_ensemble_reference(
     chemistry: dict[str, Any],
     samples: int,
     seed: int,
-    prefer_gpu: bool,
     uncertainty_model: dict[str, float],
     backend_report: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], dict[str, Any], str, dict[str, Any], dict[str, Any], dict[str, Any]]:
-    integrate_start = time.perf_counter()
+    setup_start = time.perf_counter()
     backend = "python"
     perturbations = _build_perturbations(samples, seed, uncertainty_model)
 
@@ -500,7 +591,12 @@ def _integrate_transient_ensemble_reference(
     peak_power_fraction_max = 1.0
     peak_fuel_temperature_c_max = steady_fuel_temp_c
     peak_corrosion_index_max = float(chemistry_baseline.get("corrosion_index", 1.0))
+    trajectory_health = _new_trajectory_health()
 
+    # Timed from here so this matches the vectorized path, which also excludes
+    # perturbation build and precursor initialization from elapsed_s.
+    setup_elapsed_s = time.perf_counter() - setup_start
+    integrate_start = time.perf_counter()
     for step in range(step_count + 1):
         time_s = step * dt
         dt_days = dt / 86400.0
@@ -774,6 +870,17 @@ def _integrate_transient_ensemble_reference(
         peak_power_fraction_max = max(peak_power_fraction_max, max(power_fraction))
         peak_fuel_temperature_c_max = max(peak_fuel_temperature_c_max, max(fuel_temp_c))
         peak_corrosion_index_max = max(peak_corrosion_index_max, max(corrosion_index))
+        _observe_trajectory_extrema(
+            trajectory_health,
+            power_min=min(power_fraction),
+            power_max=max(power_fraction),
+            temp_min=min(min(fuel_temp_c), min(graphite_temp_c), min(coolant_temp_c)),
+            temp_max=max(max(fuel_temp_c), max(graphite_temp_c), max(coolant_temp_c)),
+            fissile_min=min(fissile_inventory_fraction),
+            protactinium_min=min(protactinium_inventory_fraction),
+            corrosion_min=min(corrosion_index),
+        )
+        _observe_trajectory_history(trajectory_health, step=step, time_s=time_s, history_row=history[-1])
 
     metrics = {
         "duration_s": _round_float(duration_s),
@@ -797,23 +904,17 @@ def _integrate_transient_ensemble_reference(
         "peak_corrosion_index_p95": _round_float(max(item["corrosion_index_p95"] for item in history)),
         "peak_corrosion_index_max": _round_float(peak_corrosion_index_max),
     }
-    if prefer_gpu:
-        metrics["requested_gpu_backend"] = True
     elapsed_s = time.perf_counter() - integrate_start
     runtime_performance = {
         "elapsed_s": _round_float(elapsed_s),
+        "setup_s": _round_float(setup_elapsed_s),
         "sample_steps_per_s": _round_float((samples * max(len(history), 1)) / max(elapsed_s, 1.0e-12)),
         "backend_memory_allocated_bytes": None,
+        "backend_peak_memory_allocated_bytes": None,
     }
     numerical_checks = _reference_numerical_checks(
         metrics=metrics,
-        power_fraction=power_fraction,
-        fuel_temp_c=fuel_temp_c,
-        graphite_temp_c=graphite_temp_c,
-        coolant_temp_c=coolant_temp_c,
-        fissile_inventory_fraction=fissile_inventory_fraction,
-        protactinium_inventory_fraction=protactinium_inventory_fraction,
-        corrosion_index=corrosion_index,
+        trajectory_health=trajectory_health,
         precursor_states=precursor_states,
     )
     metrics["numerical_health"] = numerical_checks["status"]
@@ -836,6 +937,8 @@ def _integrate_transient_ensemble_vectorized(
     uncertainty_model: dict[str, float],
 ) -> tuple[list[dict[str, Any]], dict[str, Any], str, dict[str, Any], dict[str, Any], dict[str, Any]]:
     backend = array_backend
+    backend.reset_peak_memory_stats()
+    setup_start = time.perf_counter()
     perturbations = _build_backend_perturbations(backend, samples, seed, uncertainty_model)
 
     dt = max(float(scenario["time_step_s"]), 0.05)
@@ -887,7 +990,7 @@ def _integrate_transient_ensemble_vectorized(
     )
 
     groups = list(model_parameters["delayed_neutron_precursor_groups"])
-    loop_segments = normalize_loop_segments(baseline.get("precursor_loop_segments"))
+    loop_segments = _effective_loop_segments(model_parameters, baseline)
     initial_flow_fraction = backend.clip(perturbations["flow_scale"], 0.05, 1.5)
     initial_cleanup_rate_s = float(baseline["cleanup_removal_efficiency"]) * backend.clip(
         perturbations["cleanup_scale"], 0.0, 2.5
@@ -926,7 +1029,11 @@ def _integrate_transient_ensemble_vectorized(
         1.0e-12,
     )
 
+    trajectory_health = _new_trajectory_health()
+    device_extrema: dict[str, Any] = {}
+
     backend.synchronize()
+    setup_elapsed_s = time.perf_counter() - setup_start
     integrate_start = time.perf_counter()
     for step in range(step_count + 1):
         time_s = step * dt
@@ -1118,11 +1225,24 @@ def _integrate_transient_ensemble_vectorized(
             backend, power_fraction, power_target, dt, float(model_parameters["power_response_time_s"])
         )
 
-        power_band = backend.percentiles(power_fraction, (0.05, 0.50, 0.95))
-        fuel_band = backend.percentiles(fuel_temp_c, (0.05, 0.50, 0.95))
-        reactivity_band = backend.percentiles(final_total_reactivity_pcm, (0.05, 0.50, 0.95))
-        corrosion_band = backend.percentiles(corrosion_index, (0.05, 0.50, 0.95))
-        core_delayed_source_band = backend.percentiles(core_delayed_neutron_source_fraction, (0.05, 0.50, 0.95))
+        # One host transfer for all five series, rather than five separate
+        # device synchronizations per time step.
+        (
+            power_band,
+            fuel_band,
+            reactivity_band,
+            corrosion_band,
+            core_delayed_source_band,
+        ) = backend.percentiles_batch(
+            [
+                power_fraction,
+                fuel_temp_c,
+                final_total_reactivity_pcm,
+                corrosion_index,
+                core_delayed_neutron_source_fraction,
+            ],
+            (0.05, 0.50, 0.95),
+        )
         history.append(
             {
                 "time_s": _round_float(time_s),
@@ -1146,6 +1266,21 @@ def _integrate_transient_ensemble_vectorized(
         peak_power_fraction_max = max(peak_power_fraction_max, backend.max_scalar(power_fraction))
         peak_fuel_temperature_c_max = max(peak_fuel_temperature_c_max, backend.max_scalar(fuel_temp_c))
         peak_corrosion_index_max = max(peak_corrosion_index_max, backend.max_scalar(corrosion_index))
+        # Exact per-sample extrema over every state, accumulated as device
+        # scalars. Percentile bands would miss an excursion confined to fewer
+        # than 5% of samples, and reducing to the host each step would cost a
+        # synchronization -- so reduce on device here and read the accumulators
+        # once, after the loop.
+        device_extrema = _accumulate_device_extrema(
+            backend,
+            device_extrema,
+            power_fraction=power_fraction,
+            temperatures=(fuel_temp_c, graphite_temp_c, coolant_temp_c),
+            corrosion_index=corrosion_index,
+            fissile_inventory_fraction=fissile_inventory_fraction,
+            protactinium_inventory_fraction=protactinium_inventory_fraction,
+        )
+        _observe_trajectory_history(trajectory_health, step=step, time_s=time_s, history_row=history[-1])
 
     backend.synchronize()
     elapsed_s = time.perf_counter() - integrate_start
@@ -1173,19 +1308,18 @@ def _integrate_transient_ensemble_vectorized(
     }
     runtime_performance = {
         "elapsed_s": _round_float(elapsed_s),
+        "setup_s": _round_float(setup_elapsed_s),
         "sample_steps_per_s": _round_float((samples * (step_count + 1)) / max(elapsed_s, 1.0e-12)),
         "backend_memory_allocated_bytes": backend.memory_allocated_bytes(),
+        # Peak is what a VRAM budget has to cover; current allocation
+        # understates it by roughly 2x once transients are freed.
+        "backend_peak_memory_allocated_bytes": backend.max_memory_allocated_bytes(),
     }
     numerical_checks = _vector_numerical_checks(
         backend,
         metrics=metrics,
-        power_fraction=power_fraction,
-        fuel_temp_c=fuel_temp_c,
-        graphite_temp_c=graphite_temp_c,
-        coolant_temp_c=coolant_temp_c,
-        fissile_inventory_fraction=fissile_inventory_fraction,
-        protactinium_inventory_fraction=protactinium_inventory_fraction,
-        corrosion_index=corrosion_index,
+        trajectory_health=trajectory_health,
+        device_extrema=device_extrema,
         core_inventory=core_inventory,
         segment_inventory=segment_inventory,
     )
@@ -1201,9 +1335,15 @@ def _build_backend_perturbations(
     seed: int,
     uncertainty_model: dict[str, float],
 ) -> dict[str, Any]:
-    # Use the reference RNG stream so CPU/GPU benchmarks compare the same ensemble.
-    raw = _build_perturbations(samples, seed, uncertainty_model)
-    return {key: backend.asarray(value) for key, value in raw.items()}
+    """Build the ensemble perturbations for a vector backend.
+
+    Uses the same ``random.Random`` stream as the reference path so CPU and GPU
+    runs compare the same ensemble, but materializes each parameter one at a
+    time and hands it straight to the device. Building all eleven Python lists
+    first costs roughly 30 bytes per float object -- about 5 GB of host RAM at
+    16.7M samples, which is enough to destabilize the machine.
+    """
+    return {key: backend.asarray(values) for key, values in _iter_perturbation_arrays(samples, seed, uncertainty_model)}
 
 
 def _first_order_step_backend(backend: ArrayBackend, current: Any, target: Any, dt: float, tau_s: float) -> Any:
@@ -1295,8 +1435,9 @@ def _step_precursors_vectorized(
                     + dt * previous_rate * affine_constants[-1]
                 )
                 prior_slope = dt * previous_rate * affine_slopes[-1]
-            affine_constants.append(prior_constant / backend.maximum(diagonal, 1.0e-18))
-            affine_slopes.append(prior_slope / backend.maximum(diagonal, 1.0e-18))
+            safe_diagonal = backend.maximum(diagonal, 1.0e-18)
+            affine_constants.append(prior_constant / safe_diagonal)
+            affine_slopes.append(prior_slope / safe_diagonal)
         core_diagonal = 1.0 + dt * (core_transport_rate_s + decay)
         rhs_core = backend.maximum(core_inventory[:, group_index], 0.0) + dt * source_rate
         return_rate = dt * segment_rates[-1]
@@ -1382,16 +1523,137 @@ def _annotate_vectorized_precursor_baseline(
     baseline["precursor_loop_segment_summary"] = segment_summaries
 
 
+#: Shared non-negativity tolerance. The vectorized path may run in float32 and
+#: the reference in float64, but "did an inventory go negative" must mean the
+#: same thing on both, or a parity comparison of the checks is meaningless.
+PRECURSOR_NON_NEGATIVE_TOLERANCE = 1.0e-7
+POWER_FRACTION_CEILING = 10.0
+TEMPERATURE_CEILING_C = 2500.0
+
+
+def _new_trajectory_health() -> dict[str, Any]:
+    return {
+        "power_fraction_min": math.inf,
+        "power_fraction_max": -math.inf,
+        "temperature_min_c": math.inf,
+        "temperature_max_c": -math.inf,
+        "fissile_inventory_min": math.inf,
+        "protactinium_inventory_min": math.inf,
+        "corrosion_index_min": math.inf,
+        "non_finite_steps": [],
+        "steps_observed": 0,
+    }
+
+
+def _observe_trajectory_history(
+    health: dict[str, Any], *, step: int, time_s: float, history_row: dict[str, Any]
+) -> None:
+    """Screen every recorded step for a non-finite percentile band.
+
+    The band values already crossed to the host this step, so this costs no
+    extra synchronization. Per-sample extrema are tracked separately, on device.
+    """
+    health["steps_observed"] += 1
+    if len(health["non_finite_steps"]) < 8 and not all(
+        math.isfinite(float(value)) for value in history_row.values() if isinstance(value, (int, float))
+    ):
+        health["non_finite_steps"].append({"step": step, "time_s": _round_float(time_s)})
+
+
+def _observe_trajectory_extrema(
+    health: dict[str, Any],
+    *,
+    power_min: float,
+    power_max: float,
+    temp_min: float,
+    temp_max: float,
+    fissile_min: float,
+    protactinium_min: float,
+    corrosion_min: float,
+) -> None:
+    health["power_fraction_min"] = min(health["power_fraction_min"], power_min)
+    health["power_fraction_max"] = max(health["power_fraction_max"], power_max)
+    health["temperature_min_c"] = min(health["temperature_min_c"], temp_min)
+    health["temperature_max_c"] = max(health["temperature_max_c"], temp_max)
+    health["fissile_inventory_min"] = min(health["fissile_inventory_min"], fissile_min)
+    health["protactinium_inventory_min"] = min(health["protactinium_inventory_min"], protactinium_min)
+    health["corrosion_index_min"] = min(health["corrosion_index_min"], corrosion_min)
+
+
+def _accumulate_device_extrema(
+    backend: ArrayBackend,
+    accumulators: dict[str, Any],
+    *,
+    power_fraction: Any,
+    temperatures: tuple[Any, ...],
+    corrosion_index: Any,
+    fissile_inventory_fraction: Any,
+    protactinium_inventory_fraction: Any,
+) -> dict[str, Any]:
+    """Fold this step's exact extrema into running device-side scalars.
+
+    Everything stays on the device, so a 3,601-step sweep pays one host
+    transfer for the whole trajectory instead of one per step per quantity.
+    """
+
+    def fold(key: str, value: Any, reducer: str) -> None:
+        take_max = reducer == "max"
+        reduced = backend.amax(value) if take_max else backend.amin(value)
+        current = accumulators.get(key)
+        if current is None:
+            accumulators[key] = reduced
+        elif take_max:
+            accumulators[key] = backend.maximum(current, reduced)
+        else:
+            accumulators[key] = backend.minimum(current, reduced)
+
+    fold("power_min", power_fraction, "min")
+    fold("power_max", power_fraction, "max")
+    for temperature in temperatures:
+        fold("temp_min", temperature, "min")
+        fold("temp_max", temperature, "max")
+    fold("corrosion_min", corrosion_index, "min")
+    fold("fissile_min", fissile_inventory_fraction, "min")
+    fold("protactinium_min", protactinium_inventory_fraction, "min")
+    return accumulators
+
+
+def _trajectory_checks(health: dict[str, Any]) -> dict[str, bool]:
+    observed = health["steps_observed"] > 0
+    return {
+        "history_finite_at_every_step": not health["non_finite_steps"],
+        "power_fraction_bounded_over_trajectory": observed
+        and health["power_fraction_min"] >= 0.0
+        and health["power_fraction_max"] <= POWER_FRACTION_CEILING,
+        "temperatures_bounded_over_trajectory": observed
+        and health["temperature_min_c"] > 0.0
+        and health["temperature_max_c"] < TEMPERATURE_CEILING_C,
+        "corrosion_index_positive_over_trajectory": observed and health["corrosion_index_min"] > 0.0,
+    }
+
+
+def _finalize_numerical_checks(
+    checks: dict[str, bool], health: dict[str, Any], *, extra: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    resolved = {**checks, **_trajectory_checks(health)}
+    return {
+        "status": "ok" if all(resolved.values()) else "failed",
+        "checks": resolved,
+        "failures": [key for key, value in resolved.items() if not value],
+        "trajectory": {
+            key: (None if value in (math.inf, -math.inf) else _round_float(value))
+            if isinstance(value, float)
+            else value
+            for key, value in health.items()
+        },
+        **(extra or {}),
+    }
+
+
 def _reference_numerical_checks(
     *,
     metrics: dict[str, Any],
-    power_fraction: list[float],
-    fuel_temp_c: list[float],
-    graphite_temp_c: list[float],
-    coolant_temp_c: list[float],
-    fissile_inventory_fraction: list[float],
-    protactinium_inventory_fraction: list[float],
-    corrosion_index: list[float],
+    trajectory_health: dict[str, Any],
     precursor_states: list[dict[str, Any]],
 ) -> dict[str, Any]:
     precursor_min = min(
@@ -1409,133 +1671,81 @@ def _reference_numerical_checks(
         "finite_metrics": all(
             math.isfinite(float(value)) for value in metrics.values() if isinstance(value, (int, float))
         ),
-        "power_fraction_bounded": min(power_fraction) >= 0.0 and max(power_fraction) <= 10.0,
-        "temperatures_bounded": min(fuel_temp_c + graphite_temp_c + coolant_temp_c) > 0.0
-        and max(fuel_temp_c + graphite_temp_c + coolant_temp_c) < 2500.0,
-        "precursor_inventory_non_negative": precursor_min >= -1.0e-9,
-        "fissile_inventory_non_negative": min(fissile_inventory_fraction) >= 0.0,
-        "protactinium_inventory_non_negative": min(protactinium_inventory_fraction) >= 0.0,
-        "corrosion_index_positive": min(corrosion_index) > 0.0,
+        "precursor_inventory_non_negative": precursor_min >= -PRECURSOR_NON_NEGATIVE_TOLERANCE,
+        "fissile_inventory_non_negative": trajectory_health["fissile_inventory_min"] >= 0.0,
+        "protactinium_inventory_non_negative": trajectory_health["protactinium_inventory_min"] >= 0.0,
     }
-    return {
-        "status": "ok" if all(checks.values()) else "failed",
-        "checks": checks,
-        "failures": [key for key, value in checks.items() if not value],
-    }
+    return _finalize_numerical_checks(checks, trajectory_health)
 
 
 def _vector_numerical_checks(
     backend: ArrayBackend,
     *,
     metrics: dict[str, Any],
-    power_fraction: Any,
-    fuel_temp_c: Any,
-    graphite_temp_c: Any,
-    coolant_temp_c: Any,
-    fissile_inventory_fraction: Any,
-    protactinium_inventory_fraction: Any,
-    corrosion_index: Any,
+    trajectory_health: dict[str, Any],
+    device_extrema: dict[str, Any],
     core_inventory: Any,
     segment_inventory: Any,
 ) -> dict[str, Any]:
-    min_temp = min(
-        backend.min_scalar(fuel_temp_c), backend.min_scalar(graphite_temp_c), backend.min_scalar(coolant_temp_c)
-    )
-    max_temp = max(
-        backend.max_scalar(fuel_temp_c), backend.max_scalar(graphite_temp_c), backend.max_scalar(coolant_temp_c)
+    # The single host transfer for the whole trajectory: every extremum below
+    # was reduced on device, once per step, and is read exactly here.
+    _observe_trajectory_extrema(
+        trajectory_health,
+        power_min=backend.scalar(device_extrema["power_min"]),
+        power_max=backend.scalar(device_extrema["power_max"]),
+        temp_min=backend.scalar(device_extrema["temp_min"]),
+        temp_max=backend.scalar(device_extrema["temp_max"]),
+        fissile_min=backend.scalar(device_extrema["fissile_min"]),
+        protactinium_min=backend.scalar(device_extrema["protactinium_min"]),
+        corrosion_min=backend.scalar(device_extrema["corrosion_min"]),
     )
     checks = {
         "finite_metrics": all(
             math.isfinite(float(value)) for value in metrics.values() if isinstance(value, (int, float))
         ),
-        "power_fraction_bounded": backend.min_scalar(power_fraction) >= 0.0
-        and backend.max_scalar(power_fraction) <= 10.0,
-        "temperatures_bounded": min_temp > 0.0 and max_temp < 2500.0,
         "precursor_inventory_non_negative": min(
             backend.min_scalar(core_inventory), backend.min_scalar(segment_inventory)
         )
-        >= -1.0e-7,
-        "fissile_inventory_non_negative": backend.min_scalar(fissile_inventory_fraction) >= 0.0,
-        "protactinium_inventory_non_negative": backend.min_scalar(protactinium_inventory_fraction) >= 0.0,
-        "corrosion_index_positive": backend.min_scalar(corrosion_index) > 0.0,
+        >= -PRECURSOR_NON_NEGATIVE_TOLERANCE,
+        "fissile_inventory_non_negative": trajectory_health["fissile_inventory_min"] >= 0.0,
+        "protactinium_inventory_non_negative": trajectory_health["protactinium_inventory_min"] >= 0.0,
     }
-    return {
-        "status": "ok" if all(checks.values()) else "failed",
-        "checks": checks,
-        "failures": [key for key, value in checks.items() if not value],
-    }
+    return _finalize_numerical_checks(checks, trajectory_health)
+
+
+#: The ensemble parameters, in the exact order they consume the RNG stream.
+#: Both the reference path and the vector path walk this list, so the two
+#: always draw the identical ensemble for a given seed. Order is load-bearing:
+#: changing it changes every result.
+PERTURBATION_SPECS: tuple[tuple[str, str, float, float, float], ...] = (
+    ("event_reactivity_scale", "event_reactivity_sigma_fraction", 1.0, 0.55, 1.55),
+    ("flow_scale", "flow_sigma_fraction", 1.0, 0.65, 1.45),
+    ("heat_sink_scale", "heat_sink_sigma_fraction", 1.0, 0.6, 1.45),
+    ("cleanup_scale", "cleanup_sigma_fraction", 1.0, 0.6, 1.6),
+    ("temperature_feedback_scale", "temperature_feedback_sigma_fraction", 1.0, 0.8, 1.2),
+    ("precursor_worth_scale", "precursor_worth_sigma_fraction", 1.0, 0.75, 1.25),
+    ("xenon_worth_scale", "xenon_worth_sigma_fraction", 1.0, 0.7, 1.3),
+    ("sink_temp_bias_c", "sink_offset_sigma_c", 0.0, -math.inf, math.inf),
+    ("redox_bias_ev", "redox_setpoint_sigma_ev", 0.0, -math.inf, math.inf),
+    ("impurity_ingress_scale", "impurity_ingress_sigma_fraction", 1.0, 0.5, 1.8),
+    ("gas_stripping_scale", "gas_stripping_sigma_fraction", 1.0, 0.85, 1.15),
+)
+
+
+def _iter_perturbation_arrays(samples: int, seed: int, uncertainty_model: dict[str, float]) -> Any:
+    """Yield ``(name, values)`` one parameter at a time, in RNG order.
+
+    Streaming keeps only one parameter's worth of samples alive at a time
+    instead of all eleven, which matters at large ensembles.
+    """
+    rng = random.Random(seed)
+    for name, sigma_key, mean, lower, upper in PERTURBATION_SPECS:
+        sigma = uncertainty_model[sigma_key]
+        yield name, [_clip_value(float(rng.gauss(mean, sigma)), lower, upper) for _ in range(samples)]
 
 
 def _build_perturbations(samples: int, seed: int, uncertainty_model: dict[str, float]) -> dict[str, list[float]]:
-    rng = random.Random(seed)
-    return {
-        "event_reactivity_scale": _bounded_normal(
-            rng, samples, mean=1.0, sigma=uncertainty_model["event_reactivity_sigma_fraction"], lower=0.55, upper=1.55
-        ),
-        "flow_scale": _bounded_normal(
-            rng, samples, mean=1.0, sigma=uncertainty_model["flow_sigma_fraction"], lower=0.65, upper=1.45
-        ),
-        "heat_sink_scale": _bounded_normal(
-            rng, samples, mean=1.0, sigma=uncertainty_model["heat_sink_sigma_fraction"], lower=0.6, upper=1.45
-        ),
-        "cleanup_scale": _bounded_normal(
-            rng, samples, mean=1.0, sigma=uncertainty_model["cleanup_sigma_fraction"], lower=0.6, upper=1.6
-        ),
-        "temperature_feedback_scale": _bounded_normal(
-            rng,
-            samples,
-            mean=1.0,
-            sigma=uncertainty_model["temperature_feedback_sigma_fraction"],
-            lower=0.8,
-            upper=1.2,
-        ),
-        "precursor_worth_scale": _bounded_normal(
-            rng,
-            samples,
-            mean=1.0,
-            sigma=uncertainty_model["precursor_worth_sigma_fraction"],
-            lower=0.75,
-            upper=1.25,
-        ),
-        "xenon_worth_scale": _bounded_normal(
-            rng,
-            samples,
-            mean=1.0,
-            sigma=uncertainty_model["xenon_worth_sigma_fraction"],
-            lower=0.7,
-            upper=1.3,
-        ),
-        "sink_temp_bias_c": [float(rng.gauss(0.0, uncertainty_model["sink_offset_sigma_c"])) for _ in range(samples)],
-        "redox_bias_ev": [float(rng.gauss(0.0, uncertainty_model["redox_setpoint_sigma_ev"])) for _ in range(samples)],
-        "impurity_ingress_scale": _bounded_normal(
-            rng,
-            samples,
-            mean=1.0,
-            sigma=uncertainty_model["impurity_ingress_sigma_fraction"],
-            lower=0.5,
-            upper=1.8,
-        ),
-        "gas_stripping_scale": _bounded_normal(
-            rng,
-            samples,
-            mean=1.0,
-            sigma=uncertainty_model["gas_stripping_sigma_fraction"],
-            lower=0.85,
-            upper=1.15,
-        ),
-    }
-
-
-def _bounded_normal(
-    rng: random.Random,
-    samples: int,
-    *,
-    mean: float,
-    sigma: float,
-    lower: float,
-    upper: float,
-) -> list[float]:
-    return [_clip_value(float(rng.gauss(mean, sigma)), lower, upper) for _ in range(samples)]
+    return dict(_iter_perturbation_arrays(samples, seed, uncertainty_model))
 
 
 def _first_order_step_array(
