@@ -126,6 +126,56 @@ def validate_figure_catalog(payload: Any, *, artifact: str = "plots_manifest.jso
     return data
 
 
+def validate_transient_sweep(payload: Any, *, artifact: str = "transient_sweep.json") -> dict[str, Any]:
+    """Validate the accelerated ensemble artifact.
+
+    The sweep is the one artifact whose numbers depend on which device produced
+    them, so the checks here are about attribution as much as shape: a bundle
+    must not be able to claim a backend it did not run, or record a numerical
+    status of "failed" alongside published metrics.
+    """
+    data = _require_mapping(payload, artifact, "<root>")
+    for field in ("case", "model", "backend"):
+        _require_str(data, artifact, field, value=data.get(field))
+    for field in ("samples", "seed"):
+        value = data.get(field)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise SidecarValidationError(artifact, field, "must be a non-negative integer")
+
+    report = _require_mapping(data.get("backend_report"), artifact, "backend_report")
+    for field in ("requested", "selected"):
+        _require_str(report, artifact, f"backend_report.{field}", value=report.get(field))
+    if report.get("selected") != data.get("backend"):
+        raise SidecarValidationError(
+            artifact,
+            "backend",
+            f"backend {data.get('backend')!r} disagrees with backend_report.selected {report.get('selected')!r}",
+        )
+    if not isinstance(report.get("available"), bool):
+        raise SidecarValidationError(artifact, "backend_report.available", "must be a boolean")
+    if report.get("available") and not isinstance(report.get("details"), dict):
+        raise SidecarValidationError(
+            artifact, "backend_report.details", "must describe the device when the backend is available"
+        )
+
+    checks = _require_mapping(data.get("numerical_checks"), artifact, "numerical_checks")
+    status = checks.get("status")
+    if status != "ok":
+        raise SidecarValidationError(
+            artifact,
+            "numerical_checks.status",
+            f"is {status!r}; a bundle must not publish sweep metrics that failed their own numerical checks",
+        )
+
+    metrics = _require_mapping(data.get("metrics"), artifact, "metrics")
+    if metrics.get("samples") != data.get("samples"):
+        raise SidecarValidationError(artifact, "metrics.samples", "disagrees with the recorded sample count")
+    history = data.get("history")
+    if not isinstance(history, list) or not history:
+        raise SidecarValidationError(artifact, "history", "must be a non-empty list of recorded time steps")
+    return data
+
+
 _SIDECAR_VALIDATORS = {
     "artifact_status.json": validate_artifact_status,
     "stage_manifest.json": validate_stage_manifest,
@@ -133,6 +183,7 @@ _SIDECAR_VALIDATORS = {
     "design_readiness.json": validate_design_readiness,
     "result_claims.json": validate_result_claims,
     "plots_manifest.json": validate_figure_catalog,
+    "transient_sweep.json": validate_transient_sweep,
 }
 
 

@@ -5,7 +5,19 @@ import { CheckCircle2, ClipboardCheck, PlaySquare, ShieldCheck, SlidersHorizonta
 import { api } from "../api";
 import { Truncate } from "../components/Truncate";
 import { PanelError, PanelLoading } from "../components/StateBlock";
-import type { DraftValidationResponse, EditableParameter, SimulationDraft } from "../types";
+import type { DraftValidationResponse, EditableParameter, SimulationDraft, SweepBackend, SweepDtype } from "../types";
+
+const backendOptions: Array<{ value: SweepBackend; label: string; hint: string }> = [
+  { value: "auto", label: "Automatic", hint: "GPU when one is available, otherwise CPU" },
+  { value: "torch-xpu", label: "GPU (Intel XPU)", hint: "Fails if no XPU device is present" },
+  { value: "numpy", label: "CPU (NumPy)", hint: "Always available" },
+  { value: "torch-cpu", label: "CPU (PyTorch)", hint: "For comparing against the GPU path" }
+];
+
+// Ensembles below ~131,072 do not amortize the GPU's per-step overhead, so the
+// form says so rather than letting people pick a size the device can't help.
+const GPU_EFFICIENT_SAMPLE_FLOOR = 131072;
+const MAX_SWEEP_SAMPLES = 4194304;
 
 const phaseOptions = [
   { value: "run", label: "Dry run" },
@@ -29,7 +41,8 @@ export function Builder() {
   const [scenario, setScenario] = useState("");
   const [sweepSamples, setSweepSamples] = useState(65536);
   const [sweepSeed, setSweepSeed] = useState(42);
-  const [preferGpu, setPreferGpu] = useState(true);
+  const [sweepBackend, setSweepBackend] = useState<SweepBackend>("auto");
+  const [sweepDtype, setSweepDtype] = useState<SweepDtype>("float32");
 
   // Honor ?case= on mount and on in-app navigation to a different case.
   useEffect(() => {
@@ -54,6 +67,15 @@ export function Builder() {
     const transient = detail.data?.config.transient as { scenarios?: Array<{ name?: string }> } | undefined;
     return transient?.scenarios?.map((item) => item.name).filter(Boolean) as string[] | undefined;
   }, [detail.data]);
+
+  // Drop a scenario the newly-selected case does not define. Carrying it over
+  // silently ran the case's default transient while the form still displayed
+  // the old scenario name, so the run and the label disagreed.
+  useEffect(() => {
+    if (scenario && scenarios && !scenarios.includes(scenario)) {
+      setScenario("");
+    }
+  }, [scenario, scenarios]);
   const groupedParameters = useMemo(() => {
     const groups = new Map<string, EditableParameter[]>();
     detail.data?.editable_parameters.forEach((parameter) => groups.set(parameter.group, [...(groups.get(parameter.group) ?? []), parameter]));
@@ -91,7 +113,10 @@ export function Builder() {
       scenario: scenarioActive && scenario ? scenario : null,
       sweep_samples: sweepSamples,
       sweep_seed: sweepSeed,
-      prefer_gpu: preferGpu
+      sweep_backend: sweepBackend,
+      sweep_dtype: sweepDtype,
+      // Kept in step with the real control so an older server still honours it.
+      prefer_gpu: sweepBackend !== "numpy" && sweepBackend !== "torch-cpu"
     };
     createRun.mutate(draft);
   }
@@ -166,16 +191,33 @@ export function Builder() {
             <div className="builder-options">
               <label className="field">
                 <span>Sweep samples</span>
-                <input type="number" min={1} max={65536} value={sweepSamples} disabled={!sweepActive} onChange={(event) => setSweepSamples(Number(event.target.value))} />
+                <input type="number" min={1} max={MAX_SWEEP_SAMPLES} step={1024} value={sweepSamples} disabled={!sweepActive} onChange={(event) => setSweepSamples(Number(event.target.value))} />
               </label>
               <label className="field">
                 <span>Sweep seed</span>
                 <input type="number" min={0} value={sweepSeed} disabled={!sweepActive} onChange={(event) => setSweepSeed(Number(event.target.value))} />
               </label>
-              <label className="check-line">
-                <input type="checkbox" checked={preferGpu} disabled={!sweepActive} onChange={(event) => setPreferGpu(event.target.checked)} />
-                <span>Use GPU for sweep</span>
+              <label className="field">
+                <span>Compute backend</span>
+                <select value={sweepBackend} disabled={!sweepActive} onChange={(event) => setSweepBackend(event.target.value as SweepBackend)}>
+                  {backendOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
               </label>
+              <label className="field">
+                <span>Precision</span>
+                <select value={sweepDtype} disabled={!sweepActive} onChange={(event) => setSweepDtype(event.target.value as SweepDtype)}>
+                  <option value="float32">float32 (faster)</option>
+                  <option value="float64">float64 (slow-timescale terms)</option>
+                </select>
+              </label>
+              <p className="field-hint">
+                {backendOptions.find((option) => option.value === sweepBackend)?.hint}
+                {sweepActive && sweepBackend !== "numpy" && sweepBackend !== "torch-cpu" && sweepSamples < GPU_EFFICIENT_SAMPLE_FLOOR
+                  ? ` — at ${sweepSamples.toLocaleString()} samples the GPU is barely faster than the CPU; ${GPU_EFFICIENT_SAMPLE_FLOOR.toLocaleString()} or more makes the difference count.`
+                  : ""}
+              </p>
             </div>
           </div>
 

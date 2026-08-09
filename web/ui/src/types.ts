@@ -49,6 +49,7 @@ export interface RunRecord {
   artifacts: ArtifactRef[];
   output_sections?: OutputSection[];
   latest_event?: RunEvent | null;
+  progress?: number | null;
 }
 
 export interface EditableParameter {
@@ -98,7 +99,44 @@ export interface SimulationDraft {
   scenario?: string | null;
   sweep_samples: number;
   sweep_seed: number;
+  sweep_backend: SweepBackend;
+  sweep_dtype: SweepDtype;
+  /** @deprecated Superseded by `sweep_backend`; sent for older servers. */
   prefer_gpu: boolean;
+}
+
+export type SweepBackend = "auto" | "numpy" | "torch-cpu" | "torch-xpu";
+export type SweepDtype = "float32" | "float64";
+
+/** Mirrors `transient_sweep_summary` in src/thorium_reactor/transient_sweep.py. */
+export interface TransientSweepSummary {
+  status: string;
+  model: string;
+  backend: string;
+  requested_backend?: string | null;
+  device?: string | null;
+  dtype?: string | null;
+  samples: number;
+  seed: number;
+  scenario_name: string;
+  duration_s: number;
+  time_step_s: number;
+  event_count: number;
+  history_path: string;
+  peak_power_fraction_p95: number;
+  peak_power_fraction_max: number;
+  peak_fuel_temperature_c_p95: number;
+  peak_fuel_temperature_c_max: number;
+  final_power_fraction_p50: number;
+  final_power_fraction_p95: number;
+  runtime_performance?: {
+    elapsed_s: number;
+    setup_s?: number;
+    sample_steps_per_s: number;
+    backend_memory_allocated_bytes?: number | null;
+    backend_peak_memory_allocated_bytes?: number | null;
+  };
+  numerical_checks?: { status: string; failures: string[] };
 }
 
 export interface DraftValidationResponse {

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from thorium_reactor.transient_sweep import DEFAULT_TRANSIENT_SWEEP_SAMPLES
+from thorium_reactor.transient_sweep import DEFAULT_TRANSIENT_SWEEP_SAMPLES, MAX_TRANSIENT_SWEEP_SAMPLES
 
 
 class ArtifactRef(BaseModel):
@@ -59,6 +59,9 @@ class RunRecord(BaseModel):
     artifacts: list[ArtifactRef] = Field(default_factory=list)
     output_sections: list[OutputSection] = Field(default_factory=list)
     latest_event: RunEvent | None = None
+    #: Job progress from the run's own status file. The UI must not read
+    #: progress off the latest event, because log events carry none.
+    progress: float | None = None
 
 
 class EditableParameter(BaseModel):
@@ -89,6 +92,10 @@ class CaseDetail(CaseSummary):
     benchmark_path: str | None = None
 
 
+SWEEP_BACKENDS = ("auto", "numpy", "torch-cpu", "torch-xpu")
+SWEEP_DTYPES = ("float32", "float64")
+
+
 class SimulationDraft(BaseModel):
     case_name: str
     run_id: str | None = None
@@ -96,8 +103,17 @@ class SimulationDraft(BaseModel):
     patch: dict[str, Any] = Field(default_factory=dict)
     phases: list[str] = Field(default_factory=lambda: ["run", "validate", "report"])
     scenario: str | None = None
-    sweep_samples: int = Field(default=DEFAULT_TRANSIENT_SWEEP_SAMPLES, ge=1, le=65536)
+    # The old 65,536 ceiling sat exactly where GPU offload stops paying for
+    # itself, so a browser sweep could never reach the regime the accelerator
+    # exists for. The bound now tracks what the device can actually hold.
+    sweep_samples: int = Field(default=DEFAULT_TRANSIENT_SWEEP_SAMPLES, ge=1, le=MAX_TRANSIENT_SWEEP_SAMPLES)
     sweep_seed: int = Field(default=42, ge=0, le=4294967295)
+    # "python" is deliberately absent: the pure-Python reference integrator is
+    # orders of magnitude slower and would blow the job budget from a browser.
+    sweep_backend: Literal["auto", "numpy", "torch-cpu", "torch-xpu"] = "auto"
+    sweep_dtype: Literal["float32", "float64"] = "float32"
+    #: Deprecated. Retained so existing clients keep working; ``sweep_backend``
+    #: is the control that actually selects a backend.
     prefer_gpu: bool = True
 
 

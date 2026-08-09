@@ -164,7 +164,7 @@ def append_stage_manifest(
     if message:
         record["message"] = message
     stages.append(record)
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(manifest_path, json.dumps(manifest, indent=2, sort_keys=True))
     return manifest
 
 
@@ -186,7 +186,7 @@ def refresh_bundle_artifact_statuses(bundle: ResultBundle, *, summary: dict[str,
         status["groups"]["benchmark_evidence"] = _benchmark_evidence_group_status(bundle, summary)
     status["blockers"] = [blocker for group in status["groups"].values() for blocker in group.get("blockers", [])]
     status["warnings"] = [warning for group in status["groups"].values() for warning in group.get("warnings", [])]
-    (bundle.root / "artifact_status.json").write_text(json.dumps(status, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(bundle.root / "artifact_status.json", json.dumps(status, indent=2, sort_keys=True))
     _write_directory_status(bundle.openmc_dir, status["groups"]["openmc"])
     _write_directory_status(bundle.images_dir, status["groups"]["images"])
     _write_directory_status(bundle.geometry_exports_dir, status["groups"]["geometry_exports"])
@@ -379,7 +379,7 @@ def _directory_artifacts(directory: Path) -> list[str]:
 
 def _write_directory_status(directory: Path, payload: dict[str, Any]) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "status.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    atomic_write_text(directory / "status.json", json.dumps(payload, indent=2, sort_keys=True))
 
 
 def _relative_artifact_path(bundle: ResultBundle, path: Path) -> str:
