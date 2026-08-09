@@ -208,6 +208,22 @@ def _resolve_requested_backend(backend: str, *, prefer_gpu: bool) -> str:
     return requested
 
 
+def _effective_loop_segments(
+    model_parameters: dict[str, Any], baseline: dict[str, Any]
+) -> list[dict[str, float | str]]:
+    """The loop segments the vectorized integrator will actually allocate.
+
+    Honours the configured precursor transport model, as the reference
+    integrator does. The two-region model is algebraically the single-segment
+    case of the segmented model -- same steady state, same implicit step -- so
+    collapsing the segment list reproduces it exactly.
+    """
+    transport_model = str(model_parameters["precursor_transport_model"])
+    if transport_model == LOOP_SEGMENT_PRECURSOR_TRANSPORT_MODEL:
+        return normalize_loop_segments(baseline.get("precursor_loop_segments"))
+    return normalize_loop_segments(None)
+
+
 def _bundle_relative_path(path: Any) -> str:
     """Path recorded in the bundle, relative to the repository root.
 
@@ -420,12 +436,15 @@ def _integrate_transient_ensemble(
     vector_backend = create_array_backend(selection.selected, dtype=selection.dtype, seed=seed)
     assert isinstance(vector_backend, ArrayBackend)
     # Refuse an ensemble that cannot fit before spending minutes discovering it.
+    # Budget the segment count the integrator will actually allocate: the
+    # two-region model collapses to a single segment regardless of how many the
+    # case configures, so using the configured count would reject a run that fits.
     memory_budget = check_memory_budget(
         vector_backend,
         samples=samples,
         dtype=selection.dtype,
         groups=len(list(model_parameters["delayed_neutron_precursor_groups"])),
-        loop_segments=len(normalize_loop_segments(baseline.get("precursor_loop_segments"))),
+        loop_segments=len(_effective_loop_segments(model_parameters, baseline)),
     )
     return _integrate_transient_ensemble_vectorized(
         array_backend=vector_backend,
@@ -851,10 +870,8 @@ def _integrate_transient_ensemble_reference(
         peak_power_fraction_max = max(peak_power_fraction_max, max(power_fraction))
         peak_fuel_temperature_c_max = max(peak_fuel_temperature_c_max, max(fuel_temp_c))
         peak_corrosion_index_max = max(peak_corrosion_index_max, max(corrosion_index))
-        _observe_trajectory_health(
+        _observe_trajectory_extrema(
             trajectory_health,
-            step=step,
-            time_s=time_s,
             power_min=min(power_fraction),
             power_max=max(power_fraction),
             temp_min=min(min(fuel_temp_c), min(graphite_temp_c), min(coolant_temp_c)),
@@ -862,8 +879,8 @@ def _integrate_transient_ensemble_reference(
             fissile_min=min(fissile_inventory_fraction),
             protactinium_min=min(protactinium_inventory_fraction),
             corrosion_min=min(corrosion_index),
-            history_row=history[-1],
         )
+        _observe_trajectory_history(trajectory_health, step=step, time_s=time_s, history_row=history[-1])
 
     metrics = {
         "duration_s": _round_float(duration_s),
@@ -973,16 +990,7 @@ def _integrate_transient_ensemble_vectorized(
     )
 
     groups = list(model_parameters["delayed_neutron_precursor_groups"])
-    # Honour the configured precursor transport model, as the reference
-    # integrator does. The two-region model is algebraically the single-segment
-    # case of the segmented model -- same steady state, same implicit step -- so
-    # collapsing the segment list is enough to reproduce it exactly.
-    transport_model = str(model_parameters["precursor_transport_model"])
-    loop_segments = (
-        normalize_loop_segments(baseline.get("precursor_loop_segments"))
-        if transport_model == LOOP_SEGMENT_PRECURSOR_TRANSPORT_MODEL
-        else normalize_loop_segments(None)
-    )
+    loop_segments = _effective_loop_segments(model_parameters, baseline)
     initial_flow_fraction = backend.clip(perturbations["flow_scale"], 0.05, 1.5)
     initial_cleanup_rate_s = float(baseline["cleanup_removal_efficiency"]) * backend.clip(
         perturbations["cleanup_scale"], 0.0, 2.5
@@ -1022,6 +1030,7 @@ def _integrate_transient_ensemble_vectorized(
     )
 
     trajectory_health = _new_trajectory_health()
+    device_extrema: dict[str, Any] = {}
 
     backend.synchronize()
     setup_elapsed_s = time.perf_counter() - setup_start
@@ -1257,25 +1266,21 @@ def _integrate_transient_ensemble_vectorized(
         peak_power_fraction_max = max(peak_power_fraction_max, backend.max_scalar(power_fraction))
         peak_fuel_temperature_c_max = max(peak_fuel_temperature_c_max, backend.max_scalar(fuel_temp_c))
         peak_corrosion_index_max = max(peak_corrosion_index_max, backend.max_scalar(corrosion_index))
-        # Percentile bands already crossed to the host this step, so the
-        # trajectory health screen costs no extra synchronization.
-        _observe_trajectory_health(
-            trajectory_health,
-            step=step,
-            time_s=time_s,
-            # Bands, not per-sample extrema: reading true min/max every step
-            # would add two device synchronizations per step for a quantity the
-            # final-step check already covers exactly. The band still catches a
-            # trajectory that leaves the physical envelope.
-            power_min=power_band[0],
-            power_max=peak_power_fraction_max,
-            temp_min=fuel_band[0],
-            temp_max=peak_fuel_temperature_c_max,
-            fissile_min=None,
-            protactinium_min=None,
-            corrosion_min=corrosion_band[0],
-            history_row=history[-1],
+        # Exact per-sample extrema over every state, accumulated as device
+        # scalars. Percentile bands would miss an excursion confined to fewer
+        # than 5% of samples, and reducing to the host each step would cost a
+        # synchronization -- so reduce on device here and read the accumulators
+        # once, after the loop.
+        device_extrema = _accumulate_device_extrema(
+            backend,
+            device_extrema,
+            power_fraction=power_fraction,
+            temperatures=(fuel_temp_c, graphite_temp_c, coolant_temp_c),
+            corrosion_index=corrosion_index,
+            fissile_inventory_fraction=fissile_inventory_fraction,
+            protactinium_inventory_fraction=protactinium_inventory_fraction,
         )
+        _observe_trajectory_history(trajectory_health, step=step, time_s=time_s, history_row=history[-1])
 
     backend.synchronize()
     elapsed_s = time.perf_counter() - integrate_start
@@ -1314,13 +1319,7 @@ def _integrate_transient_ensemble_vectorized(
         backend,
         metrics=metrics,
         trajectory_health=trajectory_health,
-        power_fraction=power_fraction,
-        fuel_temp_c=fuel_temp_c,
-        graphite_temp_c=graphite_temp_c,
-        coolant_temp_c=coolant_temp_c,
-        fissile_inventory_fraction=fissile_inventory_fraction,
-        protactinium_inventory_fraction=protactinium_inventory_fraction,
-        corrosion_index=corrosion_index,
+        device_extrema=device_extrema,
         core_inventory=core_inventory,
         segment_inventory=segment_inventory,
     )
@@ -1546,40 +1545,77 @@ def _new_trajectory_health() -> dict[str, Any]:
     }
 
 
-def _observe_trajectory_health(
-    health: dict[str, Any],
-    *,
-    step: int,
-    time_s: float,
-    power_min: float,
-    power_max: float,
-    temp_min: float,
-    temp_max: float,
-    fissile_min: float | None,
-    protactinium_min: float | None,
-    corrosion_min: float,
-    history_row: dict[str, Any],
+def _observe_trajectory_history(
+    health: dict[str, Any], *, step: int, time_s: float, history_row: dict[str, Any]
 ) -> None:
-    """Screen every recorded step, not just the last one.
+    """Screen every recorded step for a non-finite percentile band.
 
-    A transient that goes non-finite or negative mid-flight and recovers by the
-    final step used to pass silently; the sweep is a stress-test envelope, so an
-    excursion anywhere in the trajectory is exactly what we need to catch.
+    The band values already crossed to the host this step, so this costs no
+    extra synchronization. Per-sample extrema are tracked separately, on device.
     """
     health["steps_observed"] += 1
-    health["power_fraction_min"] = min(health["power_fraction_min"], power_min)
-    health["power_fraction_max"] = max(health["power_fraction_max"], power_max)
-    health["temperature_min_c"] = min(health["temperature_min_c"], temp_min)
-    health["temperature_max_c"] = max(health["temperature_max_c"], temp_max)
-    if fissile_min is not None:
-        health["fissile_inventory_min"] = min(health["fissile_inventory_min"], fissile_min)
-    if protactinium_min is not None:
-        health["protactinium_inventory_min"] = min(health["protactinium_inventory_min"], protactinium_min)
-    health["corrosion_index_min"] = min(health["corrosion_index_min"], corrosion_min)
     if len(health["non_finite_steps"]) < 8 and not all(
         math.isfinite(float(value)) for value in history_row.values() if isinstance(value, (int, float))
     ):
         health["non_finite_steps"].append({"step": step, "time_s": _round_float(time_s)})
+
+
+def _observe_trajectory_extrema(
+    health: dict[str, Any],
+    *,
+    power_min: float,
+    power_max: float,
+    temp_min: float,
+    temp_max: float,
+    fissile_min: float,
+    protactinium_min: float,
+    corrosion_min: float,
+) -> None:
+    health["power_fraction_min"] = min(health["power_fraction_min"], power_min)
+    health["power_fraction_max"] = max(health["power_fraction_max"], power_max)
+    health["temperature_min_c"] = min(health["temperature_min_c"], temp_min)
+    health["temperature_max_c"] = max(health["temperature_max_c"], temp_max)
+    health["fissile_inventory_min"] = min(health["fissile_inventory_min"], fissile_min)
+    health["protactinium_inventory_min"] = min(health["protactinium_inventory_min"], protactinium_min)
+    health["corrosion_index_min"] = min(health["corrosion_index_min"], corrosion_min)
+
+
+def _accumulate_device_extrema(
+    backend: ArrayBackend,
+    accumulators: dict[str, Any],
+    *,
+    power_fraction: Any,
+    temperatures: tuple[Any, ...],
+    corrosion_index: Any,
+    fissile_inventory_fraction: Any,
+    protactinium_inventory_fraction: Any,
+) -> dict[str, Any]:
+    """Fold this step's exact extrema into running device-side scalars.
+
+    Everything stays on the device, so a 3,601-step sweep pays one host
+    transfer for the whole trajectory instead of one per step per quantity.
+    """
+
+    def fold(key: str, value: Any, reducer: str) -> None:
+        take_max = reducer == "max"
+        reduced = backend.amax(value) if take_max else backend.amin(value)
+        current = accumulators.get(key)
+        if current is None:
+            accumulators[key] = reduced
+        elif take_max:
+            accumulators[key] = backend.maximum(current, reduced)
+        else:
+            accumulators[key] = backend.minimum(current, reduced)
+
+    fold("power_min", power_fraction, "min")
+    fold("power_max", power_fraction, "max")
+    for temperature in temperatures:
+        fold("temp_min", temperature, "min")
+        fold("temp_max", temperature, "max")
+    fold("corrosion_min", corrosion_index, "min")
+    fold("fissile_min", fissile_inventory_fraction, "min")
+    fold("protactinium_min", protactinium_inventory_fraction, "min")
+    return accumulators
 
 
 def _trajectory_checks(health: dict[str, Any]) -> dict[str, bool]:
@@ -1647,36 +1683,21 @@ def _vector_numerical_checks(
     *,
     metrics: dict[str, Any],
     trajectory_health: dict[str, Any],
-    power_fraction: Any,
-    fuel_temp_c: Any,
-    graphite_temp_c: Any,
-    coolant_temp_c: Any,
-    fissile_inventory_fraction: Any,
-    protactinium_inventory_fraction: Any,
-    corrosion_index: Any,
+    device_extrema: dict[str, Any],
     core_inventory: Any,
     segment_inventory: Any,
 ) -> dict[str, Any]:
-    min_temp = min(
-        backend.min_scalar(fuel_temp_c), backend.min_scalar(graphite_temp_c), backend.min_scalar(coolant_temp_c)
-    )
-    max_temp = max(
-        backend.max_scalar(fuel_temp_c), backend.max_scalar(graphite_temp_c), backend.max_scalar(coolant_temp_c)
-    )
-    # The vectorized loop records percentile bands rather than per-sample
-    # extrema, so fold the true final-step extrema in here.
-    trajectory_health["temperature_min_c"] = min(trajectory_health["temperature_min_c"], min_temp)
-    trajectory_health["temperature_max_c"] = max(trajectory_health["temperature_max_c"], max_temp)
-    trajectory_health["power_fraction_min"] = min(
-        trajectory_health["power_fraction_min"], backend.min_scalar(power_fraction)
-    )
-    trajectory_health["power_fraction_max"] = max(
-        trajectory_health["power_fraction_max"], backend.max_scalar(power_fraction)
-    )
-    trajectory_health["fissile_inventory_min"] = backend.min_scalar(fissile_inventory_fraction)
-    trajectory_health["protactinium_inventory_min"] = backend.min_scalar(protactinium_inventory_fraction)
-    trajectory_health["corrosion_index_min"] = min(
-        trajectory_health["corrosion_index_min"], backend.min_scalar(corrosion_index)
+    # The single host transfer for the whole trajectory: every extremum below
+    # was reduced on device, once per step, and is read exactly here.
+    _observe_trajectory_extrema(
+        trajectory_health,
+        power_min=backend.scalar(device_extrema["power_min"]),
+        power_max=backend.scalar(device_extrema["power_max"]),
+        temp_min=backend.scalar(device_extrema["temp_min"]),
+        temp_max=backend.scalar(device_extrema["temp_max"]),
+        fissile_min=backend.scalar(device_extrema["fissile_min"]),
+        protactinium_min=backend.scalar(device_extrema["protactinium_min"]),
+        corrosion_min=backend.scalar(device_extrema["corrosion_min"]),
     )
     checks = {
         "finite_metrics": all(

@@ -8,6 +8,7 @@ import mimetypes
 import re
 import shutil
 import tempfile
+import time
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -222,17 +223,10 @@ class WebRepository:
         run_dir = self._run_dir(case_name, run_id)
         if not run_dir.exists():
             raise FileNotFoundError(f"Run '{run_id}' for case '{case_name}' was not found.")
-        status_path = run_dir / "job_status.json"
-        status_payload = read_json(status_path, {})
+        status_payload = read_status_payload(run_dir)
         status = status_payload.get("status") if isinstance(status_payload, Mapping) else None
         if status:
             return str(status)
-        if status_path.exists():
-            # The file is the authority for a job-managed run. If it exists but
-            # did not parse, treat the run as still in flight rather than
-            # inferring "completed" from artifacts an earlier phase wrote --
-            # that would close the event stream on a job that is still running.
-            return "running"
         return infer_status_from_files(run_dir)
 
     def list_docs(self) -> list[DocSummary]:
@@ -1415,6 +1409,25 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
+def read_status_payload(run_dir: Path) -> Any:
+    """Read job_status.json, tolerating a write that is in flight.
+
+    Writes are atomic, but a reader on a filesystem without atomic rename
+    semantics can still catch a partial file. One retry absorbs that; a file
+    that stays unparseable is genuinely corrupt, so we fall through to
+    inference rather than reporting the run live forever and leaving the event
+    stream open.
+    """
+    path = run_dir / "job_status.json"
+    if not path.exists():
+        return {}
+    payload = read_json(path, None)
+    if payload is None:
+        time.sleep(0.05)
+        payload = read_json(path, None)
+    return payload if payload is not None else {}
+
+
 def _coerce_progress(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -1536,6 +1549,12 @@ def infer_status(run_dir: Path, summary: Mapping[str, Any], validation: Mapping[
 
 
 def infer_status_from_files(run_dir: Path) -> str:
+    # The stage manifest is the record of what actually happened. A CLI stage
+    # that raised (a sweep failing its numerical checks, say) leaves the
+    # summary.json an earlier stage wrote, which would otherwise read as a
+    # clean success.
+    if stage_manifest_last_status(run_dir) == "failed":
+        return "failed"
     if (
         (run_dir / "summary.json").exists()
         or (run_dir / "validation.json").exists()
@@ -1545,6 +1564,16 @@ def infer_status_from_files(run_dir: Path) -> str:
     if (run_dir / "build_manifest.json").exists():
         return "built"
     return "unknown"
+
+
+def stage_manifest_last_status(run_dir: Path) -> str | None:
+    """Status of the most recent recorded stage, or None if there is no manifest."""
+    manifest = read_json(run_dir / "stage_manifest.json", {})
+    stages = manifest.get("stages") if isinstance(manifest, Mapping) else None
+    if not isinstance(stages, list) or not stages:
+        return None
+    last = stages[-1]
+    return str(last.get("status")) if isinstance(last, Mapping) and last.get("status") else None
 
 
 def is_viewable_geometry_artifact_path(value: Any) -> bool:

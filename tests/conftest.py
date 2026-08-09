@@ -1,8 +1,49 @@
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from thorium_reactor.msd_tp import clear_database_cache
+
+
+def build_minimal_summary() -> dict[str, Any]:
+    """The smallest summary a transient sweep will accept.
+
+    Lives here rather than in a test module because test modules are imported
+    by basename and are not a package -- importing one from another works under
+    some pytest invocations and fails under others.
+    """
+    return {
+        "bop": {"thermal_power_mw": 8.0},
+        "flow": {
+            "reduced_order": {
+                "active_flow": {
+                    "representative_residence_time_s": 0.85,
+                    "total_volumetric_flow_m3_s": 0.014,
+                }
+            }
+        },
+        "primary_system": {
+            "thermal_profile": {
+                "estimated_hot_leg_temp_c": 690.0,
+                "estimated_cold_leg_temp_c": 555.0,
+            },
+            "inventory": {
+                "fuel_salt": {"total_m3": 0.092},
+                "coolant_salt": {"net_pool_inventory_m3": 11.4},
+            },
+        },
+        "fuel_cycle": {
+            "cleanup_turnover_hours": 240.0,
+            "cleanup_turnover_days": 10.0,
+            "cleanup_removal_efficiency": 0.78,
+        },
+    }
+
+
+@pytest.fixture
+def minimal_summary() -> dict[str, Any]:
+    return build_minimal_summary()
 
 
 @pytest.fixture

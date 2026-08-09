@@ -143,11 +143,23 @@ class ArrayBackend:
         """
         return [self.percentiles(value, quantiles) for value in values]
 
-    def max_scalar(self, value: Any) -> float:
+    def amax(self, value: Any) -> Any:
+        """Maximum as a *device* scalar, without transferring to the host.
+
+        Lets a caller fold a running extremum across many steps and pay a
+        single synchronization at the end instead of one per step.
+        """
         raise NotImplementedError
 
-    def min_scalar(self, value: Any) -> float:
+    def amin(self, value: Any) -> Any:
+        """Minimum as a device scalar. See :meth:`amax`."""
         raise NotImplementedError
+
+    def max_scalar(self, value: Any) -> float:
+        return self.scalar(self.amax(value))
+
+    def min_scalar(self, value: Any) -> float:
+        return self.scalar(self.amin(value))
 
     def scalar(self, value: Any) -> float:
         raise NotImplementedError
@@ -245,11 +257,11 @@ class NumpyBackend(ArrayBackend):
         raw = self.xp.percentile(value, self.xp.asarray([item * 100.0 for item in quantiles], dtype=self.dtype))
         return [float(item) for item in self.to_host_list(raw)]
 
-    def max_scalar(self, value: Any) -> float:
-        return self.scalar(self.xp.max(value))
+    def amax(self, value: Any) -> Any:
+        return self.xp.max(value)
 
-    def min_scalar(self, value: Any) -> float:
-        return self.scalar(self.xp.min(value))
+    def amin(self, value: Any) -> Any:
+        return self.xp.min(value)
 
     def scalar(self, value: Any) -> float:
         if hasattr(value, "item"):
@@ -351,20 +363,38 @@ class TorchBackend(ArrayBackend):
 
     def maximum(self, left: Any, right: Any) -> Any:
         # clamp takes a Python scalar directly. torch.maximum does not, and
-        # wrapping the scalar in a tensor costs an allocation plus a host->device
-        # copy on every call -- hundreds of thousands of them over a sweep.
-        if not self.torch.is_tensor(right):
-            return self.torch.clamp(left, min=float(right))
-        if not self.torch.is_tensor(left):
-            return self.torch.clamp(right, min=float(left))
-        return self.torch.maximum(left, right)
+        # wrapping the scalar in a tensor costs an allocation plus a
+        # host->device copy on every call -- hundreds of thousands of them over
+        # a sweep. clamp is only equivalent for a *finite* bound, though:
+        # torch.maximum(x, nan) propagates nan, while clamp(x, min=nan) leaves
+        # x untouched, so a non-finite bound must take the tensor path or a
+        # corrupt threshold would be silently ignored.
+        scalar_bound = self._finite_scalar(right if not self.torch.is_tensor(right) else None)
+        if scalar_bound is not None:
+            return self.torch.clamp(left, min=scalar_bound)
+        scalar_bound = self._finite_scalar(left if not self.torch.is_tensor(left) else None)
+        if scalar_bound is not None:
+            return self.torch.clamp(right, min=scalar_bound)
+        return self.torch.maximum(self.asarray(left), self.asarray(right))
 
     def minimum(self, left: Any, right: Any) -> Any:
-        if not self.torch.is_tensor(right):
-            return self.torch.clamp(left, max=float(right))
-        if not self.torch.is_tensor(left):
-            return self.torch.clamp(right, max=float(left))
-        return self.torch.minimum(left, right)
+        scalar_bound = self._finite_scalar(right if not self.torch.is_tensor(right) else None)
+        if scalar_bound is not None:
+            return self.torch.clamp(left, max=scalar_bound)
+        scalar_bound = self._finite_scalar(left if not self.torch.is_tensor(left) else None)
+        if scalar_bound is not None:
+            return self.torch.clamp(right, max=scalar_bound)
+        return self.torch.minimum(self.asarray(left), self.asarray(right))
+
+    @staticmethod
+    def _finite_scalar(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            resolved = float(value)
+        except (TypeError, ValueError):
+            return None
+        return resolved if math.isfinite(resolved) else None
 
     def sum(self, value: Any, axis: int | None = None) -> Any:
         return self.torch.sum(value) if axis is None else self.torch.sum(value, dim=axis)
@@ -378,8 +408,13 @@ class TorchBackend(ArrayBackend):
     def _quantile_tensor(self, value: Any, quantiles: tuple[float, float, float]) -> Any:
         """Quantiles as a device tensor, without transferring anything to the host."""
         flat = value.flatten()
+        if flat.dtype not in (self.torch.float32, self.torch.float64):
+            # torch.quantile and torch.sort interpolation accept only float or
+            # double; half precisions are advertised by the backend, so upcast
+            # rather than surfacing a dtype error from deep in the reduction.
+            flat = flat.to(self.torch.float32)
         if int(flat.numel()) <= TORCH_QUANTILE_MAX_ELEMENTS:
-            q = self.torch.tensor(quantiles, dtype=self.dtype, device=self.device)
+            q = self.torch.tensor(quantiles, dtype=flat.dtype, device=self.device)
             return self.torch.quantile(flat, q)
         # torch.quantile refuses larger inputs; sort and interpolate on device.
         ordered = self.torch.sort(flat).values
@@ -406,11 +441,11 @@ class TorchBackend(ArrayBackend):
         width = len(quantiles)
         return [flat[index * width : (index + 1) * width] for index in range(len(values))]
 
-    def max_scalar(self, value: Any) -> float:
-        return self.scalar(self.torch.max(value))
+    def amax(self, value: Any) -> Any:
+        return self.torch.max(value)
 
-    def min_scalar(self, value: Any) -> float:
-        return self.scalar(self.torch.min(value))
+    def amin(self, value: Any) -> Any:
+        return self.torch.min(value)
 
     def scalar(self, value: Any) -> float:
         if self.torch.is_tensor(value):

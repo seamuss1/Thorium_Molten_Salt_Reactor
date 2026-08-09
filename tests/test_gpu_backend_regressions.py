@@ -14,8 +14,8 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import build_minimal_summary
 
-from tests.test_transient_sweep import _minimal_summary
 from thorium_reactor import accelerators
 from thorium_reactor.accelerators import (
     BackendUnavailable,
@@ -51,6 +51,7 @@ def _xpu_available() -> bool:
 
 
 requires_xpu = pytest.mark.skipif(not _xpu_available(), reason="no Intel XPU device available")
+hardware = pytest.mark.hardware
 
 
 def _sweep(backend: str, *, transport_model: str | None = None, dtype: str = "float64", samples: int = 64) -> dict:
@@ -59,7 +60,7 @@ def _sweep(backend: str, *, transport_model: str | None = None, dtype: str = "fl
         config.data["transient"]["precursor_transport_model"] = transport_model
     return build_transient_sweep_payload(
         config,
-        _minimal_summary(),
+        build_minimal_summary(),
         scenario_name="partial_heat_sink_loss",
         samples=samples,
         seed=13,
@@ -73,6 +74,7 @@ def _sweep(backend: str, *, transport_model: str | None = None, dtype: str = "fl
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_torch_cpu_backend_does_not_abort_the_interpreter() -> None:
     """``--backend torch-cpu`` used to kill the process outright.
 
@@ -261,7 +263,7 @@ def test_numerical_checks_screen_the_whole_trajectory() -> None:
 def test_history_path_is_recorded_relative_to_the_repository(tmp_path: Path) -> None:
     config = load_case_config(IMMERSED_POOL)
     bundle = create_result_bundle(tmp_path, config.name, "run")
-    summary = _minimal_summary()
+    summary = build_minimal_summary()
 
     run_transient_sweep_case(
         config, bundle, summary, scenario_name="partial_heat_sink_loss", samples=32, backend="numpy"
@@ -322,6 +324,7 @@ def test_state_estimate_scales_with_samples_and_precision() -> None:
 
 
 @requires_xpu
+@hardware
 def test_oversized_ensemble_is_refused_before_integrating() -> None:
     from thorium_reactor.accelerators import check_memory_budget
 
@@ -336,6 +339,7 @@ def test_oversized_ensemble_is_refused_before_integrating() -> None:
 
 
 @requires_xpu
+@hardware
 def test_xpu_matches_numpy_on_the_same_ensemble() -> None:
     cpu = _sweep("numpy", dtype="float32", samples=256)
     gpu = _sweep("torch-xpu", dtype="float32", samples=256)
@@ -346,6 +350,7 @@ def test_xpu_matches_numpy_on_the_same_ensemble() -> None:
 
 
 @requires_xpu
+@hardware
 def test_xpu_run_records_its_device_and_peak_memory() -> None:
     payload = _sweep("torch-xpu", dtype="float32", samples=256)
 
@@ -367,7 +372,7 @@ def test_report_lists_every_varied_parameter(tmp_path: Path) -> None:
     config = load_case_config(REPO_ROOT / "configs" / "cases" / "flagship_grid_msr" / "case.yaml")
     payload = build_transient_sweep_payload(
         config,
-        _minimal_summary(),
+        build_minimal_summary(),
         scenario_name="flagship_load_follow_recovery",
         samples=32,
         seed=1,
@@ -385,3 +390,133 @@ def test_report_lists_every_varied_parameter(tmp_path: Path) -> None:
     assert f"Varied parameter count: `{len(varied)}`" in report
     for parameter in varied:
         assert f"Varied `{parameter['parameter']}`" in report
+
+
+# --------------------------------------------------------------------------
+# Review findings on PR #92 (codex gpt-5.6-sol)
+# --------------------------------------------------------------------------
+
+
+def test_trajectory_extrema_are_exact_not_percentile_bands() -> None:
+    """An excursion in <5% of samples must not hide behind the p05 band.
+
+    The first cut fed percentile bands into the health screen, so a negative
+    or non-finite excursion confined to a minority of samples could recover
+    before the final step and pass.
+    """
+    reference = _sweep("python")
+    vector = _sweep("numpy")
+
+    for key in ("power_fraction_min", "power_fraction_max", "temperature_min_c", "temperature_max_c"):
+        assert vector["numerical_checks"]["trajectory"][key] == pytest.approx(
+            reference["numerical_checks"]["trajectory"][key], rel=1e-6
+        )
+    # The band is strictly inside the true extrema, which is what makes bands
+    # unsafe for this check -- assert we are not reporting the band.
+    trajectory = vector["numerical_checks"]["trajectory"]
+    worst_band_low = min(row["power_fraction_p05"] for row in vector["history"])
+    assert trajectory["power_fraction_min"] <= worst_band_low
+
+
+def test_trajectory_extrema_cover_graphite_and_coolant() -> None:
+    """Only fuel temperature was tracked; a graphite/coolant excursion escaped."""
+    payload = _sweep("numpy")
+    trajectory = payload["numerical_checks"]["trajectory"]
+    coolest_fuel_band = min(row["fuel_temp_c_p05"] for row in payload["history"])
+
+    # Graphite and coolant start below the fuel hot leg, so covering them must
+    # pull the tracked minimum below anything the fuel-only band could report.
+    assert trajectory["temperature_min_c"] < coolest_fuel_band
+
+
+def test_failed_stage_is_not_reported_as_a_completed_run(tmp_path: Path) -> None:
+    """A CLI stage that raised leaves an earlier summary.json behind.
+
+    That used to read as a clean success in the web UI, because status was
+    inferred purely from which artifacts existed.
+    """
+    from thorium_reactor.web.repository import infer_status_from_files
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "summary.json").write_text("{}", encoding="utf-8")
+    assert infer_status_from_files(run_dir) == "completed"
+
+    (run_dir / "stage_manifest.json").write_text(
+        json.dumps(
+            {"stages": [{"stage": "run", "status": "completed"}, {"stage": "transient-sweep", "status": "failed"}]}
+        ),
+        encoding="utf-8",
+    )
+    assert infer_status_from_files(run_dir) == "failed"
+
+
+def test_corrupt_status_file_does_not_pin_a_run_live_forever(tmp_path: Path) -> None:
+    """Treating any unparseable status as "running" left the SSE stream open.
+
+    A torn read during an atomic write is transient and the retry absorbs it; a
+    genuinely corrupt file is permanent, so it must fall through to inference
+    rather than reporting the run live forever.
+    """
+    from thorium_reactor.web.repository import read_status_payload
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "job_status.json").write_text("{ this is not json", encoding="utf-8")
+
+    assert read_status_payload(run_dir) == {}
+
+    (run_dir / "job_status.json").write_text(json.dumps({"status": "running"}), encoding="utf-8")
+    assert read_status_payload(run_dir)["status"] == "running"
+
+
+def test_missing_status_file_reads_as_empty(tmp_path: Path) -> None:
+    from thorium_reactor.web.repository import read_status_payload
+
+    assert read_status_payload(tmp_path) == {}
+
+
+@pytest.mark.hardware
+@requires_xpu
+def test_clamp_shortcut_preserves_nan_semantics() -> None:
+    """clamp(x, min=nan) leaves x alone; maximum(x, nan) propagates nan.
+
+    The scalar fast path must not silently swallow a corrupt threshold.
+    """
+    import torch
+
+    backend = create_array_backend("torch-xpu", dtype="float32", seed=1)
+    values = backend.asarray([1.0, 2.0, 3.0])
+
+    assert torch.isnan(backend.maximum(values, float("nan"))).all()
+    assert torch.isnan(backend.minimum(values, float("nan"))).all()
+    # A finite bound still takes the cheap path and behaves like maximum.
+    assert backend.to_host_list(backend.maximum(values, 2.0)) == [2.0, 2.0, 3.0]
+    assert backend.to_host_list(backend.minimum(values, 2.0)) == [1.0, 2.0, 2.0]
+
+
+@pytest.mark.hardware
+@requires_xpu
+def test_half_precision_percentiles_do_not_raise() -> None:
+    """float16/bfloat16 are advertised dtypes; torch.quantile rejects them."""
+    for dtype in ("float16", "bfloat16"):
+        backend = create_array_backend("torch-xpu", dtype=dtype, seed=1)
+        values = backend.asarray([float(index) for index in range(256)])
+
+        bands = backend.percentiles(values, (0.05, 0.5, 0.95))
+
+        assert len(bands) == 3
+        assert bands[0] <= bands[1] <= bands[2]
+
+
+def test_memory_budget_uses_the_segments_the_integrator_allocates() -> None:
+    """Two-region collapses to one segment, so budgeting the configured count
+    would reject an ensemble that actually fits."""
+    from thorium_reactor.transient_sweep import _effective_loop_segments
+
+    baseline = {"precursor_loop_segments": [{"id": f"s{index}"} for index in range(4)]}
+    two_region = {"precursor_transport_model": TWO_REGION_PRECURSOR_TRANSPORT_MODEL}
+    loop_segment = {"precursor_transport_model": LOOP_SEGMENT_PRECURSOR_TRANSPORT_MODEL}
+
+    assert len(_effective_loop_segments(two_region, baseline)) == 1
+    assert len(_effective_loop_segments(loop_segment, baseline)) == 4
