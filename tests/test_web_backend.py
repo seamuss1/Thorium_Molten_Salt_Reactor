@@ -26,6 +26,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 ADMIN_HEADERS = {"cf-access-authenticated-user-email": "seamusdgallagher@gmail.com"}
 
 
+@pytest.fixture(autouse=True)
+def configured_test_administrator(monkeypatch):
+    # Administrator identity is deployment configuration, never a code default.
+    monkeypatch.setenv("THORIUM_REACTOR_ADMIN_EMAILS", "seamusdgallagher@gmail.com")
+    monkeypatch.setenv("THORIUM_REACTOR_LOCAL_DEV_EMAIL", "seamusdgallagher@gmail.com")
+
+
 def access_headers(email: str) -> dict[str, str]:
     return {"cf-access-authenticated-user-email": email}
 
@@ -705,6 +712,7 @@ def test_web_rate_limits_non_admins_and_admin_can_reset(monkeypatch, tmp_path: P
         )
         assert after_reset.status_code == 202
     finally:
+        client.app.state.jobs.shutdown()
         for run_root in run_roots:
             shutil.rmtree(run_root, ignore_errors=True)
 
@@ -729,6 +737,7 @@ def test_web_admins_bypass_daily_run_limit(monkeypatch, tmp_path: Path) -> None:
         assert session.status_code == 200
         assert session.json()["runs_remaining_today"] is None
     finally:
+        client.app.state.jobs.shutdown()
         for run_root in run_roots:
             shutil.rmtree(run_root, ignore_errors=True)
 

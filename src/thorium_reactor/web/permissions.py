@@ -24,8 +24,7 @@ else:
     import fcntl
 
 
-OWNER_EMAIL = "seamusdgallagher@gmail.com"
-LOCAL_DEV_EMAIL = OWNER_EMAIL
+LOCAL_DEV_EMAIL = "developer@localhost"
 ACCESS_IDENTITY_HEADER = "cf-access-authenticated-user-email"
 PROXY_SECRET_HEADER = "x-thorium-proxy-secret"
 
@@ -261,12 +260,14 @@ def _unlock_file(handle: Any) -> None:
 
 
 def configured_admin_emails() -> set[str]:
-    emails = {OWNER_EMAIL}
+    emails: set[str] = set()
     raw = os.environ.get("THORIUM_REACTOR_ADMIN_EMAILS", "")
     for value in raw.replace(";", ",").split(","):
         value = value.strip()
         if value:
             emails.add(normalize_email(value))
+    if not emails and not truthy(os.environ.get("THORIUM_REACTOR_ACCESS_REQUIRED")):
+        emails.add(normalize_email(os.environ.get("THORIUM_REACTOR_LOCAL_DEV_EMAIL", LOCAL_DEV_EMAIL)))
     return emails
 
 

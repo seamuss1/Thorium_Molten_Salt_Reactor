@@ -1,35 +1,28 @@
-FROM python:3.11-slim
+FROM node:22-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9 AS frontend
+WORKDIR /ui
+COPY web/ui/package*.json ./
+RUN npm ci
+COPY web/ui/ ./
+RUN npm run build
 
-ARG PYTORCH_XPU_INDEX_URL=https://download.pytorch.org/whl/xpu
-ARG PYTORCH_XPU_VERSION=2.11.0+xpu
-
+FROM python:3.11-slim-bookworm@sha256:a36c24f9cbdf4fd0f52d67f0823eeac19c2028c637cecc392d97f980d4fec56b
 WORKDIR /workspace
-
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ffmpeg git libgl1 libglib2.0-0 libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir \
-        "PyYAML>=6.0" \
-        "numpy>=1.26" \
-        "Pillow>=10.0" \
-        "scipy>=1.12" \
-        "fastapi>=0.110" \
-        "httpx>=0.27" \
-        "uvicorn[standard]>=0.29" \
-        "matplotlib>=3.8" \
-        "pytest>=8.0"
-
-RUN python -m pip install --no-cache-dir \
-        --index-url "${PYTORCH_XPU_INDEX_URL}" \
-        --extra-index-url https://pypi.org/simple \
-        "torch==${PYTORCH_XPU_VERSION}"
-
-ENV PYTHONPATH=/workspace/src \
-    PYTORCH_ENABLE_XPU_FALLBACK=0 \
-    SYCL_CACHE_PERSISTENT=1 \
-    ZE_ENABLE_PCI_ID_DEVICE_ORDER=1 \
-    KMP_DUPLICATE_LIB_OK=TRUE
-
+COPY requirements.lock pyproject.toml README.md ./
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements.lock
+COPY src/ src/
+RUN python -m pip install --no-cache-dir --no-deps --no-build-isolation .
+COPY configs/ configs/
+COPY benchmarks/ benchmarks/
+COPY docs/ docs/
+COPY resources/ resources/
+COPY qa/ qa/
+COPY tests/ tests/
+COPY docker/ docker/
+COPY scripts/ scripts/
+COPY docker-compose.yml docker-compose.dev.yml docker-compose.openmc.yml ./
+COPY web/ui/package-lock.json web/ui/package-lock.json
+COPY web/README.md web/README.md
+COPY --from=frontend /ui/dist/ web/ui/dist/
+RUN python scripts/build_manifest.py > build-manifest.json
+ENV PYTHONPATH=/workspace/src
 CMD ["python", "-m", "thorium_reactor.cli", "--help"]

@@ -46,6 +46,7 @@ class RunRecord(BaseModel):
     case_name: str
     run_id: str
     status: str
+    error: str | None = None
     phase: str | None = None
     command_plan: list[str] = Field(default_factory=list)
     created_at: str | None = None

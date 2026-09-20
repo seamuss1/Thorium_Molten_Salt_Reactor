@@ -6,15 +6,18 @@ services:
     image: thorium-reactor-app:latest
     working_dir: /workspace
     volumes:
-      - ./:/workspace
+    - ./results:/workspace/results
     environment:
       PYTHONPATH: /workspace/src
       THORIUM_REACTOR_RUNTIME_SERVICE: app
       THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-app:latest
       THORIUM_REACTOR_TOOL_RUNTIME: python
       THORIUM_REACTOR_TOOL_VERSION: python-container
-    command: ["python", "-m", "thorium_reactor.cli", "--help"]
-
+    command:
+    - python
+    - -m
+    - thorium_reactor.cli
+    - --help
   web:
     build:
       context: .
@@ -22,32 +25,35 @@ services:
     image: thorium-reactor-web:latest
     working_dir: /workspace
     volumes:
-      - ./:/workspace
+    - ./results:/workspace/results
     ports:
-      - "127.0.0.1:18488:18488"
+    - 127.0.0.1:18488:18488
     environment:
       PYTHONPATH: /workspace/src
       THORIUM_REACTOR_RUNTIME_SERVICE: web
       THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-web:latest
       THORIUM_REACTOR_TOOL_RUNTIME: python
       THORIUM_REACTOR_TOOL_VERSION: python-container
-      THORIUM_REACTOR_ACCESS_REQUIRED: "${THORIUM_REACTOR_ACCESS_REQUIRED:-1}"
-      THORIUM_REACTOR_ADMIN_EMAILS: "${THORIUM_REACTOR_ADMIN_EMAILS:-seamusdgallagher@gmail.com}"
-      THORIUM_REACTOR_RATE_LIMIT_PER_DAY: "${THORIUM_REACTOR_RATE_LIMIT_PER_DAY:-1}"
-      THORIUM_REACTOR_RATE_LIMIT_TIMEZONE: "${THORIUM_REACTOR_RATE_LIMIT_TIMEZONE:-America/New_York}"
-      # Required to trust the Access identity header when access is required:
-      # the access proxy must attach the same value as x-thorium-proxy-secret.
-      THORIUM_REACTOR_PROXY_SHARED_SECRET: "${THORIUM_REACTOR_PROXY_SHARED_SECRET:-}"
-      # Transport peers (IPs/CIDRs) allowed to use the anonymous local-dev
-      # fallback when access is required. Loopback is always trusted.
-      THORIUM_REACTOR_TRUSTED_CLIENT_ADDRS: "${THORIUM_REACTOR_TRUSTED_CLIENT_ADDRS:-}"
-    command: ["uvicorn", "thorium_reactor.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "18488"]
+      THORIUM_REACTOR_ACCESS_REQUIRED: ${THORIUM_REACTOR_ACCESS_REQUIRED:-1}
+      THORIUM_REACTOR_ADMIN_EMAILS: ${THORIUM_REACTOR_ADMIN_EMAILS:-}
+      THORIUM_REACTOR_RATE_LIMIT_PER_DAY: ${THORIUM_REACTOR_RATE_LIMIT_PER_DAY:-1}
+      THORIUM_REACTOR_RATE_LIMIT_TIMEZONE: ${THORIUM_REACTOR_RATE_LIMIT_TIMEZONE:-America/New_York}
+      THORIUM_REACTOR_PROXY_SHARED_SECRET: ${THORIUM_REACTOR_PROXY_SHARED_SECRET:-}
+      THORIUM_REACTOR_TRUSTED_CLIENT_ADDRS: ${THORIUM_REACTOR_TRUSTED_CLIENT_ADDRS:-}
+      THORIUM_REACTOR_RATE_LIMIT_PATH: /workspace/results/.web/rate-limits.json
+    command:
+    - uvicorn
+    - thorium_reactor.web.app:create_app
+    - --factory
+    - --host
+    - 0.0.0.0
+    - --port
+    - '18488'
     networks:
-      default:
+      default: null
       thorium_edge:
         aliases:
-          - thorium-web
-
+        - thorium-web
   openmc:
     build:
       context: .
@@ -55,64 +61,76 @@ services:
     image: thorium-reactor-openmc:latest
     working_dir: /workspace
     volumes:
-      - ./:/workspace
+    - ./results:/workspace/results
     environment:
       PYTHONPATH: /workspace/src
       THORIUM_REACTOR_RUNTIME_SERVICE: openmc
       THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-openmc:latest
       THORIUM_REACTOR_TOOL_RUNTIME: openmc
       THORIUM_REACTOR_TOOL_VERSION: openmc-container
-    command: ["python", "-m", "thorium_reactor.cli", "--help"]
-
+    command:
+    - python
+    - -m
+    - thorium_reactor.cli
+    - --help
   thermochimica:
     build:
       context: .
-      dockerfile: docker/thermochimica-runner.Dockerfile
+      dockerfile: docker/app-runner.Dockerfile
     image: thorium-reactor-thermochimica:latest
     working_dir: /workspace
     volumes:
-      - ./:/workspace
+    - ./results:/workspace/results
     environment:
       PYTHONPATH: /workspace/src
       THORIUM_REACTOR_RUNTIME_SERVICE: thermochimica
       THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-thermochimica:latest
       THORIUM_REACTOR_TOOL_RUNTIME: thermochimica
       THORIUM_REACTOR_TOOL_VERSION: thermochimica-container
-    command: ["python", "-m", "thorium_reactor.cli", "--help"]
-
+    command:
+    - python
+    - -m
+    - thorium_reactor.cli
+    - --help
   saltproc:
     build:
       context: .
-      dockerfile: docker/saltproc-runner.Dockerfile
+      dockerfile: docker/app-runner.Dockerfile
     image: thorium-reactor-saltproc:latest
     working_dir: /workspace
     volumes:
-      - ./:/workspace
+    - ./results:/workspace/results
     environment:
       PYTHONPATH: /workspace/src
       THORIUM_REACTOR_RUNTIME_SERVICE: saltproc
       THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-saltproc:latest
       THORIUM_REACTOR_TOOL_RUNTIME: saltproc
       THORIUM_REACTOR_TOOL_VERSION: saltproc-container
-    command: ["python", "-m", "thorium_reactor.cli", "--help"]
-
+    command:
+    - python
+    - -m
+    - thorium_reactor.cli
+    - --help
   moltres:
     build:
       context: .
-      dockerfile: docker/moltres-runner.Dockerfile
+      dockerfile: docker/app-runner.Dockerfile
     image: thorium-reactor-moltres:latest
     working_dir: /workspace
     volumes:
-      - ./:/workspace
+    - ./results:/workspace/results
     environment:
       PYTHONPATH: /workspace/src
       THORIUM_REACTOR_RUNTIME_SERVICE: moltres
       THORIUM_REACTOR_RUNTIME_IMAGE: thorium-reactor-moltres:latest
       THORIUM_REACTOR_TOOL_RUNTIME: moltres
       THORIUM_REACTOR_TOOL_VERSION: moltres-container
-    command: ["python", "-m", "thorium_reactor.cli", "--help"]
-
+    command:
+    - python
+    - -m
+    - thorium_reactor.cli
+    - --help
 networks:
-  default:
+  default: null
   thorium_edge:
     name: thorium_edge

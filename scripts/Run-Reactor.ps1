@@ -4,6 +4,7 @@ param(
 )
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+Set-Location $repoRoot
 
 function Resolve-DockerService {
     param(
@@ -31,7 +32,7 @@ function Resolve-DockerService {
 }
 
 $service = Resolve-DockerService -Args $CliArgs
-$composeArgs = @("compose", "run", "--rm", "--build", $service, "python", "-m", "thorium_reactor.cli")
+$composeArgs = @("compose", "-f", "docker-compose.yml", "-f", "docker-compose.dev.yml", "run", "--rm", "--build", $service, "python", "-m", "thorium_reactor.cli")
 
 if (-not $CliArgs -or $CliArgs.Count -eq 0) {
     & docker @composeArgs --help

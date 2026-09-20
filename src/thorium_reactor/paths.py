@@ -7,6 +7,7 @@ import json
 import os
 import re
 import tempfile
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -53,7 +54,16 @@ def atomic_write_text(path: Path, contents: str) -> None:
             os.chmod(temp_name, path.stat().st_mode & 0o7777 if path.exists() else _default_file_mode())
         except OSError:
             pass
-        os.replace(temp_name, path)
+        for attempt in range(51):
+            try:
+                os.replace(temp_name, path)
+                break
+            except PermissionError:
+                # Windows readers may briefly hold a handle without delete
+                # sharing. Keep the old complete file visible while retrying.
+                if os.name != "nt" or attempt == 50:
+                    raise
+                time.sleep(0.01)
     finally:
         # A successful replace already moved the file, so this is a no-op then
         # and a cleanup when anything above raised.

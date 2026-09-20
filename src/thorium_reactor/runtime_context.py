@@ -47,9 +47,23 @@ def build_runtime_context(*, command: list[str] | None = None, cwd: Path | str |
         },
         "dependencies": dependency_summary,
         "dependency_hash": _stable_hash(dependency_summary),
+        "build_inputs": _build_inputs(git_cwd),
         "git_commit": _git_output(["rev-parse", "HEAD"], cwd=git_cwd),
         "git_branch": _git_output(["rev-parse", "--abbrev-ref", "HEAD"], cwd=git_cwd),
         "git": git_worktree_status(cwd=git_cwd),
+    }
+
+
+def _build_inputs(root: Path) -> dict[str, Any]:
+    inputs = [root / "requirements.lock", root / "web/ui/package-lock.json"]
+    inputs.extend(sorted((root / "docker").glob("*.Dockerfile")))
+    hashes = {
+        str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest() for path in inputs if path.is_file()
+    }
+    manifest = root / "build-manifest.json"
+    return {
+        "sha256": hashes,
+        "image_manifest": json.loads(manifest.read_text(encoding="utf-8")) if manifest.is_file() else None,
     }
 
 

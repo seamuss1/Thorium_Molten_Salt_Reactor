@@ -101,7 +101,7 @@ requirements:
       - tests/test_bundle_snapshots.py::test_report_and_validation_surface_input_provenance
     validation_evidence:
       - benchmarks/msre_first_criticality/benchmark.yaml
-      - results/README.md
+      - docs/result-bundles.md
     acceptance_criteria:
       - Benchmark-ready status remains blocked until solver_statistics is published_solver_bundle.
       - Runtime provenance is carried into validation and report artifacts.
@@ -180,7 +180,7 @@ requirements:
       - tests/test_bundle_snapshots.py::test_validation_prefers_bundled_benchmark_snapshot_after_repo_benchmark_changes
       - tests/test_paths.py::test_result_bundle_creates_dedicated_geometry_exports_dir
     validation_evidence:
-      - results/README.md
+      - docs/result-bundles.md
       - README.md
     acceptance_criteria:
       - Workflow commands write isolated results under results/<case>/<run_id>.

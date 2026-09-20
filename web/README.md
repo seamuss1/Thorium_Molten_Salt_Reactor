@@ -14,6 +14,10 @@ Start it with:
 
 Use `.\scripts\Run-Web.cmd -SkipUiBuild` only when `web/ui/dist` is already current.
 
+The default always runs `npm ci` and rebuilds, even if `dist` exists. Custom ports
+remain bound to loopback. See [runtime and deployment](../docs/reproducible-runtime.md)
+for the release image, remote publishing requirements, and retry behavior.
+
 ## Architecture
 
 ```text

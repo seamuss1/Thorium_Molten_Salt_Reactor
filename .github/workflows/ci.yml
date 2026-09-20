@@ -31,7 +31,9 @@ jobs:
           cache: pip
 
       - name: Install package with dev extras
-        run: pip install -e ".[dev]"
+        run: |
+          pip install --require-hashes -r requirements.lock
+          pip install --no-deps --no-build-isolation -e .
 
       - name: ruff check
         run: ruff check src tests
@@ -55,7 +57,9 @@ jobs:
           cache: pip
 
       - name: Install package with dev extras
-        run: pip install -e ".[dev]"
+        run: |
+          pip install --require-hashes -r requirements.lock
+          pip install --no-deps --no-build-isolation -e .
 
       - name: Run test suite
         run: pytest -m "not slow and not hardware" --cov --cov-report=term
@@ -75,7 +79,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: web/ui/package-lock.json
 
@@ -87,3 +91,20 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+  windows-workflows:
+    name: Windows wrappers and job lifecycle
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install locked test runtime
+        run: |
+          pip install --require-hashes -r requirements.lock
+          pip install --no-deps --no-build-isolation -e .
+      - name: Verify wrappers, solver outcomes and process ownership
+        run: pytest tests/test_web_wrappers.py tests/test_audit_regressions.py -q

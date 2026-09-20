@@ -6,7 +6,7 @@ services:
     image: thorium-reactor-openmc:latest
     working_dir: /workspace
     volumes:
-      - ./:/workspace
+      - ./results:/workspace/results
     environment:
       PYTHONPATH: /workspace/src
       THORIUM_REACTOR_RUNTIME_SERVICE: openmc

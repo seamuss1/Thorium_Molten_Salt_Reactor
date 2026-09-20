@@ -9,6 +9,7 @@ from thorium_reactor.chemistry import (
     build_steady_state_chemistry_summary,
     corrosion_index_from_state,
 )
+from thorium_reactor.config import validate_transient_scenario
 from thorium_reactor.precursors import (
     build_initial_precursor_state,
     precursor_group_summary,
@@ -133,6 +134,7 @@ def run_transient_case(
 
 
 def _resolve_scenario(transient_config: dict[str, Any], scenario_name: str | None) -> dict[str, Any]:
+    validate_transient_scenario(transient_config, scenario_name)
     scenarios = transient_config.get("scenarios", [])
     if not isinstance(scenarios, list):
         scenarios = []

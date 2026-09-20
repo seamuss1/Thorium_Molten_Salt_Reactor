@@ -15,7 +15,7 @@ from thorium_reactor.benchmark_evidence import (
 from thorium_reactor.benchmarking import get_docker_runtime_status, run_solver_backed_benchmark
 from thorium_reactor.bundle_inputs import ensure_bundle_inputs, load_bundle_inputs
 from thorium_reactor.capabilities import get_case_capabilities
-from thorium_reactor.config import load_case_config
+from thorium_reactor.config import ConfigError, load_case_config, validate_transient_scenario
 from thorium_reactor.economics import run_economics_case
 from thorium_reactor.evidence import build_evidence_status, load_canonical_artifact_status
 from thorium_reactor.geometry.exporters import export_geometry
@@ -202,7 +202,13 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"ERROR: {error}")
         return 0 if summary["passed"] else 1
 
-    config = load_case_config(case_config_path(repo_root, args.case))
+    try:
+        config = load_case_config(case_config_path(repo_root, args.case))
+        if args.command in {"transient", "transient-sweep"} and not args.reuse_run_id:
+            validate_transient_scenario(config.data.get("transient", {}), args.scenario)
+    except ConfigError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     if args.command in {
         "build",
@@ -274,6 +280,17 @@ def main(argv: list[str] | None = None) -> int:
             print(summary["neutronics"]["status"])
             if summary["neutronics"].get("message"):
                 print(summary["neutronics"]["message"])
+            expected_status = "dry-run" if args.no_solver else "completed"
+            succeeded = summary["neutronics"].get("status") == expected_status
+            error = (
+                None
+                if succeeded
+                else str(
+                    summary["neutronics"].get("error")
+                    or summary["neutronics"].get("message")
+                    or f"Requested run did not succeed: {summary['neutronics'].get('status')}"
+                )
+            )
             _finish_cli_stage(
                 bundle,
                 args.command,
@@ -282,8 +299,12 @@ def main(argv: list[str] | None = None) -> int:
                 stage_artifacts_before,
                 provenance,
                 summary=summary,
+                status="completed" if succeeded else "failed",
+                message=error,
             )
-            return 0
+            if error:
+                print(error, file=sys.stderr)
+            return 0 if succeeded else 1
 
         if args.command == "transient":
             from thorium_reactor.transient import run_transient_case

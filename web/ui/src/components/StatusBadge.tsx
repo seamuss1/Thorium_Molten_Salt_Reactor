@@ -3,7 +3,7 @@ type Tone = "ok" | "warn" | "danger" | "info" | "neutral";
 const TONE_BY_KEYWORD: Array<[RegExp, Tone]> = [
   [/(complete|completed|pass|passed|ready|ok|valid|success|ended)/i, "ok"],
   [/(running|queued|active|in[_-]?progress|started|live)/i, "info"],
-  [/(fail|failed|error|blocked|missing|canceled|cancelled|reversal|high[_-]?risk)/i, "danger"],
+  [/(fail|failed|error|blocked|missing|canceled|cancelled|interrupted|reversal|high[_-]?risk)/i, "danger"],
   [/(pending|warn|warning|built|partial|medium|degraded|caution)/i, "warn"]
 ];
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, ArrowLeft, Atom, CheckCircle2, Clock, XCircle } from "lucide-react";
 import { api } from "../api";
 import { Truncate } from "../components/Truncate";
@@ -48,6 +48,14 @@ export function Runs() {
   }, [isLive, caseName, runId, queryClient]);
 
   const active = isLive;
+  const retry = useMutation({
+    mutationFn: () => api.retryRun(selected!.caseName, selected!.runId),
+    onSuccess: (run) => {
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      navigate(`/runs/${run.case_name}/${run.run_id}`);
+    }
+  });
+  useEffect(() => { retry.reset(); }, [selected?.caseName, selected?.runId]);
   // Progress comes from the run's own status, not from whichever event happened
   // to arrive last: log lines carry no progress, so reading the latest event
   // made the bar flip to indeterminate every time a phase printed a line.
@@ -109,6 +117,11 @@ export function Runs() {
               </div>
               <div className="output-focus-title" style={{ flex: "0 0 auto" }}>
                 <StatusBadge status={detail.data.status} />
+                {["failed", "interrupted", "canceled"].includes(detail.data.status) && (
+                  <button className="secondary-action" disabled={retry.isPending} onClick={() => retry.mutate()}>
+                    {retry.isPending ? "Retrying…" : "Retry as new run"}
+                  </button>
+                )}
                 {hasViewableGeometry(detail.data) && (
                   <Link className="secondary-action" to={`/viewer/${detail.data.case_name}/${detail.data.run_id}`}>
                     Open 3D
@@ -116,6 +129,8 @@ export function Runs() {
                 )}
               </div>
             </header>
+            {detail.data.error && <p role="alert" className="event-banner">{detail.data.error}</p>}
+            {retry.isError && <PanelError error={retry.error} onRetry={() => retry.mutate()} />}
             {detail.data.command_plan.length ? (
               <div className="timeline">
                 {detail.data.command_plan.map((phase) => (
@@ -128,7 +143,7 @@ export function Runs() {
             ) : (
               <EmptyState icon={Clock}>No phase plan recorded for this run.</EmptyState>
             )}
-            {(active || detail.data.latest_event) && (
+            {(active || (detail.data.latest_event && detail.data.latest_event.message !== detail.data.error)) && (
               <div className="event-banner">
                 <Clock aria-hidden="true" />
                 <div className="event-body">
@@ -163,7 +178,7 @@ function phaseClass(status: string, current: boolean): string {
 }
 
 function iconForPhase(status: string, current: boolean) {
-  if (status === "failed" && current) return <XCircle aria-hidden="true" />;
+  if (["failed", "interrupted", "canceled"].includes(status) && current) return <XCircle aria-hidden="true" />;
   if (status === "completed") return <CheckCircle2 aria-hidden="true" />;
   return <Clock aria-hidden="true" />;
 }
