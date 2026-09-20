@@ -46,6 +46,8 @@ def start_process(command: list[str], **kwargs) -> subprocess.Popen:
 
 
 def _assign_windows_job(process: subprocess.Popen) -> int:
+    if sys.platform != "win32":
+        raise OSError("Windows Job Objects are only available on Windows.")
     import ctypes
     from ctypes import wintypes
 
