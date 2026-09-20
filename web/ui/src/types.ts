@@ -36,6 +36,7 @@ export interface RunRecord {
   case_name: string;
   run_id: string;
   status: string;
+  error?: string | null;
   phase?: string | null;
   command_plan: string[];
   created_at?: string | null;

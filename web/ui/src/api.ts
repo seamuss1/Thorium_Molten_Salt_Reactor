@@ -68,6 +68,8 @@ export const api = {
   run: (caseName: string, runId: string) => request<RunRecord>(`/api/runs/${caseName}/${runId}`),
   createRun: (draft: SimulationDraft) =>
     request<RunRecord>("/api/runs", { method: "POST", body: JSON.stringify(draft) }),
+  retryRun: (caseName: string, runId: string) =>
+    request<RunRecord>(`/api/runs/${caseName}/${runId}/retry`, { method: "POST" }),
   validateDraft: (caseName: string, patch: Record<string, unknown>) =>
     request<DraftValidationResponse>(`/api/cases/${caseName}/validate-draft`, {
       method: "POST",

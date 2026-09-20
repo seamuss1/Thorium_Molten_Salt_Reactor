@@ -6,9 +6,13 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from thorium_reactor.paths import atomic_write_text
+from thorium_reactor.web.job_ownership import acquire_lease, start_process, terminate_process_tree
 from thorium_reactor.web.repository import TERMINAL_STATUSES, WebRepository, read_json, utc_now
 from thorium_reactor.web.schemas import RunEvent, RunRecord, SimulationDraft, copy_model, model_to_dict
 
@@ -16,12 +20,95 @@ ALLOWED_PHASES = ("build", "run", "transient", "transient-sweep", "validate", "r
 DEFAULT_PHASE_TIMEOUT_SECONDS = 900.0
 
 
+class JobQueueFull(RuntimeError):
+    pass
+
+
 class JobManager:
-    def __init__(self, repository: WebRepository, *, max_workers: int = 2) -> None:
+    def __init__(self, repository: WebRepository, *, max_workers: int = 2, max_queued: int = 8) -> None:
+        if max_workers < 1 or max_queued < 0:
+            raise ValueError("Job capacity must include at least one worker and a nonnegative queue.")
         self.repository = repository
         self._semaphore = threading.Semaphore(max_workers)
+        self._capacity = threading.BoundedSemaphore(max_workers + max_queued)
+        self._stopping = threading.Event()
+        self._lock = threading.RLock()
+        self._threads: set[threading.Thread] = set()
+        self._processes: dict[Path, subprocess.Popen] = {}
+        self.owner_id = uuid.uuid4().hex
+        self._lease_dir = repository.repo_root / "results" / ".job-owners"
+        self._lease = acquire_lease(self._lease_dir / f"{self.owner_id}.lock")
+        if self._lease is None:
+            raise RuntimeError("Could not acquire a unique job-owner lease.")
+        self.reconcile()
 
-    def submit(self, draft: SimulationDraft) -> RunRecord:
+    def reconcile(self) -> None:
+        """Only an owner whose OS lock was released can have abandoned work."""
+        guard = acquire_lease(self._lease_dir / "reconcile.lock")
+        if guard is None:
+            return
+        try:
+            for path in (self.repository.repo_root / "results").glob("*/*/job_status.json"):
+                status = read_json(path, {})
+                if status.get("status") not in {"queued", "running"}:
+                    continue
+                owner = str(status.get("owner_id", ""))
+                if owner == self.owner_id:
+                    continue
+                lease = None
+                if len(owner) == 32 and all(c in "0123456789abcdef" for c in owner):
+                    lease = acquire_lease(self._lease_dir / f"{owner}.lock")
+                    if lease is None:
+                        continue
+                try:
+                    message = "The job owner stopped before this run finished. Retry to create a new run."
+                    status.update(status="interrupted", finished_at=utc_now(), error=message)
+                    write_status(path.parent, status)
+                    append_event(path.parent, "error", "interrupted", message)
+                finally:
+                    if lease is not None:
+                        lease.close()
+        finally:
+            guard.close()
+
+    def shutdown(self) -> None:
+        with self._lock:
+            self._stopping.set()
+            processes = list(self._processes.values())
+            threads = list(self._threads)
+        for process in processes:
+            terminate_process_tree(process)
+        for thread in threads:
+            thread.join(timeout=15)
+        if not any(thread.is_alive() for thread in threads) and self._lease is not None:
+            self._lease.close()
+            self._lease = None
+
+    def submit(
+        self,
+        draft: SimulationDraft,
+        *,
+        claim: Callable[[], Any] | None = None,
+        release: Callable[[], None] | None = None,
+    ) -> RunRecord:
+        if self._stopping.is_set() or not self._capacity.acquire(blocking=False):
+            raise JobQueueFull("The run queue is full or shutting down. Try again after an active run finishes.")
+        claimed = None
+        try:
+            self.repository.validate_run_draft(draft)
+            if claim is not None:
+                claimed = claim()
+            with self._lock:
+                if self._stopping.is_set():
+                    raise JobQueueFull("The run queue is shutting down.")
+                return self._submit_reserved(draft)
+        except Exception:
+            self._capacity.release()
+            if claimed is not None and release is not None:
+                release()
+            raise
+
+    def _submit_reserved(self, draft: SimulationDraft) -> RunRecord:
         phases = normalize_phases(draft.phases)
         bundle = self.repository.prepare_run_bundle(draft)
         draft = copy_model(draft, update={"run_id": bundle.run_id})
@@ -35,24 +122,47 @@ class JobManager:
             "started_at": None,
             "finished_at": None,
             "progress": 0.0,
+            "owner_id": self.owner_id,
         }
         write_status(bundle.root, status)
+        write_json(bundle.root / "web_draft.json", model_to_dict(draft))
         append_event(bundle.root, "info", None, "Run queued.", progress=0.0)
-        thread = threading.Thread(target=self._run_job, args=(bundle.root, draft, phases), daemon=True)
-        thread.start()
-        return self.repository.get_run(bundle.case_name, bundle.run_id)
+        record = self.repository.get_run(bundle.case_name, bundle.run_id)
+        thread = threading.Thread(target=self._work, args=(bundle.root, draft, phases), daemon=True)
+        self._threads.add(thread)
+        try:
+            thread.start()
+        except Exception as exc:
+            self._threads.discard(thread)
+            status.update(status="failed", finished_at=utc_now(), error=str(exc))
+            write_status(bundle.root, status)
+            append_event(bundle.root, "error", None, str(exc))
+            raise
+        return record
+
+    def _work(self, run_dir: Path, draft: SimulationDraft, phases: list[str]) -> None:
+        try:
+            self._run_job(run_dir, draft, phases)
+        finally:
+            self._capacity.release()
+            with self._lock:
+                self._threads.discard(threading.current_thread())
 
     def _run_job(self, run_dir: Path, draft: SimulationDraft, phases: list[str]) -> None:
         with self._semaphore:
-            if os.environ.get("THORIUM_REACTOR_WEB_FAKE_JOBS") == "1":
-                self._run_fake_job(run_dir, draft, phases)
-                return
             status = read_json(run_dir / "job_status.json", {})
             status.update({"status": "running", "started_at": utc_now(), "progress": 0.01})
             write_status(run_dir, status)
             append_event(run_dir, "info", None, "Run started.", progress=0.01)
             try:
+                if self._stopping.is_set():
+                    raise InterruptedError("Server shut down before this run finished. Retry to create a new run.")
+                if os.environ.get("THORIUM_REACTOR_WEB_FAKE_JOBS") == "1":
+                    self._run_fake_job(run_dir, draft, phases)
+                    return
                 for index, phase in enumerate(phases, start=1):
+                    if self._stopping.is_set():
+                        raise InterruptedError("Server shut down before this run finished. Retry to create a new run.")
                     progress = (index - 1) / max(len(phases), 1)
                     status.update({"status": "running", "phase": phase, "progress": progress})
                     write_status(run_dir, status)
@@ -67,7 +177,8 @@ class JobManager:
                 write_status(run_dir, status)
                 append_event(run_dir, "info", "completed", "Run completed.", progress=1.0)
             except Exception as exc:
-                status.update({"status": "failed", "finished_at": utc_now(), "error": str(exc)})
+                terminal = "interrupted" if self._stopping.is_set() else "failed"
+                status.update({"status": terminal, "finished_at": utc_now(), "error": str(exc)})
                 write_status(run_dir, status)
                 append_event(run_dir, "error", status.get("phase"), str(exc), progress=status.get("progress"))
 
@@ -76,7 +187,7 @@ class JobManager:
         env = os.environ.copy()
         src_path = str(self.repository.repo_root / "src")
         env["PYTHONPATH"] = src_path + os.pathsep + env.get("PYTHONPATH", "")
-        process = subprocess.Popen(
+        process = start_process(
             command,
             cwd=str(self.repository.repo_root),
             env=env,
@@ -85,6 +196,10 @@ class JobManager:
             text=True,
             bufsize=1,
         )
+        with self._lock:
+            self._processes[run_dir] = process
+            if self._stopping.is_set():
+                terminate_process_tree(process)
         assert process.stdout is not None
         timed_out = {"value": False}
 
@@ -96,10 +211,7 @@ class JobManager:
                 phase,
                 f"Phase '{phase}' exceeded the {phase_timeout_seconds(phase):.0f} second job budget.",
             )
-            try:
-                process.kill()
-            except OSError:
-                pass
+            terminate_process_tree(process)
 
         timer = threading.Timer(phase_timeout_seconds(phase), kill_on_timeout)
         timer.daemon = True
@@ -112,6 +224,11 @@ class JobManager:
             return_code = process.wait()
         finally:
             timer.cancel()
+            terminate_process_tree(process)
+            process.wait(timeout=10)
+            process.stdout.close()
+            with self._lock:
+                self._processes.pop(run_dir, None)
         if timed_out["value"]:
             raise TimeoutError(f"Phase '{phase}' exceeded the {phase_timeout_seconds(phase):.0f} second job budget.")
         if return_code != 0:
@@ -122,6 +239,8 @@ class JobManager:
         status.update({"status": "running", "started_at": utc_now()})
         write_status(run_dir, status)
         for index, phase in enumerate(phases, start=1):
+            if self._stopping.is_set():
+                raise InterruptedError("Server shut down before this run finished.")
             progress = index / max(len(phases), 1)
             status.update({"phase": phase, "progress": progress})
             write_status(run_dir, status)
@@ -248,9 +367,7 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     UI from a job that is still running, so the write must never be observable
     in a partial state.
     """
-    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    os.replace(temporary, path)
+    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True))
 
 
 def is_terminal(status: str) -> bool:

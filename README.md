@@ -17,6 +17,10 @@ The workflow keeps evidence levels explicit. Dry-run neutronics, reduced-order t
 
 The Windows `.cmd` wrappers are the normal entrypoints on this host because PowerShell script execution is restricted. See [AGENTS.md](AGENTS.md) for the repo-local runtime rules and [web/README.md](web/README.md) for the browser stack.
 
+See [Reproducible runtime and deployment](docs/reproducible-runtime.md) for locked
+dependency installation, standalone release images, the development Compose
+override, safe port publishing, and interrupted-run recovery.
+
 ## What This Repo Does
 
 | Layer | What is implemented | Where to look |

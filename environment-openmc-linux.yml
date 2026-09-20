@@ -1,14 +1,11 @@
-name: thorium-reactor
+# Exploratory host environment. For the reproducible solver use the digest-pinned
+# openmc Compose service; Conda's compiled solver closure is not locked here.
+name: thorium-reactor-openmc
 channels:
   - conda-forge
 dependencies:
-  - python=3.11
+  - python=3.12
   - pip
-  - numpy>=1.26
-  - pillow>=10.0
-  - pyyaml>=6.0
-  - pytest>=8.0
-  - ffmpeg
-  - openmc>=0.14
+  - openmc=0.15.3
   - pip:
-      - -e .
+      - --require-hashes -r requirements.lock

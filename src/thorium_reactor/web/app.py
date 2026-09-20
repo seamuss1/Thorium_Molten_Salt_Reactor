@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from thorium_reactor.web.jobs import JobManager, is_terminal
+from thorium_reactor.web.jobs import JobManager, JobQueueFull, is_terminal
 from thorium_reactor.web.permissions import AccessController, AccessUser
 from thorium_reactor.web.repository import WebRepository
 from thorium_reactor.web.schemas import (
@@ -30,12 +31,21 @@ from thorium_reactor.web.schemas import (
 def create_app(repo_root: Path | None = None) -> FastAPI:
     repository = WebRepository(repo_root)
     jobs = JobManager(repository)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            await asyncio.to_thread(jobs.shutdown)
+
     app = FastAPI(
         title="Thorium Reactor Lab",
         version="0.1.0",
         docs_url="/api/openapi",
         redoc_url="/api/redoc",
         openapi_url="/api/openapi.json",
+        lifespan=lifespan,
     )
     app.state.repository = repository
     app.state.jobs = jobs
@@ -95,13 +105,33 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         user: AccessUser = Depends(current_user),
         controller: AccessController = Depends(access),
     ) -> RunRecord:
-        claimed = controller.claim_run_start(user)
         try:
-            return jobs.submit(draft)
+            return jobs.submit(
+                draft,
+                claim=lambda: controller.claim_run_start(user),
+                release=lambda: controller.release_run_start(user),
+            )
+        except JobQueueFull as exc:
+            raise HTTPException(status_code=503, detail=str(exc), headers={"Retry-After": "5"}) from exc
+        except HTTPException:
+            raise
         except Exception as exc:
-            if claimed is not None:
-                controller.release_run_start(user)
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @api.post("/runs/{case_name}/{run_id}/retry", response_model=RunRecord, status_code=202)
+    def retry_run(
+        case_name: str,
+        run_id: str,
+        user: AccessUser = Depends(current_user),
+        controller: AccessController = Depends(access),
+    ) -> RunRecord:
+        try:
+            draft = repository.retry_draft(case_name, run_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return create_run(draft, user, controller)
 
     @api.get("/runs", response_model=list[RunRecord])
     def list_runs() -> list[RunRecord]:

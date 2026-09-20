@@ -1,0 +1,19 @@
+services:
+  app:
+    volumes:
+    - ./:/workspace
+  web:
+    volumes:
+    - ./:/workspace
+  openmc:
+    volumes:
+    - ./:/workspace
+  thermochimica:
+    volumes:
+    - ./:/workspace
+  saltproc:
+    volumes:
+    - ./:/workspace
+  moltres:
+    volumes:
+    - ./:/workspace

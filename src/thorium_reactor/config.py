@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -108,13 +109,16 @@ def load_case_config(path: Path) -> CaseConfig:
     with path.open("r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle) or {}
 
+    if not isinstance(raw, Mapping):
+        raise ConfigError(f"Case config {path} must be a mapping.")
+
     missing = [key for key in REQUIRED_CASE_KEYS if key not in raw]
     if missing:
         raise ConfigError(f"Case config {path} is missing required keys: {', '.join(missing)}")
     _validate_case_schema(path, raw)
 
     name = raw.get("name") or path.parent.name
-    return CaseConfig(name=name, path=path, data=raw)
+    return CaseConfig(name=name, path=path, data=dict(raw))
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -133,6 +137,7 @@ def resolve_benchmark_path(repo_root: Path, data: Mapping[str, Any]) -> Path | N
 
 
 def _validate_case_schema(path: Path, raw: Mapping[str, Any]) -> None:
+    _validate_finite_numbers(path, raw)
     _validate_material_properties(path, raw.get("materials"))
     _validate_reactor_settings(path, raw.get("reactor"))
     _validate_geometry_settings(path, raw.get("geometry"))
@@ -355,6 +360,10 @@ def _validate_optional_transient_settings(path: Path, transient: Any) -> None:
         return
     if not isinstance(transient, Mapping):
         raise ConfigError(f"Case config {path} optional 'transient' section must be a mapping.")
+    _validate_transient_timing(path, transient, "transient")
+    _validate_transient_events(
+        path, transient.get("events", []), "transient.events", transient.get("duration_s", 120.0)
+    )
     for field_name in (
         "duration_s",
         "time_step_s",
@@ -374,7 +383,12 @@ def _validate_optional_transient_settings(path: Path, transient: Any) -> None:
         "max_power_fraction",
     ):
         if field_name in transient:
-            _require_number(path, f"transient.{field_name}", transient[field_name])
+            value = _require_number(path, f"transient.{field_name}", transient[field_name])
+            if (
+                field_name.endswith("response_time_s")
+                or field_name in {"reactivity_to_power_scale_pcm", "max_power_fraction"}
+            ) and value <= 0:
+                raise ConfigError(f"Case config {path} transient.{field_name} must be positive.")
     precursor_groups = transient.get("delayed_neutron_precursor_groups")
     precursor_transport_model = transient.get("precursor_transport_model")
     if precursor_transport_model is not None and precursor_transport_model not in SUPPORTED_PRECURSOR_TRANSPORT_MODELS:
@@ -425,27 +439,83 @@ def _validate_optional_transient_settings(path: Path, transient: Any) -> None:
     if scenarios is not None:
         if not isinstance(scenarios, list):
             raise ConfigError(f"Case config {path} transient.scenarios must be a list.")
+        names: set[str] = set()
         for index, scenario in enumerate(scenarios, start=1):
             if not isinstance(scenario, Mapping):
                 raise ConfigError(f"Case config {path} transient.scenarios[{index}] must be a mapping.")
-            if "duration_s" in scenario:
-                _require_number(path, f"transient.scenarios[{index}].duration_s", scenario["duration_s"])
-            if "time_step_s" in scenario:
-                _require_number(path, f"transient.scenarios[{index}].time_step_s", scenario["time_step_s"])
-            events = scenario.get("events")
-            if events is not None:
-                if not isinstance(events, list):
-                    raise ConfigError(f"Case config {path} transient.scenarios[{index}].events must be a list.")
-                for event_index, event in enumerate(events, start=1):
-                    if not isinstance(event, Mapping):
-                        raise ConfigError(
-                            f"Case config {path} transient.scenarios[{index}].events[{event_index}] must be a mapping."
-                        )
-                    _require_number(
-                        path,
-                        f"transient.scenarios[{index}].events[{event_index}].time_s",
-                        event.get("time_s", 0.0),
-                    )
+            name = scenario.get("name")
+            if not isinstance(name, str) or not name.strip() or name in names:
+                raise ConfigError(f"Case config {path} transient.scenarios[{index}].name must be nonempty and unique.")
+            names.add(name)
+            timing = {**transient, **scenario}
+            _validate_transient_timing(path, timing, f"transient.scenarios[{index}]")
+            _validate_transient_events(
+                path,
+                scenario.get("events", []),
+                f"transient.scenarios[{index}].events",
+                timing.get("duration_s", 120.0),
+            )
+
+
+def validate_transient_scenario(transient: Mapping[str, Any], name: str | None) -> None:
+    """An explicit scenario selection must never become an implicit hold experiment."""
+    if name is None:
+        return
+    scenarios = transient.get("scenarios") or []
+    available = (
+        [str(item["name"]) for item in scenarios]
+        if scenarios
+        else [str(transient.get("default_name", "steady_state_hold"))]
+    )
+    if name not in available:
+        raise ConfigError(f"Unknown transient scenario {name!r}. Available scenarios: {', '.join(available)}.")
+
+
+def _validate_transient_timing(path: Path, settings: Mapping[str, Any], prefix: str) -> None:
+    duration = _require_number(path, f"{prefix}.duration_s", settings.get("duration_s", 120.0))
+    step = _require_number(path, f"{prefix}.time_step_s", settings.get("time_step_s", 1.0))
+    if step < 0.05:
+        raise ConfigError(
+            f"Case config {path} {prefix}.time_step_s must be at least 0.05 seconds (the supported minimum)."
+        )
+    if duration <= 0 or duration < step:
+        raise ConfigError(f"Case config {path} {prefix}.duration_s must be positive and at least time_step_s.")
+
+
+def _validate_transient_events(path: Path, events: Any, prefix: str, duration: float) -> None:
+    if not isinstance(events, list):
+        raise ConfigError(f"Case config {path} {prefix} must be a list.")
+    nonnegative = {"flow_fraction", "heat_sink_fraction", "cleanup_multiplier", "impurity_ingress_multiplier"}
+    numeric = nonnegative | {
+        "reactivity_step_pcm",
+        "secondary_sink_temp_offset_c",
+        "redox_setpoint_shift_ev",
+        "gas_stripping_efficiency",
+    }
+    for index, event in enumerate(events, start=1):
+        field = f"{prefix}[{index}]"
+        if not isinstance(event, Mapping):
+            raise ConfigError(f"Case config {path} {field} must be a mapping.")
+        time = _require_number(path, f"{field}.time_s", event.get("time_s", 0.0))
+        if not 0 <= time <= duration:
+            raise ConfigError(f"Case config {path} {field}.time_s must be within [0, duration_s].")
+        for key in numeric & event.keys():
+            value = _require_number(path, f"{field}.{key}", event[key])
+            if key in nonnegative and value < 0:
+                raise ConfigError(f"Case config {path} {field}.{key} must be non-negative.")
+            if key == "gas_stripping_efficiency" and not 0 <= value <= 1:
+                raise ConfigError(f"Case config {path} {field}.{key} must be within [0, 1].")
+
+
+def _validate_finite_numbers(path: Path, value: Any, field: str = "case") -> None:
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ConfigError(f"Case config {path} field '{field}' must be finite.")
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            _validate_finite_numbers(path, child, f"{field}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _validate_finite_numbers(path, child, f"{field}[{index}]")
 
 
 def _validate_optional_depletion_settings(path: Path, depletion: Any) -> None:
@@ -873,7 +943,10 @@ def _validate_decay_heat_groups(path: Path, groups: Any) -> None:
 def _require_number(path: Path, field_name: str, value: Any) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigError(f"Case config {path} field '{field_name}' must be numeric.")
-    return float(value)
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ConfigError(f"Case config {path} field '{field_name}' must be finite.")
+    return parsed
 
 
 def _validate_optional_integrations(path: Path, integrations: Any) -> None:

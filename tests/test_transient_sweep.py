@@ -55,7 +55,7 @@ def test_run_transient_sweep_case_produces_accelerated_bundle(tmp_path: Path) ->
         scenario_name="partial_heat_sink_loss",
         samples=128,
         seed=7,
-        prefer_gpu=True,
+        backend="numpy",
     )
 
     assert payload["backend"] in {"python", "numpy", "torch-xpu"}
@@ -102,7 +102,7 @@ def test_run_transient_sweep_case_enforces_minimum_sample_floor(tmp_path: Path) 
         },
     }
 
-    payload = run_transient_sweep_case(config, bundle, summary, samples=4, seed=11)
+    payload = run_transient_sweep_case(config, bundle, summary, samples=4, seed=11, backend="numpy")
 
     assert payload["samples"] == 32
     assert summary["transient_sweep"]["samples"] == 32

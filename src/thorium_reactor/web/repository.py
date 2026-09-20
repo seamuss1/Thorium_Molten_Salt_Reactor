@@ -44,7 +44,7 @@ from thorium_reactor.web.schemas import (
 )
 
 RUN_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
-TERMINAL_STATUSES = {"completed", "failed", "canceled"}
+TERMINAL_STATUSES = {"completed", "failed", "canceled", "interrupted"}
 RAW_ARTIFACTS = (
     "summary.json",
     "state_store.json",
@@ -129,6 +129,7 @@ class WebRepository:
         )
 
     def prepare_run_bundle(self, draft: SimulationDraft) -> ResultBundle:
+        self.validate_run_draft(draft)
         case_name = safe_segment(draft.case_name)
         base_config = load_case_config(case_config_path(self.repo_root, case_name))
         config, normalized_yaml = self._load_draft_config(
@@ -160,6 +161,30 @@ class WebRepository:
             },
         )
         return bundle
+
+    def validate_run_draft(self, draft: SimulationDraft) -> None:
+        """Preflight without creating a bundle or consuming a run quota."""
+        from thorium_reactor.config import validate_transient_scenario
+
+        config, _ = self._load_draft_config(draft.case_name, draft_yaml=draft.draft_yaml, patch=draft.patch)
+        validate_transient_scenario(config.data.get("transient", {}), draft.scenario)
+
+    def retry_draft(self, case_name: str, run_id: str) -> SimulationDraft:
+        run_dir = self._run_dir(case_name, run_id)
+        if not run_dir.exists():
+            raise FileNotFoundError(f"Run '{run_id}' was not found.")
+        if self.run_status(case_name, run_id) not in TERMINAL_STATUSES:
+            raise ValueError("Only a finished or interrupted run can be retried.")
+        saved = read_json(run_dir / "web_draft.json", {})
+        if not saved:
+            raise ValueError("This older run has no saved workflow to retry. Create a new run in Builder.")
+        saved.update(
+            case_name=case_name,
+            run_id=None,
+            patch={},
+            draft_yaml=(run_dir / CASE_SNAPSHOT_NAME).read_text(encoding="utf-8"),
+        )
+        return SimulationDraft(**saved)
 
     def list_runs(self) -> list[RunRecord]:
         records: list[RunRecord] = []
@@ -302,6 +327,7 @@ class WebRepository:
             case_name=safe_case_name,
             run_id=safe_run_id,
             status=str(status),
+            error=status_payload.get("error"),
             phase=status_payload.get("phase"),
             command_plan=[str(item) for item in status_payload.get("command_plan", [])],
             created_at=status_payload.get("created_at") or timestamp_from_path(run_dir),

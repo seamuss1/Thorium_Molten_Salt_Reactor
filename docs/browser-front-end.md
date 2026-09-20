@@ -18,7 +18,7 @@ The FastAPI backend runs on port `18488` in the Docker web runtime. A production
 http://localhost:18488
 ```
 
-The wrapper builds `web/ui/dist` when it is missing. If the UI build is already current, use:
+The wrapper runs `npm ci` and rebuilds `web/ui/dist` on every normal start. If the UI build is already current, use:
 
 ```powershell
 .\scripts\Run-Web.cmd -SkipUiBuild
@@ -28,11 +28,11 @@ During focused UI development, Vite can still be run from `web/ui` for hot reloa
 
 ## Access And Rate Limits
 
-The deployed Docker `web` service defaults `THORIUM_REACTOR_ACCESS_REQUIRED=1`, so `/api/runs` requires the Cloudflare Access authenticated email header. `seamusdgallagher@gmail.com` is always an unlimited-start admin, and additional admins are read from comma-separated `THORIUM_REACTOR_ADMIN_EMAILS`.
+The deployed Docker `web` service defaults `THORIUM_REACTOR_ACCESS_REQUIRED=1`, so `/api/runs` requires the Cloudflare Access authenticated email header. Admins must be explicitly configured in comma-separated `THORIUM_REACTOR_ADMIN_EMAILS`; no personal address has implicit privileges.
 
-Non-admin authenticated users are limited by `THORIUM_REACTOR_RATE_LIMIT_PER_DAY`, which defaults to one simulation start per day. The Admin view lists limited users and can reset a user's daily counter. Rate state is stored in `.tmp/web-rate-limits.json` unless `THORIUM_REACTOR_RATE_LIMIT_PATH` points elsewhere.
+Non-admin authenticated users are limited by `THORIUM_REACTOR_RATE_LIMIT_PER_DAY`, which defaults to one simulation start per day. The Admin view lists limited users and can reset a user's daily counter. Rate state is stored in `results/.web/rate-limits.json` in release Compose (the host default is `.tmp/web-rate-limits.json`).
 
-The `Run-Web` wrapper keeps local development convenient by disabling the Access-header requirement and using `seamusdgallagher@gmail.com` as the local dev identity. Pass `-RequireAccessIdentity` when testing the deployed identity gate locally.
+The `Run-Web` wrapper keeps local development convenient by disabling the Access-header requirement and using `developer@localhost` as the local dev identity. Pass `-RequireAccessIdentity` when testing the deployed identity gate locally.
 
 ## Run Safety
 
