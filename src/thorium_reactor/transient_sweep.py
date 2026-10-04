@@ -29,6 +29,7 @@ from thorium_reactor.precursors import (
     step_precursor_state,
     summarize_precursor_state,
 )
+from thorium_reactor.time_grid import apply_events, transient_intervals
 from thorium_reactor.transient import (
     _build_transient_baseline,
     _precursor_cleanup_rate_s,
@@ -481,9 +482,8 @@ def _integrate_transient_ensemble_reference(
     backend = "python"
     perturbations = _build_perturbations(samples, seed, uncertainty_model)
 
-    dt = max(float(scenario["time_step_s"]), 0.05)
-    duration_s = max(float(scenario["duration_s"]), dt)
-    step_count = int(round(duration_s / dt))
+    requested_dt = float(scenario["time_step_s"])
+    duration_s = float(scenario["duration_s"])
 
     controls = {
         "reactivity_pcm": 0.0,
@@ -495,7 +495,6 @@ def _integrate_transient_ensemble_reference(
         "impurity_ingress_multiplier": 1.0,
         "gas_stripping_efficiency": float(chemistry["gas_stripping_efficiency"]),
     }
-    event_index = 0
 
     power_fraction = [1.0 for _ in range(samples)]
     steady_fuel_temp_c = float(baseline["hot_leg_temp_c"])
@@ -597,27 +596,9 @@ def _integrate_transient_ensemble_reference(
     # perturbation build and precursor initialization from elapsed_s.
     setup_elapsed_s = time.perf_counter() - setup_start
     integrate_start = time.perf_counter()
-    for step in range(step_count + 1):
-        time_s = step * dt
+    for step, (start_s, time_s, dt) in enumerate(transient_intervals(duration_s, requested_dt, scenario["events"])):
         dt_days = dt / 86400.0
-        while (
-            event_index < len(scenario["events"])
-            and float(scenario["events"][event_index]["time_s"]) <= time_s + 1.0e-9
-        ):
-            event = scenario["events"][event_index]
-            for source_key, target_key in (
-                ("reactivity_step_pcm", "reactivity_pcm"),
-                ("flow_fraction", "flow_fraction"),
-                ("heat_sink_fraction", "heat_sink_fraction"),
-                ("cleanup_multiplier", "cleanup_multiplier"),
-                ("secondary_sink_temp_offset_c", "sink_temp_offset_c"),
-                ("redox_setpoint_shift_ev", "redox_setpoint_shift_ev"),
-                ("impurity_ingress_multiplier", "impurity_ingress_multiplier"),
-                ("gas_stripping_efficiency", "gas_stripping_efficiency"),
-            ):
-                if source_key in event:
-                    controls[target_key] = float(event[source_key])
-            event_index += 1
+        apply_events(controls, scenario["events"], start_s)
 
         effective_flow_fraction = [_clip_value(controls["flow_fraction"] * scale, 0.05, 1.5) for scale in flow_scale]
         effective_heat_sink_fraction = [
@@ -633,161 +614,162 @@ def _integrate_transient_ensemble_reference(
             _clip_value(controls["gas_stripping_efficiency"] * scale, 0.0, 1.0) for scale in gas_stripping_scale
         ]
 
-        thermal_load_ratio = [
-            power_fraction[index]
-            / max(effective_flow_fraction[index] * max(effective_heat_sink_fraction[index], 0.15), 0.05)
-            for index in range(samples)
-        ]
-        fuel_target_c = [
-            steady_fuel_temp_c
-            + (thermal_load_ratio[index] - 1.0) * float(baseline["steady_state_delta_t_c"]) * 0.7
-            + (controls["sink_temp_offset_c"] + sink_temp_bias_c[index]) * 0.25
-            for index in range(samples)
-        ]
-        graphite_target_c = [
-            steady_graphite_temp_c + (fuel_temp_c[index] - steady_fuel_temp_c) * 0.7 for index in range(samples)
-        ]
-        coolant_target_c = [
-            steady_coolant_temp_c
-            + (thermal_load_ratio[index] - 1.0) * float(baseline["steady_state_delta_t_c"]) * 0.45
-            + (controls["sink_temp_offset_c"] + sink_temp_bias_c[index]) * 0.55
-            for index in range(samples)
-        ]
+        if dt > 0.0:
+            thermal_load_ratio = [
+                power_fraction[index]
+                / max(effective_flow_fraction[index] * max(effective_heat_sink_fraction[index], 0.15), 0.05)
+                for index in range(samples)
+            ]
+            fuel_target_c = [
+                steady_fuel_temp_c
+                + (thermal_load_ratio[index] - 1.0) * float(baseline["steady_state_delta_t_c"]) * 0.7
+                + (controls["sink_temp_offset_c"] + sink_temp_bias_c[index]) * 0.25
+                for index in range(samples)
+            ]
+            graphite_target_c = [
+                steady_graphite_temp_c + (fuel_temp_c[index] - steady_fuel_temp_c) * 0.7 for index in range(samples)
+            ]
+            coolant_target_c = [
+                steady_coolant_temp_c
+                + (thermal_load_ratio[index] - 1.0) * float(baseline["steady_state_delta_t_c"]) * 0.45
+                + (controls["sink_temp_offset_c"] + sink_temp_bias_c[index]) * 0.55
+                for index in range(samples)
+            ]
 
-        fuel_temp_c = _first_order_step_array(
-            fuel_temp_c,
-            fuel_target_c,
-            dt,
-            float(model_parameters["fuel_temperature_response_time_s"]),
-        )
-        graphite_temp_c = _first_order_step_array(
-            graphite_temp_c,
-            graphite_target_c,
-            dt,
-            float(model_parameters["graphite_temperature_response_time_s"]),
-        )
-        coolant_temp_c = _first_order_step_array(
-            coolant_temp_c,
-            coolant_target_c,
-            dt,
-            float(model_parameters["coolant_temperature_response_time_s"]),
-        )
-
-        precursor_summaries: list[dict[str, float]] = []
-        for index in range(samples):
-            precursor_states[index] = step_precursor_state(
-                state=precursor_states[index],
-                groups=precursor_groups,
-                power_fraction=power_fraction[index],
-                flow_fraction=effective_flow_fraction[index],
-                dt_s=dt,
-                core_residence_time_s=float(baseline["core_residence_time_s"]),
-                loop_residence_time_s=float(baseline["loop_residence_time_s"]),
-                cleanup_rate_s=cleanup_rate_s[index],
-                transport_model=str(model_parameters["precursor_transport_model"]),
-                loop_segments=baseline.get("precursor_loop_segments"),
+            fuel_temp_c = _first_order_step_array(
+                fuel_temp_c,
+                fuel_target_c,
+                dt,
+                float(model_parameters["fuel_temperature_response_time_s"]),
             )
-            precursor_summaries.append(
-                summarize_precursor_state(
-                    precursor_states[index],
-                    precursor_groups,
-                    steady_state=precursor_states[index]["steady_state"],
+            graphite_temp_c = _first_order_step_array(
+                graphite_temp_c,
+                graphite_target_c,
+                dt,
+                float(model_parameters["graphite_temperature_response_time_s"]),
+            )
+            coolant_temp_c = _first_order_step_array(
+                coolant_temp_c,
+                coolant_target_c,
+                dt,
+                float(model_parameters["coolant_temperature_response_time_s"]),
+            )
+
+            precursor_summaries: list[dict[str, float]] = []
+            for index in range(samples):
+                precursor_states[index] = step_precursor_state(
+                    state=precursor_states[index],
+                    groups=precursor_groups,
+                    power_fraction=power_fraction[index],
+                    flow_fraction=effective_flow_fraction[index],
+                    dt_s=dt,
+                    core_residence_time_s=float(baseline["core_residence_time_s"]),
+                    loop_residence_time_s=float(baseline["loop_residence_time_s"]),
+                    cleanup_rate_s=cleanup_rate_s[index],
+                    transport_model=str(model_parameters["precursor_transport_model"]),
+                    loop_segments=baseline.get("precursor_loop_segments"),
                 )
-            )
-        core_delayed_neutron_source_fraction = [
-            float(item["core_delayed_neutron_source_fraction"]) for item in precursor_summaries
-        ]
-
-        xenon_target = [max(value, 0.0) for value in power_fraction]
-        xenon_fraction = _first_order_step_array(
-            xenon_fraction,
-            xenon_target,
-            dt,
-            float(model_parameters["xenon_response_time_s"]),
-        )
-        xenon_fraction = [
-            max(
-                xenon_fraction[index]
-                - cleanup_rate_s[index] * float(depletion["xenon_removal_fraction"]) * xenon_fraction[index] * dt,
-                0.0,
-            )
-            for index in range(samples)
-        ]
-
-        breeding_gain_fraction_per_day = float(depletion["breeding_gain_fraction_per_day"])
-        fissile_burn_fraction_per_day_full_power = float(depletion["fissile_burn_fraction_per_day_full_power"])
-        minor_actinide_sink_fraction_per_day = float(depletion["minor_actinide_sink_fraction_per_day"])
-        protactinium_holdup_days = max(float(depletion["protactinium_holdup_days"]), 0.05)
-        protactinium_target_fraction = [
-            breeding_gain_fraction_per_day * protactinium_holdup_days * value for value in power_fraction
-        ]
-        protactinium_inventory_fraction = _first_order_step_array(
-            protactinium_inventory_fraction,
-            protactinium_target_fraction,
-            dt,
-            protactinium_holdup_days * 86400.0,
-        )
-        fissile_inventory_fraction = [
-            _clip_value(
-                fissile_inventory_fraction[index]
-                + (
-                    breeding_gain_fraction_per_day * max(1.0 - protactinium_inventory_fraction[index], 0.0)
-                    - fissile_burn_fraction_per_day_full_power * power_fraction[index]
-                    - minor_actinide_sink_fraction_per_day
+                precursor_summaries.append(
+                    summarize_precursor_state(
+                        precursor_states[index],
+                        precursor_groups,
+                        steady_state=precursor_states[index]["steady_state"],
+                    )
                 )
-                * dt_days,
-                0.2,
-                1.5,
-            )
-            for index in range(samples)
-        ]
+            core_delayed_neutron_source_fraction = [
+                float(item["core_delayed_neutron_source_fraction"]) for item in precursor_summaries
+            ]
 
-        redox_target_ev = [
-            target_redox_state_ev
-            + controls["redox_setpoint_shift_ev"]
-            + redox_bias_ev[index]
-            + impurity_fraction[index] * 0.03
-            for index in range(samples)
-        ]
-        redox_state_ev = _first_order_step_array(
-            redox_state_ev,
-            redox_target_ev,
-            dt,
-            max(float(chemistry["redox_control_time_days"]) * 86400.0, dt),
-        )
-        impurity_ingress_fraction_per_day = [
-            float(chemistry["oxidant_ingress_fraction_per_day"])
-            * _clip_value(controls["impurity_ingress_multiplier"] * scale, 0.0, 4.0)
-            for scale in impurity_ingress_scale
-        ]
-        impurity_capture_rate_per_day = [
-            (float(chemistry["impurity_capture_efficiency"]) + gas_stripping_efficiency[index])
-            / max(float(baseline["fuel_cycle"].get("cleanup_turnover_days", 14.0)), 0.25)
-            for index in range(samples)
-        ]
-        impurity_fraction = [
-            _clip_value(
-                impurity_fraction[index]
-                + (
-                    impurity_ingress_fraction_per_day[index]
-                    - impurity_capture_rate_per_day[index] * impurity_fraction[index]
+            xenon_target = [max(value, 0.0) for value in power_fraction]
+            xenon_fraction = _first_order_step_array(
+                xenon_fraction,
+                xenon_target,
+                dt,
+                float(model_parameters["xenon_response_time_s"]),
+            )
+            xenon_fraction = [
+                max(
+                    xenon_fraction[index]
+                    - cleanup_rate_s[index] * float(depletion["xenon_removal_fraction"]) * xenon_fraction[index] * dt,
+                    0.0,
                 )
-                * dt_days,
-                0.0,
-                0.05,
+                for index in range(samples)
+            ]
+
+            breeding_gain_fraction_per_day = float(depletion["breeding_gain_fraction_per_day"])
+            fissile_burn_fraction_per_day_full_power = float(depletion["fissile_burn_fraction_per_day_full_power"])
+            minor_actinide_sink_fraction_per_day = float(depletion["minor_actinide_sink_fraction_per_day"])
+            protactinium_holdup_days = max(float(depletion["protactinium_holdup_days"]), 0.05)
+            protactinium_target_fraction = [
+                breeding_gain_fraction_per_day * protactinium_holdup_days * value for value in power_fraction
+            ]
+            protactinium_inventory_fraction = _first_order_step_array(
+                protactinium_inventory_fraction,
+                protactinium_target_fraction,
+                dt,
+                protactinium_holdup_days * 86400.0,
             )
-            for index in range(samples)
-        ]
-        corrosion_index = [
-            max(
-                0.1,
-                1.0
-                + max(redox_state_ev[index] - target_redox_state_ev, 0.0)
-                * float(chemistry["corrosion_acceleration_per_ev"])
-                + impurity_fraction[index] * 400.0,
+            fissile_inventory_fraction = [
+                _clip_value(
+                    fissile_inventory_fraction[index]
+                    + (
+                        breeding_gain_fraction_per_day * max(1.0 - protactinium_inventory_fraction[index], 0.0)
+                        - fissile_burn_fraction_per_day_full_power * power_fraction[index]
+                        - minor_actinide_sink_fraction_per_day
+                    )
+                    * dt_days,
+                    0.2,
+                    1.5,
+                )
+                for index in range(samples)
+            ]
+
+            redox_target_ev = [
+                target_redox_state_ev
+                + controls["redox_setpoint_shift_ev"]
+                + redox_bias_ev[index]
+                + impurity_fraction[index] * 0.03
+                for index in range(samples)
+            ]
+            redox_state_ev = _first_order_step_array(
+                redox_state_ev,
+                redox_target_ev,
+                dt,
+                max(float(chemistry["redox_control_time_days"]) * 86400.0, dt),
             )
-            for index in range(samples)
-        ]
+            impurity_ingress_fraction_per_day = [
+                float(chemistry["oxidant_ingress_fraction_per_day"])
+                * _clip_value(controls["impurity_ingress_multiplier"] * scale, 0.0, 4.0)
+                for scale in impurity_ingress_scale
+            ]
+            impurity_capture_rate_per_day = [
+                (float(chemistry["impurity_capture_efficiency"]) + gas_stripping_efficiency[index])
+                / max(float(baseline["fuel_cycle"].get("cleanup_turnover_days", 14.0)), 0.25)
+                for index in range(samples)
+            ]
+            impurity_fraction = [
+                _clip_value(
+                    impurity_fraction[index]
+                    + (
+                        impurity_ingress_fraction_per_day[index]
+                        - impurity_capture_rate_per_day[index] * impurity_fraction[index]
+                    )
+                    * dt_days,
+                    0.0,
+                    0.05,
+                )
+                for index in range(samples)
+            ]
+            corrosion_index = [
+                max(
+                    0.1,
+                    1.0
+                    + max(redox_state_ev[index] - target_redox_state_ev, 0.0)
+                    * float(chemistry["corrosion_acceleration_per_ev"])
+                    + impurity_fraction[index] * 400.0,
+                )
+                for index in range(samples)
+            ]
 
         temperature_feedback_pcm = [
             fuel_temp_feedback_pcm_per_c[index] * (fuel_temp_c[index] - steady_fuel_temp_c)
@@ -841,6 +823,13 @@ def _integrate_transient_ensemble_reference(
             float(model_parameters["power_response_time_s"]),
         )
 
+        prior_reactivity = controls["reactivity_pcm"]
+        apply_events(controls, scenario["events"], time_s)
+        total_reactivity_pcm = [
+            value + (controls["reactivity_pcm"] - prior_reactivity) * scale
+            for value, scale in zip(total_reactivity_pcm, event_reactivity_scale)
+        ]
+
         power_band = _percentile_band(power_fraction)
         fuel_band = _percentile_band(fuel_temp_c)
         reactivity_band = _percentile_band(total_reactivity_pcm)
@@ -848,7 +837,7 @@ def _integrate_transient_ensemble_reference(
         core_delayed_source_band = _percentile_band(core_delayed_neutron_source_fraction)
         history.append(
             {
-                "time_s": _round_float(time_s),
+                "time_s": time_s,
                 "power_fraction_p05": _round_float(power_band[0]),
                 "power_fraction_p50": _round_float(power_band[1]),
                 "power_fraction_p95": _round_float(power_band[2]),
@@ -883,8 +872,8 @@ def _integrate_transient_ensemble_reference(
         _observe_trajectory_history(trajectory_health, step=step, time_s=time_s, history_row=history[-1])
 
     metrics = {
-        "duration_s": _round_float(duration_s),
-        "time_step_s": _round_float(dt),
+        "duration_s": duration_s,
+        "time_step_s": requested_dt,
         "history_points": len(history),
         "event_count": len(scenario["events"]),
         "samples": int(samples),
@@ -941,9 +930,8 @@ def _integrate_transient_ensemble_vectorized(
     setup_start = time.perf_counter()
     perturbations = _build_backend_perturbations(backend, samples, seed, uncertainty_model)
 
-    dt = max(float(scenario["time_step_s"]), 0.05)
-    duration_s = max(float(scenario["duration_s"]), dt)
-    step_count = int(round(duration_s / dt))
+    requested_dt = float(scenario["time_step_s"])
+    duration_s = float(scenario["duration_s"])
     controls = {
         "reactivity_pcm": 0.0,
         "flow_fraction": 1.0,
@@ -954,7 +942,6 @@ def _integrate_transient_ensemble_vectorized(
         "impurity_ingress_multiplier": 1.0,
         "gas_stripping_efficiency": float(chemistry["gas_stripping_efficiency"]),
     }
-    event_index = 0
 
     power_fraction = backend.full((samples,), 1.0)
     steady_fuel_temp_c = float(baseline["hot_leg_temp_c"])
@@ -1035,27 +1022,9 @@ def _integrate_transient_ensemble_vectorized(
     backend.synchronize()
     setup_elapsed_s = time.perf_counter() - setup_start
     integrate_start = time.perf_counter()
-    for step in range(step_count + 1):
-        time_s = step * dt
+    for step, (start_s, time_s, dt) in enumerate(transient_intervals(duration_s, requested_dt, scenario["events"])):
         dt_days = dt / 86400.0
-        while (
-            event_index < len(scenario["events"])
-            and float(scenario["events"][event_index]["time_s"]) <= time_s + 1.0e-9
-        ):
-            event = scenario["events"][event_index]
-            for source_key, target_key in (
-                ("reactivity_step_pcm", "reactivity_pcm"),
-                ("flow_fraction", "flow_fraction"),
-                ("heat_sink_fraction", "heat_sink_fraction"),
-                ("cleanup_multiplier", "cleanup_multiplier"),
-                ("secondary_sink_temp_offset_c", "sink_temp_offset_c"),
-                ("redox_setpoint_shift_ev", "redox_setpoint_shift_ev"),
-                ("impurity_ingress_multiplier", "impurity_ingress_multiplier"),
-                ("gas_stripping_efficiency", "gas_stripping_efficiency"),
-            ):
-                if source_key in event:
-                    controls[target_key] = float(event[source_key])
-            event_index += 1
+        apply_events(controls, scenario["events"], start_s)
 
         effective_flow_fraction = backend.clip(controls["flow_fraction"] * perturbations["flow_scale"], 0.05, 1.5)
         effective_heat_sink_fraction = backend.clip(
@@ -1069,129 +1038,130 @@ def _integrate_transient_ensemble_vectorized(
             controls["gas_stripping_efficiency"] * perturbations["gas_stripping_scale"], 0.0, 1.0
         )
 
-        thermal_load_ratio = power_fraction / backend.maximum(
-            effective_flow_fraction * backend.maximum(effective_heat_sink_fraction, 0.15),
-            0.05,
-        )
-        sink_bias = controls["sink_temp_offset_c"] + perturbations["sink_temp_bias_c"]
-        fuel_target_c = (
-            steady_fuel_temp_c
-            + (thermal_load_ratio - 1.0) * float(baseline["steady_state_delta_t_c"]) * 0.7
-            + sink_bias * 0.25
-        )
-        graphite_target_c = steady_graphite_temp_c + (fuel_temp_c - steady_fuel_temp_c) * 0.7
-        coolant_target_c = (
-            steady_coolant_temp_c
-            + (thermal_load_ratio - 1.0) * float(baseline["steady_state_delta_t_c"]) * 0.45
-            + sink_bias * 0.55
-        )
-        fuel_temp_c = _first_order_step_backend(
-            backend, fuel_temp_c, fuel_target_c, dt, float(model_parameters["fuel_temperature_response_time_s"])
-        )
-        graphite_temp_c = _first_order_step_backend(
-            backend,
-            graphite_temp_c,
-            graphite_target_c,
-            dt,
-            float(model_parameters["graphite_temperature_response_time_s"]),
-        )
-        coolant_temp_c = _first_order_step_backend(
-            backend,
-            coolant_temp_c,
-            coolant_target_c,
-            dt,
-            float(model_parameters["coolant_temperature_response_time_s"]),
-        )
-
-        core_inventory, segment_inventory = _step_precursors_vectorized(
-            backend,
-            core_inventory=core_inventory,
-            segment_inventory=segment_inventory,
-            groups=groups,
-            loop_segments=loop_segments,
-            power_fraction=power_fraction,
-            flow_fraction=effective_flow_fraction,
-            cleanup_rate_s=cleanup_rate_s,
-            dt=dt,
-            baseline=baseline,
-        )
-        core_delayed_neutron_source_fraction = _core_delayed_source(
-            backend, core_inventory, decay_vector
-        ) / backend.maximum(
-            steady_core_source,
-            1.0e-12,
-        )
-
-        xenon_fraction = _first_order_step_backend(
-            backend,
-            xenon_fraction,
-            backend.maximum(power_fraction, 0.0),
-            dt,
-            float(model_parameters["xenon_response_time_s"]),
-        )
-        xenon_fraction = backend.maximum(
-            xenon_fraction - cleanup_rate_s * float(depletion["xenon_removal_fraction"]) * xenon_fraction * dt,
-            0.0,
-        )
-
-        breeding_gain_fraction_per_day = float(depletion["breeding_gain_fraction_per_day"])
-        fissile_burn_fraction_per_day_full_power = float(depletion["fissile_burn_fraction_per_day_full_power"])
-        minor_actinide_sink_fraction_per_day = float(depletion["minor_actinide_sink_fraction_per_day"])
-        protactinium_holdup_days = max(float(depletion["protactinium_holdup_days"]), 0.05)
-        protactinium_target_fraction = breeding_gain_fraction_per_day * protactinium_holdup_days * power_fraction
-        protactinium_inventory_fraction = _first_order_step_backend(
-            backend,
-            protactinium_inventory_fraction,
-            protactinium_target_fraction,
-            dt,
-            protactinium_holdup_days * 86400.0,
-        )
-        fissile_inventory_fraction = backend.clip(
-            fissile_inventory_fraction
-            + (
-                breeding_gain_fraction_per_day * backend.maximum(1.0 - protactinium_inventory_fraction, 0.0)
-                - fissile_burn_fraction_per_day_full_power * power_fraction
-                - minor_actinide_sink_fraction_per_day
+        if dt > 0.0:
+            thermal_load_ratio = power_fraction / backend.maximum(
+                effective_flow_fraction * backend.maximum(effective_heat_sink_fraction, 0.15),
+                0.05,
             )
-            * dt_days,
-            0.2,
-            1.5,
-        )
+            sink_bias = controls["sink_temp_offset_c"] + perturbations["sink_temp_bias_c"]
+            fuel_target_c = (
+                steady_fuel_temp_c
+                + (thermal_load_ratio - 1.0) * float(baseline["steady_state_delta_t_c"]) * 0.7
+                + sink_bias * 0.25
+            )
+            graphite_target_c = steady_graphite_temp_c + (fuel_temp_c - steady_fuel_temp_c) * 0.7
+            coolant_target_c = (
+                steady_coolant_temp_c
+                + (thermal_load_ratio - 1.0) * float(baseline["steady_state_delta_t_c"]) * 0.45
+                + sink_bias * 0.55
+            )
+            fuel_temp_c = _first_order_step_backend(
+                backend, fuel_temp_c, fuel_target_c, dt, float(model_parameters["fuel_temperature_response_time_s"])
+            )
+            graphite_temp_c = _first_order_step_backend(
+                backend,
+                graphite_temp_c,
+                graphite_target_c,
+                dt,
+                float(model_parameters["graphite_temperature_response_time_s"]),
+            )
+            coolant_temp_c = _first_order_step_backend(
+                backend,
+                coolant_temp_c,
+                coolant_target_c,
+                dt,
+                float(model_parameters["coolant_temperature_response_time_s"]),
+            )
 
-        redox_target_ev = (
-            target_redox_state_ev
-            + controls["redox_setpoint_shift_ev"]
-            + perturbations["redox_bias_ev"]
-            + impurity_fraction * 0.03
-        )
-        redox_state_ev = _first_order_step_backend(
-            backend,
-            redox_state_ev,
-            redox_target_ev,
-            dt,
-            max(float(chemistry["redox_control_time_days"]) * 86400.0, dt),
-        )
-        impurity_ingress_fraction_per_day = float(chemistry["oxidant_ingress_fraction_per_day"]) * backend.clip(
-            controls["impurity_ingress_multiplier"] * perturbations["impurity_ingress_scale"],
-            0.0,
-            4.0,
-        )
-        impurity_capture_rate_per_day = (
-            float(chemistry["impurity_capture_efficiency"]) + gas_stripping_efficiency
-        ) / max(float(baseline["fuel_cycle"].get("cleanup_turnover_days", 14.0)), 0.25)
-        impurity_fraction = backend.clip(
-            impurity_fraction
-            + (impurity_ingress_fraction_per_day - impurity_capture_rate_per_day * impurity_fraction) * dt_days,
-            0.0,
-            0.05,
-        )
-        corrosion_index = backend.maximum(
-            1.0
-            + backend.maximum(redox_state_ev - target_redox_state_ev, 0.0)
-            * float(chemistry["corrosion_acceleration_per_ev"])
-            + impurity_fraction * 400.0,
-            0.1,
-        )
+            core_inventory, segment_inventory = _step_precursors_vectorized(
+                backend,
+                core_inventory=core_inventory,
+                segment_inventory=segment_inventory,
+                groups=groups,
+                loop_segments=loop_segments,
+                power_fraction=power_fraction,
+                flow_fraction=effective_flow_fraction,
+                cleanup_rate_s=cleanup_rate_s,
+                dt=dt,
+                baseline=baseline,
+            )
+            core_delayed_neutron_source_fraction = _core_delayed_source(
+                backend, core_inventory, decay_vector
+            ) / backend.maximum(
+                steady_core_source,
+                1.0e-12,
+            )
+
+            xenon_fraction = _first_order_step_backend(
+                backend,
+                xenon_fraction,
+                backend.maximum(power_fraction, 0.0),
+                dt,
+                float(model_parameters["xenon_response_time_s"]),
+            )
+            xenon_fraction = backend.maximum(
+                xenon_fraction - cleanup_rate_s * float(depletion["xenon_removal_fraction"]) * xenon_fraction * dt,
+                0.0,
+            )
+
+            breeding_gain_fraction_per_day = float(depletion["breeding_gain_fraction_per_day"])
+            fissile_burn_fraction_per_day_full_power = float(depletion["fissile_burn_fraction_per_day_full_power"])
+            minor_actinide_sink_fraction_per_day = float(depletion["minor_actinide_sink_fraction_per_day"])
+            protactinium_holdup_days = max(float(depletion["protactinium_holdup_days"]), 0.05)
+            protactinium_target_fraction = breeding_gain_fraction_per_day * protactinium_holdup_days * power_fraction
+            protactinium_inventory_fraction = _first_order_step_backend(
+                backend,
+                protactinium_inventory_fraction,
+                protactinium_target_fraction,
+                dt,
+                protactinium_holdup_days * 86400.0,
+            )
+            fissile_inventory_fraction = backend.clip(
+                fissile_inventory_fraction
+                + (
+                    breeding_gain_fraction_per_day * backend.maximum(1.0 - protactinium_inventory_fraction, 0.0)
+                    - fissile_burn_fraction_per_day_full_power * power_fraction
+                    - minor_actinide_sink_fraction_per_day
+                )
+                * dt_days,
+                0.2,
+                1.5,
+            )
+
+            redox_target_ev = (
+                target_redox_state_ev
+                + controls["redox_setpoint_shift_ev"]
+                + perturbations["redox_bias_ev"]
+                + impurity_fraction * 0.03
+            )
+            redox_state_ev = _first_order_step_backend(
+                backend,
+                redox_state_ev,
+                redox_target_ev,
+                dt,
+                max(float(chemistry["redox_control_time_days"]) * 86400.0, dt),
+            )
+            impurity_ingress_fraction_per_day = float(chemistry["oxidant_ingress_fraction_per_day"]) * backend.clip(
+                controls["impurity_ingress_multiplier"] * perturbations["impurity_ingress_scale"],
+                0.0,
+                4.0,
+            )
+            impurity_capture_rate_per_day = (
+                float(chemistry["impurity_capture_efficiency"]) + gas_stripping_efficiency
+            ) / max(float(baseline["fuel_cycle"].get("cleanup_turnover_days", 14.0)), 0.25)
+            impurity_fraction = backend.clip(
+                impurity_fraction
+                + (impurity_ingress_fraction_per_day - impurity_capture_rate_per_day * impurity_fraction) * dt_days,
+                0.0,
+                0.05,
+            )
+            corrosion_index = backend.maximum(
+                1.0
+                + backend.maximum(redox_state_ev - target_redox_state_ev, 0.0)
+                * float(chemistry["corrosion_acceleration_per_ev"])
+                + impurity_fraction * 400.0,
+                0.1,
+            )
 
         temperature_feedback_pcm = (
             fuel_temp_feedback_pcm_per_c * (fuel_temp_c - steady_fuel_temp_c)
@@ -1225,6 +1195,13 @@ def _integrate_transient_ensemble_vectorized(
             backend, power_fraction, power_target, dt, float(model_parameters["power_response_time_s"])
         )
 
+        prior_reactivity = controls["reactivity_pcm"]
+        apply_events(controls, scenario["events"], time_s)
+        final_total_reactivity_pcm = (
+            final_total_reactivity_pcm
+            + (controls["reactivity_pcm"] - prior_reactivity) * perturbations["event_reactivity_scale"]
+        )
+
         # One host transfer for all five series, rather than five separate
         # device synchronizations per time step.
         (
@@ -1245,7 +1222,7 @@ def _integrate_transient_ensemble_vectorized(
         )
         history.append(
             {
-                "time_s": _round_float(time_s),
+                "time_s": time_s,
                 "power_fraction_p05": _round_float(power_band[0]),
                 "power_fraction_p50": _round_float(power_band[1]),
                 "power_fraction_p95": _round_float(power_band[2]),
@@ -1285,8 +1262,8 @@ def _integrate_transient_ensemble_vectorized(
     backend.synchronize()
     elapsed_s = time.perf_counter() - integrate_start
     metrics = {
-        "duration_s": _round_float(duration_s),
-        "time_step_s": _round_float(dt),
+        "duration_s": duration_s,
+        "time_step_s": requested_dt,
         "history_points": len(history),
         "event_count": len(scenario["events"]),
         "samples": int(samples),
@@ -1309,7 +1286,7 @@ def _integrate_transient_ensemble_vectorized(
     runtime_performance = {
         "elapsed_s": _round_float(elapsed_s),
         "setup_s": _round_float(setup_elapsed_s),
-        "sample_steps_per_s": _round_float((samples * (step_count + 1)) / max(elapsed_s, 1.0e-12)),
+        "sample_steps_per_s": _round_float((samples * len(history)) / max(elapsed_s, 1.0e-12)),
         "backend_memory_allocated_bytes": backend.memory_allocated_bytes(),
         # Peak is what a VRAM budget has to cover; current allocation
         # understates it by roughly 2x once transients are freed.
@@ -1473,17 +1450,18 @@ def _annotate_vectorized_precursor_baseline(
     total_inventory = total_core + total_segment
     core_source = _core_delayed_source(backend, core_inventory, decay_vector)
     segment_sources_by_group = segment_inventory * decay_vector[None, :, None]
-    loop_source = backend.sum(backend.sum(segment_sources_by_group, axis=2), axis=1)
-    total_source = core_source + loop_source
+    nominal_production = sum(float(group["relative_yield_fraction"]) for group in groups)
     sample_count = max(int(getattr(total_core, "shape", [1])[0]), 1)
     baseline["initial_core_precursor_fraction"] = _round_float(
         backend.scalar(backend.sum(total_core / backend.maximum(total_inventory, 1.0e-12))) / sample_count
     )
     baseline["initial_core_delayed_neutron_source_absolute_fraction"] = _round_float(
-        backend.scalar(backend.sum(core_source / backend.maximum(total_source, 1.0e-12))) / sample_count
+        backend.scalar(backend.sum(core_source)) / (sample_count * max(nominal_production, 1.0e-12))
     )
+    # These inventories are initialized at steady state, so production balances
+    # all decays plus cleanup. The complement includes removed precursors.
     baseline["initial_precursor_transport_loss_fraction"] = _round_float(
-        backend.scalar(backend.sum(loop_source / backend.maximum(total_source, 1.0e-12))) / sample_count
+        1.0 - backend.scalar(backend.sum(core_source)) / (sample_count * max(nominal_production, 1.0e-12))
     )
     group_summaries = []
     for group_index, group in enumerate(groups):
@@ -1557,7 +1535,7 @@ def _observe_trajectory_history(
     if len(health["non_finite_steps"]) < 8 and not all(
         math.isfinite(float(value)) for value in history_row.values() if isinstance(value, (int, float))
     ):
-        health["non_finite_steps"].append({"step": step, "time_s": _round_float(time_s)})
+        health["non_finite_steps"].append({"step": step, "time_s": time_s})
 
 
 def _observe_trajectory_extrema(

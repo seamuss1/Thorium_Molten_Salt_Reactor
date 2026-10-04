@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,8 +11,10 @@ import numpy as np
 
 from thorium_reactor.precursors import normalize_precursor_groups
 
-RKDG_TRANSPORT_MODEL = "native_rz_rkdg_scalar_transport_v1"
-TRANSPORT_NPZ_SCHEMA_VERSION = 1
+FINITE_VOLUME_TRANSPORT_MODEL = "native_rz_finite_volume_ssprk3_v2"
+# Import compatibility only; new artifacts always use the accurate v2 model.
+RKDG_TRANSPORT_MODEL = FINITE_VOLUME_TRANSPORT_MODEL
+TRANSPORT_NPZ_SCHEMA_VERSION = 2
 DEFAULT_DECAY_HEAT_PRECURSOR_GROUPS: tuple[dict[str, float | str], ...] = (
     {"name": "decay_heat_fast", "decay_constant_s": 0.21, "yield_fraction": 0.38},
     {"name": "decay_heat_medium", "decay_constant_s": 0.030, "yield_fraction": 0.37},
@@ -130,8 +133,9 @@ def solve_transport_fields(
     cleanup_rate_s: float = 0.0,
     source_density: np.ndarray | None = None,
     initial_fields: np.ndarray | None = None,
-    polynomial_order: int = 1,
+    polynomial_order: int = 0,
     positivity_floor: float = 0.0,
+    balance_tolerance: float = 1e-8,
 ) -> TransportResult:
     if not field_specs:
         raise ValueError("At least one transported field is required.")
@@ -139,8 +143,33 @@ def solve_transport_fields(
         raise ValueError("duration_s must be non-negative.")
     if time_step_s <= 0.0:
         raise ValueError("time_step_s must be positive.")
-    if polynomial_order < 0:
-        raise ValueError("polynomial_order must be non-negative.")
+    if polynomial_order != 0:
+        raise ValueError("Only polynomial_order=0 is supported: cell-average finite-volume transport, not DG.")
+    if not all(
+        math.isfinite(v)
+        for v in (
+            duration_s,
+            time_step_s,
+            velocity_z_m_s,
+            diffusion_coefficient_m2_s,
+            cleanup_rate_s,
+            positivity_floor,
+            balance_tolerance,
+        )
+    ):
+        raise ValueError("Transport parameters must be finite.")
+    if min(diffusion_coefficient_m2_s, cleanup_rate_s, positivity_floor) < 0 or balance_tolerance <= 0:
+        raise ValueError("Transport diffusion, cleanup and floor must be non-negative; tolerance must be positive.")
+    if any(not math.isfinite(spec.decay_constant_s) or spec.decay_constant_s < 0 for spec in field_specs):
+        raise ValueError("Decay constants must be finite and non-negative.")
+    stable_dt = _stable_time_step(
+        mesh,
+        cfl=0.9,
+        velocity_z_m_s=velocity_z_m_s,
+        diffusion_coefficient_m2_s=diffusion_coefficient_m2_s,
+        reaction_rate_s=max(spec.decay_constant_s for spec in field_specs) + cleanup_rate_s,
+    )
+    effective_dt = min(time_step_s, stable_dt)
 
     shape = (len(field_specs), mesh.axial_cells, mesh.radial_cells)
     if initial_fields is None:
@@ -156,23 +185,24 @@ def solve_transport_fields(
         if source.shape != shape:
             raise ValueError(f"source_density must have shape {shape}.")
 
+    if not np.all(np.isfinite(fields)) or not np.all(np.isfinite(source)) or np.any(fields < 0) or np.any(source < 0):
+        raise ValueError("Initial fields and sources must be finite and non-negative.")
     volumes = mesh.cell_volumes_m3
     initial_inventory = _field_masses(fields, volumes)
     source_integral = np.zeros(len(field_specs), dtype=float)
     decay_integral = np.zeros(len(field_specs), dtype=float)
     cleanup_integral = np.zeros(len(field_specs), dtype=float)
     outlet_integral = np.zeros(len(field_specs), dtype=float)
+    limiter_integral = np.zeros(len(field_specs), dtype=float)
     minimum_value = float(np.min(fields)) if fields.size else 0.0
 
     elapsed = 0.0
     step_count = 0
-    while elapsed < duration_s - 1.0e-15:
-        dt = min(float(time_step_s), float(duration_s) - elapsed)
-        source_integral += np.sum(source * volumes[None, :, :], axis=(1, 2)) * dt
-        decay_integral += _decay_rates(fields, field_specs, volumes) * dt
-        cleanup_integral += np.sum(max(cleanup_rate_s, 0.0) * fields * volumes[None, :, :], axis=(1, 2)) * dt
-        outlet_integral += _outlet_rates(fields, mesh, velocity_z_m_s) * dt
-        fields = _ssp_rk3_step(
+    while elapsed < duration_s:
+        dt = min(effective_dt, float(duration_s) - elapsed)
+        if elapsed + dt <= elapsed:
+            raise RuntimeError("Transport timestep cannot advance floating-point time.")
+        fields, stage_fields, correction = _ssp_rk3_step(
             fields,
             dt,
             mesh,
@@ -183,15 +213,32 @@ def solve_transport_fields(
             cleanup_rate_s=cleanup_rate_s,
             positivity_floor=positivity_floor,
         )
+        # SSP-RK3 Butcher weights for RHS evaluations at u0, u1, u2.
+        source_integral += _field_masses(source, volumes) * dt
+        for weight, stage in zip((1 / 6, 1 / 6, 2 / 3), stage_fields):
+            decay_integral += weight * dt * _decay_rates(stage, field_specs, volumes)
+            cleanup_integral += weight * dt * cleanup_rate_s * _field_masses(stage, volumes)
+            outlet_integral += weight * dt * _outlet_rates(stage, mesh, velocity_z_m_s)
+        limiter_integral += correction
         minimum_value = min(minimum_value, float(np.min(fields)))
         elapsed += dt
         step_count += 1
 
     final_inventory = _field_masses(fields, volumes)
     expected_final = initial_inventory + source_integral - decay_integral - cleanup_integral - outlet_integral
-    scale = np.maximum(np.maximum(np.abs(initial_inventory), np.abs(final_inventory)), 1.0)
+    scale = np.maximum(
+        np.maximum(np.abs(initial_inventory) + source_integral, np.abs(final_inventory)), np.finfo(float).tiny
+    )
     residuals = np.abs(final_inventory - expected_final) / scale
-    dof_per_cell = (int(polynomial_order) + 1) ** 2
+    corrected_residuals = np.abs(final_inventory - expected_final - limiter_integral) / scale
+    limiter_fractions = np.abs(limiter_integral) / scale
+    accepted = bool(
+        np.all(np.isfinite(fields))
+        and np.all(residuals <= balance_tolerance)
+        and np.all(corrected_residuals <= balance_tolerance)
+        and np.all(limiter_fractions <= balance_tolerance)
+    )
+    dof_per_cell = 1
     field_summaries: list[dict[str, Any]] = []
     for index, spec in enumerate(field_specs):
         field_summaries.append(
@@ -200,17 +247,30 @@ def solve_transport_fields(
                 "group_set": spec.group_set,
                 "decay_constant_s": _round_float(spec.decay_constant_s),
                 "yield_fraction": _round_float(spec.yield_fraction),
-                "initial_inventory": _round_float(initial_inventory[index]),
-                "final_inventory": _round_float(final_inventory[index]),
-                "source_integral": _round_float(source_integral[index]),
-                "decay_integral": _round_float(decay_integral[index]),
-                "cleanup_integral": _round_float(cleanup_integral[index]),
-                "outlet_integral": _round_float(outlet_integral[index]),
-                "balance_residual": _round_float(residuals[index]),
+                "initial_inventory": float(initial_inventory[index]),
+                "final_inventory": float(final_inventory[index]),
+                "source_integral": float(source_integral[index]),
+                "decay_integral": float(decay_integral[index]),
+                "cleanup_integral": float(cleanup_integral[index]),
+                "outlet_integral": float(outlet_integral[index]),
+                "balance_residual": float(residuals[index]),
+                "limiter_inventory_correction": float(limiter_integral[index]),
+                "corrected_balance_residual": float(corrected_residuals[index]),
             }
         )
     summary = {
-        "status": "completed",
+        "status": "completed" if accepted else "failed",
+        "execution_status": "completed",
+        "numerical_acceptance": {
+            "status": "accepted" if accepted else "failed",
+            "balance_tolerance": balance_tolerance,
+        },
+        "spatial_discretization": "cell_average_finite_volume_first_order_upwind",
+        "limiter_inventory_correction": float(np.sum(limiter_integral)),
+        "corrected_conservation_residual": float(np.max(corrected_residuals)),
+        "effective_time_step_s": effective_dt,
+        "stable_time_step_s": stable_dt if math.isfinite(stable_dt) else None,
+        "timestep_subdivided": effective_dt < time_step_s,
         "model": RKDG_TRANSPORT_MODEL,
         "mesh": {
             "type": "rz_structured",
@@ -229,14 +289,14 @@ def solve_transport_fields(
         "diffusion_coefficient_m2_s": _round_float(diffusion_coefficient_m2_s),
         "cleanup_rate_s": _round_float(cleanup_rate_s),
         "limiter": "positivity_preserving_floor",
-        "minimum_field_value": _round_float(max(minimum_value, positivity_floor)),
-        "conservation_residual": _round_float(float(np.max(residuals)) if residuals.size else 0.0),
-        "initial_inventory": _round_float(float(np.sum(initial_inventory))),
-        "final_inventory": _round_float(float(np.sum(final_inventory))),
-        "source_integral": _round_float(float(np.sum(source_integral))),
-        "decay_integral": _round_float(float(np.sum(decay_integral))),
-        "cleanup_integral": _round_float(float(np.sum(cleanup_integral))),
-        "outlet_integral": _round_float(float(np.sum(outlet_integral))),
+        "minimum_field_value": minimum_value,
+        "conservation_residual": float(np.max(residuals)) if residuals.size else 0.0,
+        "initial_inventory": float(np.sum(initial_inventory)),
+        "final_inventory": float(np.sum(final_inventory)),
+        "source_integral": float(np.sum(source_integral)),
+        "decay_integral": float(np.sum(decay_integral)),
+        "cleanup_integral": float(np.sum(cleanup_integral)),
+        "outlet_integral": float(np.sum(outlet_integral)),
         "fields": field_summaries,
     }
     return TransportResult(mesh=mesh, field_specs=list(field_specs), field_values=fields, summary=summary)
@@ -255,12 +315,19 @@ def run_transport_case(config: Any, bundle: Any, summary: dict[str, Any]) -> dic
     cfl = max(float(settings.get("cfl", 0.35)), 1.0e-6)
     duration = max(float(settings.get("duration_s", 2.0)), 0.0)
     configured_dt = settings.get("time_step_s")
+    cleanup_rate = float(settings.get("cleanup_rate_s", _cleanup_rate_from_summary(summary)))
     if configured_dt is None:
-        time_step = _stable_time_step(mesh, cfl=cfl, velocity_z_m_s=velocity, diffusion_coefficient_m2_s=diffusion)
+        time_step = _stable_time_step(
+            mesh,
+            cfl=cfl,
+            velocity_z_m_s=velocity,
+            diffusion_coefficient_m2_s=diffusion,
+            reaction_rate_s=max(spec.decay_constant_s for spec in specs) + cleanup_rate,
+        )
     else:
         time_step = float(configured_dt)
     time_step = min(max(time_step, 1.0e-9), max(duration, 1.0e-9))
-    polynomial_order = int(settings.get("polynomial_order", 1))
+    polynomial_order = settings.get("polynomial_order", 0)
     cleanup_rate = max(float(settings.get("cleanup_rate_s", _cleanup_rate_from_summary(summary))), 0.0)
     source_density = _source_density(mesh, specs, summary)
     initial_fields = _initial_fields(mesh, specs, source_density, cleanup_rate_s=cleanup_rate)
@@ -275,7 +342,8 @@ def run_transport_case(config: Any, bundle: Any, summary: dict[str, Any]) -> dic
         source_density=source_density,
         initial_fields=initial_fields,
         polynomial_order=polynomial_order,
-        positivity_floor=max(float(settings.get("positivity_floor", 0.0)), 0.0),
+        positivity_floor=float(settings.get("positivity_floor", 0.0)),
+        balance_tolerance=float(settings.get("balance_tolerance", 1e-8)),
     )
 
     group_sets: dict[str, dict[str, float]] = {}
@@ -330,6 +398,9 @@ def run_transport_case(config: Any, bundle: Any, summary: dict[str, Any]) -> dic
     metrics["transport_rkdg_axial_cells"] = mesh.axial_cells
     metrics["transport_rkdg_conservation_residual"] = transport_summary["conservation_residual"]
     metrics["transport_rkdg_minimum_field_value"] = transport_summary["minimum_field_value"]
+    # Retain legacy metric keys for old consumers; v2 names describe the method.
+    for suffix in ("radial_cells", "axial_cells", "conservation_residual", "minimum_field_value"):
+        metrics[f"transport_fv_{suffix}"] = metrics[f"transport_rkdg_{suffix}"]
     bundle.write_json("summary.json", summary)
     bundle.write_metrics(metrics)
     return transport_summary
@@ -346,24 +417,20 @@ def _ssp_rk3_step(
     diffusion_coefficient_m2_s: float,
     cleanup_rate_s: float,
     positivity_floor: float,
-) -> np.ndarray:
+) -> tuple[np.ndarray, tuple[np.ndarray, ...], np.ndarray]:
     u0 = fields
-    u1 = _enforce_floor(
-        u0 + dt * _rhs(u0, mesh, field_specs, source, velocity_z_m_s, diffusion_coefficient_m2_s, cleanup_rate_s),
-        positivity_floor,
+    raw1 = u0 + dt * _rhs(u0, mesh, field_specs, source, velocity_z_m_s, diffusion_coefficient_m2_s, cleanup_rate_s)
+    u1 = _enforce_floor(raw1, positivity_floor)
+    raw2 = 0.75 * u0 + 0.25 * (
+        u1 + dt * _rhs(u1, mesh, field_specs, source, velocity_z_m_s, diffusion_coefficient_m2_s, cleanup_rate_s)
     )
-    u2 = _enforce_floor(
-        0.75 * u0
-        + 0.25
-        * (u1 + dt * _rhs(u1, mesh, field_specs, source, velocity_z_m_s, diffusion_coefficient_m2_s, cleanup_rate_s)),
-        positivity_floor,
+    u2 = _enforce_floor(raw2, positivity_floor)
+    raw3 = u0 / 3 + (2 / 3) * (
+        u2 + dt * _rhs(u2, mesh, field_specs, source, velocity_z_m_s, diffusion_coefficient_m2_s, cleanup_rate_s)
     )
-    return _enforce_floor(
-        (1.0 / 3.0) * u0
-        + (2.0 / 3.0)
-        * (u2 + dt * _rhs(u2, mesh, field_specs, source, velocity_z_m_s, diffusion_coefficient_m2_s, cleanup_rate_s)),
-        positivity_floor,
-    )
+    u3 = _enforce_floor(raw3, positivity_floor)
+    correction = _field_masses((u1 - raw1) / 6 + (2 / 3) * (u2 - raw2) + (u3 - raw3), mesh.cell_volumes_m3)
+    return u3, (u0, u1, u2), correction
 
 
 def _rhs(
@@ -564,14 +631,28 @@ def _stable_time_step(
     cfl: float,
     velocity_z_m_s: float,
     diffusion_coefficient_m2_s: float,
+    reaction_rate_s: float = 0.0,
 ) -> float:
-    advective = np.inf if abs(velocity_z_m_s) <= 0.0 else cfl * mesh.dz_m / abs(velocity_z_m_s)
-    diffusive = (
-        np.inf
-        if diffusion_coefficient_m2_s <= 0.0
-        else cfl * min(mesh.dr_m, mesh.dz_m) ** 2 / max(4.0 * diffusion_coefficient_m2_s, 1.0e-30)
-    )
-    return float(min(advective, diffusive, 0.25))
+    if not math.isfinite(cfl) or not 0 < cfl <= 1:
+        raise ValueError("CFL must be in (0, 1].")
+    # Maximum outgoing rate of the actual FV operator, including cylindrical
+    # areas, nonuniform cells, reactions, and all simultaneous losses.
+    volumes = mesh.cell_volumes_m3
+    dz, dr = np.diff(mesh.axial_edges_m), np.diff(mesh.radial_edges_m)
+    if not np.all(np.isfinite(volumes)) or np.any(volumes <= 0) or np.any(dz <= 0) or np.any(dr <= 0):
+        raise ValueError("Mesh cells must be finite and positive.")
+    rates = np.full_like(volumes, reaction_rate_s) + abs(velocity_z_m_s) / dz[:, None]
+    for r in range(1, mesh.radial_cells):
+        conductance = diffusion_coefficient_m2_s * 2 * np.pi * mesh.radial_edges_m[r] * dz / (0.5 * (dr[r - 1] + dr[r]))
+        rates[:, r - 1] += conductance / volumes[:, r - 1]
+        rates[:, r] += conductance / volumes[:, r]
+    area = np.pi * np.diff(mesh.radial_edges_m**2)
+    for z in range(1, mesh.axial_cells):
+        conductance = diffusion_coefficient_m2_s * area / (0.5 * (dz[z - 1] + dz[z]))
+        rates[z - 1] += conductance / volumes[z - 1]
+        rates[z] += conductance / volumes[z]
+    maximum = float(np.max(rates))
+    return cfl / maximum if maximum > 0 else math.inf
 
 
 def _source_density(
@@ -645,6 +726,9 @@ def _transport_npz_schema(result: TransportResult, arrays: Mapping[str, np.ndarr
     return {
         "schema_version": TRANSPORT_NPZ_SCHEMA_VERSION,
         "generator": "thorium_reactor.transport.rzdg._write_solution_npz",
+        "migration": "v1 arrays already stored cell averages; v2 corrects model/order metadata without changing array layout",
+        "polynomial_order": 0,
+        "dof_per_cell": 1,
         "artifact": "transport_solution.npz",
         "model": RKDG_TRANSPORT_MODEL,
         "coordinate_conventions": {

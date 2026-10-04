@@ -490,6 +490,17 @@ def generate_report(
 
     physics_core = summary.get("physics_core", {})
     if physics_core:
+        if physics_core.get("coupling", {}).get("mode") == "one_way_screening":
+            lines.extend(["", "## Physics Core Method", ""])
+            lines.append("- One-way diffusion screening; no converged neutronics/thermal/decay-heat feedback.")
+            core_neutronics = physics_core.get("neutronics", {})
+            lines.append(f"- Raw predicted k_eff: `{core_neutronics.get('k_eff', 'n/a')}`")
+            lines.append(
+                f"- Cross-section provenance: `{core_neutronics.get('cross_sections', {}).get('provenance', 'n/a')}`"
+            )
+            lines.append(f"- Calibration: `{core_neutronics.get('calibration', {}).get('status', 'disabled')}`")
+            if core_neutronics.get("calibrated_k_eff") is not None:
+                lines.append(f"- Separately calibrated k_eff: `{core_neutronics['calibrated_k_eff']}`")
         precursor_transport = physics_core.get("precursor_transport", {})
         decay_heat = (
             precursor_transport.get("decay_heat_precursors", {}) if isinstance(precursor_transport, dict) else {}
@@ -526,7 +537,7 @@ def generate_report(
     if transport_solver:
         mesh = transport_solver.get("mesh", {})
         source_fractions = transport_solver.get("source_fractions", {})
-        lines.extend(["", "## Native RKDG Transport", ""])
+        lines.extend(["", "## Native Finite-Volume Transport", ""])
         lines.append(f"- Model: `{transport_solver.get('model', 'n/a')}`")
         lines.append(
             "- Mesh/order: "
@@ -539,6 +550,13 @@ def generate_report(
             f"- Time step/CFL: `{transport_solver.get('time_step_s', 'n/a')}` s / `{transport_solver.get('cfl', 'n/a')}`"
         )
         lines.append(f"- Conservation residual: `{transport_solver.get('conservation_residual', 'n/a')}`")
+        lines.append(
+            f"- Numerical acceptance: `{transport_solver.get('numerical_acceptance', {}).get('status', 'not recorded in legacy artifact')}`"
+        )
+        lines.append(
+            f"- Limiter inventory correction: `{transport_solver.get('limiter_inventory_correction', 'not recorded')}`"
+        )
+        lines.append(f"- Effective time step: `{transport_solver.get('effective_time_step_s', 'not recorded')}` s")
         lines.append(f"- Minimum field value: `{transport_solver.get('minimum_field_value', 'n/a')}`")
         fraction_items = source_fractions.items() if isinstance(source_fractions, dict) else []
         for group_name, fractions in fraction_items:

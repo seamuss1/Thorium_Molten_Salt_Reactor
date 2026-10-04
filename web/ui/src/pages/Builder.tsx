@@ -191,7 +191,7 @@ export function Builder() {
             <div className="builder-options">
               <label className="field">
                 <span>Sweep samples</span>
-                <input type="number" min={1} max={MAX_SWEEP_SAMPLES} step={1024} value={sweepSamples} disabled={!sweepActive} onChange={(event) => setSweepSamples(Number(event.target.value))} />
+                <input type="number" min={1} max={MAX_SWEEP_SAMPLES} step={1} value={sweepSamples} disabled={!sweepActive} onChange={(event) => setSweepSamples(Number(event.target.value))} />
               </label>
               <label className="field">
                 <span>Sweep seed</span>

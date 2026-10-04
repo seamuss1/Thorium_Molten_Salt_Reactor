@@ -69,11 +69,22 @@ def build_depletion_matrix(
                     _add_product(
                         dense, mode, decay_constant, parent_idx, zone_index[zone], nuclide_index, len(nuclide_names)
                     )
+            reaction_loss_rates: dict[str, float] = {}
             for reaction in parent.reactions:
                 rate = _reaction_rate(reaction_rates, zone, parent.name, reaction)
+                # Each reaction rate is the total rate for that channel. Multiple
+                # daughter branches share one parent loss, just as decay modes do.
+                if reaction.reaction_type in reaction_loss_rates:
+                    if not math.isclose(rate, reaction_loss_rates[reaction.reaction_type], rel_tol=1e-12, abs_tol=0.0):
+                        raise ValueError(
+                            f"Branches of {parent.name} {reaction.reaction_type} in {zone} must share one total rate."
+                        )
+                else:
+                    reaction_loss_rates[reaction.reaction_type] = rate
+                    if rate > 0.0:
+                        dense[parent_idx, parent_idx] -= rate
                 if rate <= 0.0:
                     continue
-                dense[parent_idx, parent_idx] -= rate
                 if reaction.reaction_type.lower() == "fission":
                     for product, yield_fraction in reaction.fission_yields.items():
                         if product in nuclide_index:

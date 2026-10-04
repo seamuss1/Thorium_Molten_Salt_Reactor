@@ -47,7 +47,13 @@ SUPPORTED_PROPERTY_PROVIDERS = {
     "msd_tp_redlich_kister",
 }
 SUPPORTED_INTEGRATIONS = ("moose", "scale", "thermochimica", "saltproc", "moltres")
-SUPPORTED_DETERMINISTIC_NEUTRONICS_METHODS = {"diffusion", "sp3", "transport"}
+SUPPORTED_DETERMINISTIC_NEUTRONICS_METHODS = {
+    "diffusion",
+    "diffusion_variant_a",
+    "diffusion_variant_b",
+    "sp3",
+    "transport",
+}
 
 
 class ConfigError(ValueError):
@@ -478,8 +484,8 @@ def _validate_transient_timing(path: Path, settings: Mapping[str, Any], prefix: 
         raise ConfigError(
             f"Case config {path} {prefix}.time_step_s must be at least 0.05 seconds (the supported minimum)."
         )
-    if duration <= 0 or duration < step:
-        raise ConfigError(f"Case config {path} {prefix}.duration_s must be positive and at least time_step_s.")
+    if duration <= 0:
+        raise ConfigError(f"Case config {path} {prefix}.duration_s must be positive.")
 
 
 def _validate_transient_events(path: Path, events: Any, prefix: str, duration: float) -> None:
@@ -556,9 +562,9 @@ def _validate_optional_transport_solver_settings(path: Path, transport_solver: A
         polynomial_order = _require_non_negative_int(
             path, "transport_solver.polynomial_order", transport_solver["polynomial_order"]
         )
-        if polynomial_order > 3:
+        if polynomial_order != 0:
             raise ConfigError(
-                f"Case config {path} transport_solver.polynomial_order above 3 is not supported in the native v1 solver."
+                f"Case config {path} transport_solver.polynomial_order must be 0 for cell-average finite-volume transport (higher-order DG is not implemented)."
             )
     for field_name in (
         "duration_s",
@@ -569,11 +575,14 @@ def _validate_optional_transport_solver_settings(path: Path, transport_solver: A
         "diffusion_coefficient_m2_s",
         "cleanup_rate_s",
         "positivity_floor",
+        "balance_tolerance",
     ):
         if field_name in transport_solver:
             value = _require_number(path, f"transport_solver.{field_name}", transport_solver[field_name])
-            if field_name in {"duration_s", "time_step_s", "cfl"} and value <= 0.0:
+            if field_name in {"duration_s", "time_step_s", "cfl", "balance_tolerance"} and value <= 0.0:
                 raise ConfigError(f"Case config {path} field 'transport_solver.{field_name}' must be positive.")
+            if field_name == "cfl" and value > 1:
+                raise ConfigError(f"Case config {path} transport_solver.cfl must be at most 1.")
             if (
                 field_name in {"flow_fraction", "diffusion_coefficient_m2_s", "cleanup_rate_s", "positivity_floor"}
                 and value < 0.0
@@ -877,6 +886,16 @@ def _validate_optional_physics_core_settings(path: Path, physics_core: Any) -> N
                         f"is unsupported. Supported values: {supported}."
                     )
         temperature_grid = neutronics.get("temperature_grid_c")
+        calibration = neutronics.get("calibration")
+        if calibration is not None:
+            if (
+                not isinstance(calibration, Mapping)
+                or not calibration.get("reference_id")
+                or not calibration.get("scope")
+            ):
+                raise ConfigError(f"Case config {path} frozen calibration requires reference_id and scope.")
+            if _require_number(path, "physics_core.neutronics.calibration.factor", calibration.get("factor")) <= 0:
+                raise ConfigError(f"Case config {path} calibration.factor must be positive.")
         if temperature_grid is not None:
             if not isinstance(temperature_grid, list) or len(temperature_grid) < 2:
                 raise ConfigError(
@@ -900,6 +919,14 @@ def _validate_optional_physics_core_settings(path: Path, physics_core: Any) -> N
             _require_positive_int(
                 path, "physics_core.precursor_transport.loop_cells", precursor_transport["loop_cells"]
             )
+        if "loop_length_m" in precursor_transport:
+            if (
+                _require_number(
+                    path, "physics_core.precursor_transport.loop_length_m", precursor_transport["loop_length_m"]
+                )
+                <= 0
+            ):
+                raise ConfigError(f"Case config {path} precursor_transport.loop_length_m must be positive.")
         if "diffusion_coefficient_m2_s" in precursor_transport:
             value = _require_number(
                 path,
@@ -909,6 +936,10 @@ def _validate_optional_physics_core_settings(path: Path, physics_core: Any) -> N
             if value < 0.0:
                 raise ConfigError(
                     f"Case config {path} physics_core.precursor_transport.diffusion_coefficient_m2_s must be non-negative."
+                )
+            if value > 0 and "loop_length_m" not in precursor_transport:
+                raise ConfigError(
+                    f"Case config {path} nonzero precursor diffusion requires loop_length_m for physical geometry."
                 )
         decay_heat_groups = precursor_transport.get("decay_heat_groups")
         if decay_heat_groups is not None:

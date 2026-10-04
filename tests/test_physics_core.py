@@ -33,10 +33,10 @@ def test_run_case_writes_coupled_physics_core_artifact() -> None:
         assert physics_core["status"] == "completed"
         assert physics_core["integrity_checks"]["status"] == "ok"
         assert physics_core["neutronics"]["group_count"] == 11
-        assert physics_core["neutronics"]["methods"] == ["diffusion", "sp3", "transport"]
+        assert physics_core["neutronics"]["methods"] == ["diffusion", "diffusion_variant_a", "diffusion_variant_b"]
         assert (
             physics_core["neutronics"]["cross_sections"]["interpolation"]
-            == "linear_temperature_dependence_between_declared_grid_points"
+            == "synthetic_linear_temperature_parameterization"
         )
         assert physics_core["neutronics"]["k_eff"] > 0.0
         assert physics_core["neutronics"]["beta_eff"] > 0.0
@@ -110,6 +110,7 @@ def test_physics_core_honors_configured_method_and_mesh_counts() -> None:
         "precursor_transport": {
             "loop_cells": 3,
             "diffusion_coefficient_m2_s": 1.0e-5,
+            "loop_length_m": 5.0,
             "decay_heat_groups": [
                 {"name": "fast", "decay_constant_s": 0.09, "yield_fraction": 0.7},
                 {"name": "slow", "decay_constant_s": 0.004, "yield_fraction": 0.3},
@@ -141,7 +142,7 @@ def test_physics_core_honors_configured_method_and_mesh_counts() -> None:
 
     physics_core = build_physics_core_summary(config, summary)
 
-    assert physics_core["neutronics"]["methods"] == ["transport"]
+    assert physics_core["neutronics"]["methods"] == ["diffusion_variant_b"]
     assert physics_core["neutronics"]["group_count"] == 7
     assert physics_core["thermal_hydraulics"]["axial_node_count"] == 8
     assert physics_core["precursor_transport"]["loop_cell_count"] == 3
