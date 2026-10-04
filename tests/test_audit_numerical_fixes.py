@@ -229,6 +229,8 @@ def test_transient_absolute_sources_retain_nominal_production_during_storage(mod
 
 @pytest.mark.parametrize("backend_name", ["numpy", "torch-cpu"])
 def test_vectorized_precursor_baseline_matches_scalar_cleanup_fractions(backend_name):
+    if backend_name.startswith("torch"):
+        pytest.importorskip("torch")
     try:
         backend = create_array_backend(backend_name, dtype="float64", seed=1)
     except BackendUnavailable as exc:

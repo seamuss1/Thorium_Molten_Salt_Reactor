@@ -89,6 +89,7 @@ def test_sweep_exact_boundaries_and_analytic_response(config, minimal_summary, b
         if os.environ.get("RUN_XPU_NUMERICAL_TESTS") != "1":
             pytest.skip("Set RUN_XPU_NUMERICAL_TESTS=1 on a supported XPU host.")
     if backend.startswith("torch"):
+        pytest.importorskip("torch")
         from thorium_reactor.accelerators import BackendUnavailable, create_array_backend
 
         try:
