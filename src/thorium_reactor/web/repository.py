@@ -137,14 +137,12 @@ class WebRepository:
             draft_yaml=draft.draft_yaml,
             patch=draft.patch,
         )
+        benchmark_path = self._draft_benchmark_path(config.data) or self._draft_benchmark_path(base_config.data)
         run_id = sanitize_run_id(draft.run_id)
         bundle = create_result_bundle(self.repo_root, config.name, run_id)
         (bundle.root / CASE_SNAPSHOT_NAME).write_text(normalized_yaml, encoding="utf-8")
 
-        benchmark_path = resolve_benchmark_path(self.repo_root, config.data) or resolve_benchmark_path(
-            self.repo_root, base_config.data
-        )
-        if benchmark_path and benchmark_path.exists():
+        if benchmark_path:
             shutil.copy2(benchmark_path, bundle.root / BENCHMARK_SNAPSHOT_NAME)
 
         bundle.write_json(
@@ -320,7 +318,7 @@ class WebRepository:
         state_store = read_json(run_dir / "state_store.json", {})
         events = self.read_events(case_name, run_id)
         metrics = summary.get("metrics") or read_metrics_csv(run_dir / "metrics.csv")
-        status = status_payload.get("status") or infer_status(run_dir, summary, validation)
+        status = status_payload.get("status") or infer_status_from_files(run_dir)
         reactor = state_store.get("reactor") or summary.get("reactor") or build_manifest.get("reactor") or {}
         capabilities = summary.get("workflow_capabilities") or build_manifest.get("workflow_capabilities") or []
         return RunRecord(
@@ -603,8 +601,8 @@ class WebRepository:
 
         mesh = as_mapping(transport.get("mesh"))
         metrics = output_metrics(
-            ("RKDG radial cells", mesh.get("radial_cells"), "cells", "number"),
-            ("RKDG axial cells", mesh.get("axial_cells"), "cells", "number"),
+            ("Transport radial cells", mesh.get("radial_cells"), "cells", "number"),
+            ("Transport axial cells", mesh.get("axial_cells"), "cells", "number"),
             ("Polynomial order", transport.get("polynomial_order"), "p", "number"),
             ("CFL", transport.get("cfl"), None, "number"),
             ("Transport residual", transport.get("conservation_residual"), "fraction", "number"),
@@ -627,7 +625,7 @@ class WebRepository:
             status=first_present(transport.get("status"), depletion.get("status")),
             summary=make_sentence(
                 [
-                    f"R-Z RKDG {mesh.get('radial_cells')} x {mesh.get('axial_cells')}"
+                    f"R-Z finite-volume {mesh.get('radial_cells')} x {mesh.get('axial_cells')}"
                     if mesh.get("radial_cells") and mesh.get("axial_cells")
                     else None,
                     f"{depletion.get('isotope_count')} isotope depletion matrix"
@@ -1178,7 +1176,27 @@ class WebRepository:
             draft_path = case_dir / "case.yaml"
             draft_path.write_text(normalized_yaml, encoding="utf-8")
             config = load_case_config(draft_path)
+        self._draft_benchmark_path(config.data)
         return config, normalized_yaml
+
+    def _draft_benchmark_path(self, data: Mapping[str, Any]) -> Path | None:
+        """Browser drafts may select repository benchmark records, never host files."""
+        raw_path = as_mapping(data.get("reactor")).get("benchmark")
+        if not raw_path:
+            return None
+        message = "Browser benchmarks must name an existing benchmarks/<name>/benchmark.yaml file."
+        if not isinstance(raw_path, str):
+            raise ValueError(message)
+        relative = PurePosixPath(raw_path.replace("\\", "/"))
+        if len(relative.parts) != 3 or relative.parts[0] != "benchmarks" or relative.parts[2] != "benchmark.yaml":
+            raise ValueError(message)
+        safe_segment(relative.parts[1])
+        path = (self.repo_root / Path(*relative.parts)).resolve()
+        # Compare against the repository location, not a resolved benchmark
+        # directory: symlinks of the directory or the file must not escape it.
+        if not path.is_relative_to(self.repo_root / "benchmarks") or not path.is_file():
+            raise ValueError(message)
+        return path
 
     def _run_dir(self, case_name: str, run_id: str) -> Path:
         return self.repo_root / "results" / safe_segment(case_name) / safe_segment(run_id)
@@ -1564,14 +1582,6 @@ def dedupe(values: Iterable[str]) -> list[str]:
 
 def timestamp_from_path(path: Path) -> str:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat().replace("+00:00", "Z")
-
-
-def infer_status(run_dir: Path, summary: Mapping[str, Any], validation: Mapping[str, Any]) -> str:
-    if summary.get("neutronics", {}).get("status") or validation or (run_dir / "report.md").exists():
-        return "completed"
-    if (run_dir / "build_manifest.json").exists():
-        return "built"
-    return "unknown"
 
 
 def infer_status_from_files(run_dir: Path) -> str:

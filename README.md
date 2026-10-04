@@ -109,7 +109,7 @@ results/<case>/<run_id>/
   geometry/exports/
 ```
 
-Most commands are additive. `run` creates the core summary; `validate` adds acceptance checks; `report` generates Markdown and plots; `render` adds geometry exports; `transport` adds native R-Z RKDG scalar transport artifacts; `deplete` adds the native sparse depletion matrix; `transient`, `transient-sweep`, `economics`, and external integration commands append their own domain artifacts. The bundle is meant to be inspectable by Git-unaware tools, the CLI, and the browser app.
+Most commands are additive. `run` creates the core summary; `validate` adds acceptance checks; `report` generates Markdown and plots; `render` adds geometry exports; `transport` adds native R-Z finite-volume scalar transport artifacts; `deplete` adds the native sparse depletion matrix; `transient`, `transient-sweep`, `economics`, and external integration commands append their own domain artifacts. The bundle is meant to be inspectable by Git-unaware tools, the CLI, and the browser app.
 
 See [results/README.md](results/README.md) for the full file-by-file contract.
 

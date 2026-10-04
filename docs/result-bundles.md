@@ -10,6 +10,30 @@ results/<case>/<run_id>/
 
 Every run bundle should be readable after the fact without consulting mutable case files.
 
+## Input Integrity And Resume
+
+Commands reading or extending an existing bundle load its case snapshot before
+consulting the canonical case. A missing or invalid current case therefore does
+not invalidate an archived run with a valid snapshot.
+
+When `provenance.json` records SHA-256 hashes for case or benchmark snapshots,
+loading, extending, and `verify-bundle` compare the current files with those
+hashes. A changed or missing recorded snapshot fails; it is not silently recreated
+or assigned a new hash. Legacy bundles without recorded hashes remain readable,
+but have no historical hash verification.
+
+Solver-backed uncertainty sweeps record a fingerprint of the case, benchmark,
+uncertainty inputs, seed, sampler, and model. `--resume` rejects incompatible or
+unverifiable fingerprints before replacing the sweep manifest. An unchanged sweep
+may increase its sample count or change worker count. Each reused child must have
+a completed finite result and matching saved inputs. Before rerunning a child,
+its old result is invalidated; execution failure records a failed summary without
+stale metrics. Older sweeps without fingerprints require a new run.
+
+Explicit solver execution failures return nonzero CLI status for benchmarks and
+external integrations. Export-only integration commands remain successful when
+their requested artifacts were generated.
+
 ## Bundle Lifecycle
 
 | Command | Creates or extends | Typical files |
@@ -21,7 +45,7 @@ Every run bundle should be readable after the fact without consulting mutable ca
 | `render` | Extends latest or selected bundle | `geometry/exports/*.png`, `*.svg`, `*.obj`, `*.stl`, `*.gltf`, `*_mesh_validation.json`, `render_assets.json` |
 | `transient` | Extends or creates bundle | `transient.json`, transient metrics folded into `summary.json`, transient plots after report |
 | `transient-sweep` | Extends or creates bundle | `transient_sweep.json`, p05/p50/p95 metrics, backend report, envelope plots |
-| `transport` | Extends or creates bundle | `transport_mesh.json`, `transport_summary.json`, `transport_solution.npz`, RKDG metrics folded into `summary.json` |
+| `transport` | Extends or creates bundle | `transport_mesh.json`, `transport_summary.json`, `transport_solution.npz`, finite-volume metrics folded into `summary.json` |
 | `deplete` | Extends or creates bundle | `depletion_chain.json`, `depletion_summary.json`, `depletion_history.json`, `depletion_matrix.npz`, depletion metrics folded into `summary.json` |
 | `economics` | Extends or creates bundle | `finance.json`, `schedule.json`, `cash_flow.csv`, `cost_breakdown.csv`, `project_plan.json`, finance plots |
 | integration exporters | Extends or creates bundle | `<tool>_integration.json`, `<tool>_handoff.json`, generated input decks |
@@ -40,7 +64,7 @@ Every run bundle should be readable after the fact without consulting mutable ca
 | `report.md` | Human-readable generated report for the run |
 | `plots_manifest.json` | Plot names, paths, and display labels consumed by the web app |
 | `render_assets.json` | Geometry export paths and available visual views |
-| `transport_summary.json` | Native R-Z RKDG mesh/order/time-step, source-fraction, and conservation diagnostics when `transport` has run |
+| `transport_summary.json` | Native R-Z finite-volume mesh/order/time-step, source-fraction, and conservation diagnostics when `transport` has run |
 | `depletion_summary.json` | Native sparse depletion chain, matrix, inventory-delta, feed/removal, and atom-balance diagnostics when `deplete` has run |
 
 ## Geometry Exports
@@ -74,6 +98,11 @@ The web backend reads `results/` directly. It does not need a database for norma
 | `case_snapshot.yaml` | Draft-per-run case input, including browser edits |
 
 Canonical case files are not modified by browser runs.
+
+Browser drafts may select only existing `benchmarks/<name>/benchmark.yaml` files
+within the repository benchmark catalog. Host paths, directory traversal, and
+symlinks escaping that catalog are rejected before a bundle or quota claim is
+created. Run listings and details both honor failed CLI stage manifests.
 
 ## Refreshing README Figures
 

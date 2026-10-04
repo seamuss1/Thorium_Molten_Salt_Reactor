@@ -13,9 +13,9 @@ from thorium_reactor.benchmark_evidence import (
     merge_benchmark_evidence_into_quality,
 )
 from thorium_reactor.benchmarking import get_docker_runtime_status, run_solver_backed_benchmark
-from thorium_reactor.bundle_inputs import ensure_bundle_inputs, load_bundle_inputs
+from thorium_reactor.bundle_inputs import bundle_snapshot_integrity_errors, ensure_bundle_inputs, load_bundle_inputs
 from thorium_reactor.capabilities import get_case_capabilities
-from thorium_reactor.config import ConfigError, load_case_config, validate_transient_scenario
+from thorium_reactor.config import CaseConfig, ConfigError, load_case_config, validate_transient_scenario
 from thorium_reactor.economics import run_economics_case
 from thorium_reactor.evidence import build_evidence_status, load_canonical_artifact_status
 from thorium_reactor.geometry.exporters import export_geometry
@@ -202,15 +202,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"ERROR: {error}")
         return 0 if summary["passed"] else 1
 
-    try:
-        config = load_case_config(case_config_path(repo_root, args.case))
-        if args.command in {"transient", "transient-sweep"} and not args.reuse_run_id:
-            validate_transient_scenario(config.data.get("transient", {}), args.scenario)
-    except ConfigError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-
-    if args.command in {
+    creates_bundle = args.command in {
         "build",
         "run",
         "benchmark",
@@ -220,19 +212,32 @@ def main(argv: list[str] | None = None) -> int:
         *UNCERTAINTY_COMMANDS,
         *NATIVE_ADVANCED_COMMANDS,
         *INTEGRATION_COMMANDS,
-    }:
-        allow_existing = bool(
-            args.reuse_run_id or (args.run_id is not None and args.command in EXTEND_EXISTING_RUN_COMMANDS)
-        )
-        bundle = _load_or_create_bundle(repo_root, config.name, args.run_id, allow_existing=allow_existing)
-        inputs = ensure_bundle_inputs(repo_root, bundle, config)
-    else:
-        bundle = (
-            latest_result_bundle(repo_root, config.name)
-            if args.run_id is None
-            else _load_existing_bundle(repo_root, config.name, args.run_id)
-        )
-        inputs = load_bundle_inputs(repo_root, bundle, config)
+    }
+    allow_existing = bool(
+        args.reuse_run_id or (args.run_id is not None and args.command in EXTEND_EXISTING_RUN_COMMANDS)
+    )
+    bundle = None
+    try:
+        if not creates_bundle:
+            bundle, live_config = _load_case_bundle(repo_root, args.case, args.run_id)
+            inputs = load_bundle_inputs(repo_root, bundle, live_config)
+        elif allow_existing and args.run_id is not None:
+            try:
+                bundle, live_config = _load_case_bundle(repo_root, args.case, args.run_id)
+            except FileNotFoundError:
+                pass
+            if bundle is not None:
+                inputs = load_bundle_inputs(repo_root, bundle, live_config)
+                inputs = ensure_bundle_inputs(repo_root, bundle, inputs.config)
+        if bundle is None:
+            config = load_case_config(case_config_path(repo_root, args.case))
+            if args.command in {"transient", "transient-sweep"}:
+                validate_transient_scenario(config.data.get("transient", {}), args.scenario)
+            bundle = _load_or_create_bundle(repo_root, config.name, args.run_id, allow_existing=allow_existing)
+            inputs = ensure_bundle_inputs(repo_root, bundle, config)
+    except (ConfigError, FileNotFoundError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     config = inputs.config
     benchmark = inputs.benchmark
@@ -488,6 +493,19 @@ def main(argv: list[str] | None = None) -> int:
                     repo_root=repo_root,
                 )
             transport = run_transport_case(config, bundle, summary)
+            if transport.get("status") != "completed":
+                _finish_cli_stage(
+                    bundle,
+                    args.command,
+                    stage_command,
+                    stage_started_utc,
+                    stage_artifacts_before,
+                    provenance,
+                    summary=summary,
+                    status="failed",
+                )
+                print("Transport failed numerical acceptance; inspect transport_summary.json.", file=sys.stderr)
+                return 1
             generate_summary_plots(bundle, summary)
             refresh_bundle_artifact_statuses(bundle, summary=summary)
             _finish_cli_stage(
@@ -608,11 +626,13 @@ def main(argv: list[str] | None = None) -> int:
                 stage_artifacts_before,
                 provenance,
                 summary=summary,
-                status=result.get("status", "completed"),
+                status="failed"
+                if args.run_external and result.get("status") != "completed"
+                else result.get("status", "completed"),
             )
             print(bundle.root)
             print(result["status"])
-            return 0
+            return _external_execution_exit_code(result, requested=args.run_external)
 
         if args.command == "scale":
             result = run_scale_integration(
@@ -635,11 +655,13 @@ def main(argv: list[str] | None = None) -> int:
                 stage_artifacts_before,
                 provenance,
                 summary=summary,
-                status=result.get("status", "completed"),
+                status="failed"
+                if args.run_external and result.get("status") != "completed"
+                else result.get("status", "completed"),
             )
             print(bundle.root)
             print(result["status"])
-            return 0
+            return _external_execution_exit_code(result, requested=args.run_external)
 
         if args.command == "thermochimica":
             result = run_thermochimica_integration(
@@ -662,11 +684,13 @@ def main(argv: list[str] | None = None) -> int:
                 stage_artifacts_before,
                 provenance,
                 summary=summary,
-                status=result.get("status", "completed"),
+                status="failed"
+                if args.run_external and result.get("status") != "completed"
+                else result.get("status", "completed"),
             )
             print(bundle.root)
             print(result["status"])
-            return 0
+            return _external_execution_exit_code(result, requested=args.run_external)
 
         if args.command == "saltproc":
             result = run_saltproc_integration(
@@ -689,11 +713,13 @@ def main(argv: list[str] | None = None) -> int:
                 stage_artifacts_before,
                 provenance,
                 summary=summary,
-                status=result.get("status", "completed"),
+                status="failed"
+                if args.run_external and result.get("status") != "completed"
+                else result.get("status", "completed"),
             )
             print(bundle.root)
             print(result["status"])
-            return 0
+            return _external_execution_exit_code(result, requested=args.run_external)
 
         if args.command == "moltres":
             result = run_moltres_integration(
@@ -716,11 +742,13 @@ def main(argv: list[str] | None = None) -> int:
                 stage_artifacts_before,
                 provenance,
                 summary=summary,
-                status=result.get("status", "completed"),
+                status="failed"
+                if args.run_external and result.get("status") != "completed"
+                else result.get("status", "completed"),
             )
             print(bundle.root)
             print(result["status"])
-            return 0
+            return _external_execution_exit_code(result, requested=args.run_external)
 
         if args.command == "validate":
             result = validate_case(config, bundle, benchmark=benchmark, provenance=provenance)
@@ -904,6 +932,7 @@ def main(argv: list[str] | None = None) -> int:
                     "The solver-backed benchmark run did not produce a summary bundle."
                 )
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            succeeded = summary.get("neutronics", {}).get("status") == "completed"
             generate_summary_plots(bundle, summary)
             validation = validate_case(config, bundle, summary=summary, benchmark=benchmark, provenance=provenance)
             generate_validation_plot(bundle, validation)
@@ -951,9 +980,15 @@ def main(argv: list[str] | None = None) -> int:
                 provenance,
                 summary=summary,
                 repo_root=repo_root,
+                status="completed" if succeeded else "failed",
             )
             print(bundle.root)
-            return 0
+            if not succeeded:
+                print(
+                    summary.get("neutronics", {}).get("error") or "Solver-backed benchmark did not complete.",
+                    file=sys.stderr,
+                )
+            return 0 if succeeded else 1
 
         if args.command == "verify-bundle":
             failures = _verify_bundle_evidence_contract(bundle)
@@ -983,6 +1018,13 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             pass
         raise
+
+
+def _external_execution_exit_code(result: dict[str, object], *, requested: bool) -> int:
+    if requested and result.get("status") != "completed":
+        print(result.get("error") or "Requested external solver execution did not complete.", file=sys.stderr)
+        return 1
+    return 0
 
 
 def _refresh_benchmark_evidence(
@@ -1097,6 +1139,7 @@ def _verify_bundle_evidence_contract(bundle: ResultBundle) -> list[str]:
     report overclaims solver-backed/benchmark-ready/build-candidate status.
     """
     failures: list[str] = []
+    failures.extend(bundle_snapshot_integrity_errors(bundle))
     failures.extend(validate_bundle_sidecars(bundle.root))
 
     summary_path = bundle.root / "summary.json"
@@ -1141,6 +1184,21 @@ def _load_or_create_bundle(
 
 def _load_existing_bundle(repo_root: Path, case_name: str, run_id: str) -> ResultBundle:
     return existing_result_bundle(repo_root, case_name, run_id)
+
+
+def _load_case_bundle(repo_root: Path, case_name: str, run_id: str | None) -> tuple[ResultBundle, CaseConfig | None]:
+    """Prefer an archived identity, then resolve a live case directory alias."""
+
+    def lookup(identity: str) -> ResultBundle:
+        if run_id is None:
+            return latest_result_bundle(repo_root, identity)
+        return _load_existing_bundle(repo_root, identity, run_id)
+
+    try:
+        return lookup(case_name), None
+    except FileNotFoundError:
+        live_config = load_case_config(case_config_path(repo_root, case_name))
+        return lookup(live_config.name), live_config
 
 
 def _stage_command_from_argv(argv: list[str] | None, command: str) -> list[str]:

@@ -546,7 +546,7 @@ def test_report_missing_cleanup_preserves_valid_compound_fields() -> None:
             None,
         )
 
-        transport = _section(report, "## Native RKDG Transport")
+        transport = _section(report, "## Native Finite-Volume Transport")
         assert "- Mesh/order: (12 x 24), p=`3`" in transport
         assert "- Time step/CFL: `0.0025` s" in transport
         assert "`None`" not in transport
@@ -751,7 +751,7 @@ def test_report_includes_reduced_order_flow_section() -> None:
         assert "## Physics Core Transport" in report
         assert "finite_volume_decay_heat_precursor_transport" in report
         assert "heat_exchanger_and_offgas_contact" in report
-        assert "## Native RKDG Transport" in report
+        assert "## Native Finite-Volume Transport" in report
         assert "native_rz_rkdg_scalar_transport_v1" in report
         assert "transport_solution.npz" in report
         assert "## Native Sparse Depletion" in report

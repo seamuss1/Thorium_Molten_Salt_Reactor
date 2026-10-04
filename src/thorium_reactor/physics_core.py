@@ -7,13 +7,14 @@ import numpy as np
 
 from thorium_reactor.precursors import normalize_loop_segments, normalize_precursor_groups
 
-PHYSICS_CORE_MODEL = "coupled_deterministic_physics_core_v1"
+PHYSICS_CORE_MODEL = "one_way_diffusion_screening_core_v2"
 FINITE_VOLUME_TH_MODEL = "one_dimensional_finite_volume_loop"
 FINITE_VOLUME_PRECURSOR_MODEL = "finite_volume_advection_diffusion_decay"
 FINITE_VOLUME_DECAY_HEAT_PRECURSOR_MODEL = "finite_volume_decay_heat_precursor_transport"
 DECAY_HEAT_PRECURSOR_TRANSPORT_SOURCE = "https://doi.org/10.1016/j.applthermaleng.2026.129983"
 DECAY_HEAT_PRECURSOR_ROM_SOURCE = "https://doi.org/10.1080/00295450.2025.2530813"
-DEFAULT_DETERMINISTIC_METHODS = ("diffusion", "sp3", "transport")
+DEFAULT_DETERMINISTIC_METHODS = ("diffusion", "diffusion_variant_a", "diffusion_variant_b")
+LEGACY_METHOD_ALIASES = {"sp3": "diffusion_variant_a", "transport": "diffusion_variant_b"}
 SUPPORTED_DETERMINISTIC_METHODS = set(DEFAULT_DETERMINISTIC_METHODS)
 
 
@@ -33,15 +34,17 @@ def build_physics_core_summary(config: Any, summary: dict[str, Any]) -> dict[str
         "model": PHYSICS_CORE_MODEL,
         "scientific_scope": (
             "Deterministic reduced-order finite-volume physics core for screening, "
-            "coupling studies, and regression checks; OpenMC remains the reference "
+            "one-way dependency studies, and regression checks; OpenMC remains the reference "
             "path for Monte Carlo neutronics where available."
         ),
         "coupling": {
-            "neutronics_to_thermal_hydraulics": "axial power shape",
-            "thermal_hydraulics_to_neutronics": "temperature-dependent multigroup cross sections",
+            "mode": "one_way_screening",
+            "feedback_converged": False,
+            "neutronics_to_thermal_hydraulics": "not_implemented; prescribed cosine heat source",
+            "thermal_hydraulics_to_neutronics": "mean temperatures only; synthetic coefficient response",
             "flow_to_precursors": "finite-volume advection residence times",
-            "precursors_to_neutronics": "core delayed-neutron source importance",
-            "decay_heat_to_thermal_hydraulics": "finite-volume core and external-loop source split",
+            "precursors_to_neutronics": "postprocessed beta_eff only; does not alter eigenproblem",
+            "decay_heat_to_thermal_hydraulics": "not_implemented; decay heat source fractions are diagnostic only",
         },
         "neutronics": neutronics,
         "thermal_hydraulics": thermal_hydraulics,
@@ -59,14 +62,10 @@ def build_deterministic_neutronics_summary(
     precursor_transport: dict[str, Any],
 ) -> dict[str, Any]:
     neutronics_settings = _section(settings, "neutronics")
-    methods = (
-        tuple(
-            method
-            for method in neutronics_settings.get("deterministic_methods", DEFAULT_DETERMINISTIC_METHODS)
-            if method in SUPPORTED_DETERMINISTIC_METHODS
-        )
-        or DEFAULT_DETERMINISTIC_METHODS
-    )
+    requested_methods = neutronics_settings.get("deterministic_methods", DEFAULT_DETERMINISTIC_METHODS)
+    methods = tuple(LEGACY_METHOD_ALIASES.get(method, method) for method in requested_methods)
+    if not methods or any(method not in SUPPORTED_DETERMINISTIC_METHODS for method in methods):
+        raise ValueError("Unsupported diffusion screening method.")
     group_count = max(int(neutronics_settings.get("group_count", 11)), 2)
     temperature_grid_c = _temperature_grid(neutronics_settings)
     axial_nodes = thermal_hydraulics["axial_nodes"]
@@ -86,12 +85,23 @@ def build_deterministic_neutronics_summary(
     raw_results = {
         method: _solve_multigroup_eigenvalue(base_xs, axial_nodes=axial_nodes, method=method) for method in methods
     }
-    reference_keff = _reference_keff(config, summary)
-    calibration_factor = reference_keff / max(raw_results[methods[0]]["k_eff"], 1.0e-12)
+    calibration = neutronics_settings.get("calibration")
+    calibration_factor = 1.0
+    if calibration is not None:
+        if (
+            not isinstance(calibration, dict)
+            or not calibration.get("reference_id")
+            or not calibration.get("scope")
+            or "factor" not in calibration
+        ):
+            raise ValueError("Frozen calibration requires reference_id, scope, and factor.")
+        calibration_factor = float(calibration["factor"])
+        if not math.isfinite(calibration_factor) or calibration_factor <= 0:
+            raise ValueError("Calibration factor must be finite and positive.")
 
     method_results: dict[str, Any] = {}
     for method, result in raw_results.items():
-        method_results[method] = _scaled_neutronics_result(result, calibration_factor)
+        method_results[method] = _scaled_neutronics_result(result, calibration_factor if calibration else None)
 
     feedback = _feedback_coefficients(
         config,
@@ -107,10 +117,9 @@ def build_deterministic_neutronics_summary(
     )
     total_beta = _total_delayed_neutron_yield(config)
     reference = {
-        "source": "openmc" if summary.get("metrics", {}).get("keff") is not None else "case_validation_or_surrogate",
-        "k_eff": _round_float(reference_keff),
-        "openmc_status": summary.get("neutronics", {}).get("status"),
-        "statepoint": summary.get("neutronics", {}).get("statepoint"),
+        "source": "external_summary_metric" if summary.get("metrics", {}).get("keff") is not None else "unavailable",
+        "k_eff": summary.get("metrics", {}).get("keff"),
+        "used_for_calibration": False,
     }
     selected = method_results[methods[0]]
     adjoint_weighted_precursor = _adjoint_weighted_core_delayed_source_fraction(
@@ -120,7 +129,10 @@ def build_deterministic_neutronics_summary(
     beta_eff = total_beta * adjoint_weighted_precursor["fraction"]
     return {
         "status": "completed",
-        "model": "temperature_dependent_multigroup_deterministic",
+        "model": "synthetic_multigroup_diffusion_screening_v2",
+        "method_alias_migration": {old: new for old, new in LEGACY_METHOD_ALIASES.items() if old in requested_methods},
+        "calibration": {**(calibration or {}), "status": "frozen" if calibration else "disabled"},
+        "calibrated_k_eff": selected["k_eff"] * calibration_factor if calibration else None,
         "methods": list(methods),
         "selected_method": methods[0],
         "group_count": group_count,
@@ -140,6 +152,7 @@ def build_deterministic_neutronics_summary(
         ),
         "delayed_neutron_flow_loss_pcm": _round_float((total_beta - beta_eff) * 1.0e5),
         "delayed_neutron_total_yield_fraction": _round_float(total_beta),
+        "importance_basis": "static_response_proxy_not_adjoint_eigenfunction",
         "adjoint_weighted_importance": selected["adjoint_weighted_importance"],
         "power_shape": selected["power_shape"],
         "feedback_coefficients": feedback,
@@ -195,8 +208,13 @@ def build_finite_volume_thermal_hydraulics(
         * 0.01,
         1.0e-4,
     )
-    active_volume_m3 = max(float(active_flow.get("total_salt_volume_cm3", 0.0)) * 1.0e-6, flow_area_m2)
-    core_length_m = max(active_volume_m3 / flow_area_m2, float(geometry.get("height_cm", 100.0)) * 0.01, 0.1)
+    active_volume_m3 = float(active_flow.get("total_salt_volume_cm3", 0.0)) * 1.0e-6
+    if active_volume_m3 <= 0.0:
+        fallback_length_m = float(geometry.get("active_core_height_cm", geometry.get("height_cm", 100.0))) * 0.01
+        active_volume_m3 = flow_area_m2 * max(fallback_length_m, 1.0e-6)
+    # Active flow volume and area define this region; vessel plenums and cover
+    # gas must not extend the heated core or its precursor residence time.
+    core_length_m = active_volume_m3 / flow_area_m2
     volumetric_flow_m3_s = mass_flow_kg_s / density_kg_m3 if density_kg_m3 > 0.0 else 0.0
     velocity_m_s = volumetric_flow_m3_s / flow_area_m2 if flow_area_m2 > 0.0 else 0.0
     dz_m = core_length_m / node_count
@@ -217,7 +235,9 @@ def build_finite_volume_thermal_hydraulics(
             {
                 "index": index,
                 "z_mid_m": _round_float((index + 0.5) * dz_m),
-                "cell_length_m": _round_float(dz_m),
+                "cell_length_m": dz_m,
+                "flow_area_m2": flow_area_m2,
+                "volume_m3": flow_area_m2 * dz_m,
                 "power_shape": _round_float(shape),
                 "power_mw": _round_float(node_power_w / 1.0e6),
                 "fuel_salt_inlet_temp_c": _round_float(inlet_temp_c),
@@ -225,7 +245,7 @@ def build_finite_volume_thermal_hydraulics(
                 "fuel_salt_outlet_temp_c": _round_float(outlet_temp_c),
                 "graphite_temp_c": _round_float(graphite_temp_c),
                 "porosity": _round_float(_core_porosity(config, active_volume_m3, core_length_m)),
-                "velocity_m_s": _round_float(velocity_m_s),
+                "velocity_m_s": velocity_m_s,
             }
         )
 
@@ -340,22 +360,27 @@ def build_finite_volume_precursor_transport(
         loop_segments,
         loop_cell_count,
         loop_residence_time_s=float(loop_residence["residence_time_s"]),
+        loop_length_m=precursor_settings.get("loop_length_m"),
     )
-    diffusion_m2_s = max(float(precursor_settings.get("diffusion_coefficient_m2_s", 2.5e-5)), 0.0)
+    diffusion_m2_s = max(float(precursor_settings.get("diffusion_coefficient_m2_s", 0.0)), 0.0)
     cleanup_rate_s = _cleanup_rate_s(config, summary)
     delayed_group_results = []
     delayed_core_source = 0.0
     delayed_total_source = 0.0
     delayed_loop_source = 0.0
+    delayed_production = 0.0
+    delayed_cleanup = 0.0
     cell_inventories = [0.0 for _ in cells]
     cell_delayed_sources = [0.0 for _ in cells]
     for group in groups:
+        diagnostics: dict[str, Any] = {}
         inventory = _solve_ring_advection_diffusion_decay(
             cells,
             decay_constant_s=float(group["decay_constant_s"]),
             source_strength=float(group["relative_yield_fraction"]),
             diffusion_m2_s=diffusion_m2_s,
             cleanup_rate_s=cleanup_rate_s,
+            diagnostics=diagnostics,
         )
         for index, value in enumerate(inventory):
             cell_inventories[index] += value
@@ -367,8 +392,11 @@ def build_finite_volume_precursor_transport(
         delayed_core_source += core_source
         delayed_loop_source += loop_source
         delayed_total_source += core_source + loop_source
+        delayed_production += diagnostics["production"]
+        delayed_cleanup += diagnostics["removal"]
         delayed_group_results.append(
             {
+                "numerical_checks": diagnostics,
                 "name": str(group["name"]),
                 "decay_constant_s": _round_float(float(group["decay_constant_s"])),
                 "yield_fraction": _round_float(float(group["yield_fraction"])),
@@ -379,12 +407,14 @@ def build_finite_volume_precursor_transport(
             }
         )
     decay_heat = _decay_heat_precursor_summary(cells, diffusion_m2_s, cleanup_rate_s, precursor_settings)
-    cell_report = _cell_inventory_report(cells, cell_inventories, cell_delayed_sources)
+    cell_report = _cell_inventory_report(
+        cells, cell_inventories, cell_delayed_sources, precursor_production_rate=delayed_production
+    )
     return {
         "status": "completed",
         "model": FINITE_VOLUME_PRECURSOR_MODEL,
         "equation": "dC_i/dt + div(u C_i) = div(D_i grad C_i) + beta_i S_f - lambda_i C_i - cleanup_i C_i",
-        "spatial_discretization": "implicit upwind finite volume on core and external-loop ring cells",
+        "spatial_discretization": "conservative steady upwind finite volume; shared face diffusion with explicit geometry",
         "group_count": len(groups),
         "cell_count": len(cells),
         "core_cell_count": sum(1 for cell in cells if cell["region"] == "core"),
@@ -393,13 +423,20 @@ def build_finite_volume_precursor_transport(
         "loop_residence_basis": str(loop_residence["basis"]),
         "diffusion_coefficient_m2_s": _round_float(diffusion_m2_s),
         "cleanup_rate_s": _round_float(cleanup_rate_s),
+        "absolute_source_fraction_basis": "precursor_production_before_cleanup",
+        "precursor_production_rate": delayed_production,
+        "delayed_neutron_decay_rate": delayed_total_source,
+        "precursor_cleanup_removal_rate": delayed_cleanup,
         "core_delayed_neutron_source_absolute_fraction": _round_float(
-            delayed_core_source / max(delayed_total_source, 1.0e-12)
+            delayed_core_source / max(delayed_production, 1.0e-12)
         ),
         "loop_delayed_neutron_source_absolute_fraction": _round_float(
-            delayed_loop_source / max(delayed_total_source, 1.0e-12)
+            delayed_loop_source / max(delayed_production, 1.0e-12)
         ),
-        "transport_loss_fraction": _round_float(delayed_loop_source / max(delayed_total_source, 1.0e-12)),
+        "cleanup_loss_fraction": _round_float(delayed_cleanup / max(delayed_production, 1.0e-12)),
+        "transport_loss_fraction": _round_float(
+            (delayed_loop_source + delayed_cleanup) / max(delayed_production, 1.0e-12)
+        ),
         "delayed_neutron_groups": delayed_group_results,
         "decay_heat_precursors": decay_heat,
         "cells": cell_report,
@@ -427,7 +464,7 @@ def _adjoint_weighted_core_delayed_source_fraction(
         max(float(cell.get("source_fraction", 0.0)), 0.0) * importance[index] for index, cell in enumerate(core_cells)
     )
     weighted_source = sum(
-        max(float(cell.get("delayed_neutron_source_fraction", 0.0)), 0.0) * importance[index]
+        max(float(cell.get("delayed_neutron_source_absolute_fraction", 0.0)), 0.0) * importance[index]
         for index, cell in enumerate(core_cells)
     )
     if static_source <= 0.0:
@@ -488,7 +525,7 @@ def build_temperature_dependent_multigroup_xs(
         "nu_fission_cm_inv": nu_fission,
         "scatter_cm_inv": scatter,
         "chi": chi,
-        "interpolation": "linear_temperature_dependence_between_declared_grid_points",
+        "interpolation": "synthetic_linear_temperature_parameterization",
     }
 
 
@@ -497,6 +534,7 @@ def _solve_multigroup_eigenvalue(
     *,
     axial_nodes: list[dict[str, Any]],
     method: str,
+    residual_tolerance: float = 1.0e-8,
 ) -> dict[str, Any]:
     group_count = int(xs["group_count"])
     node_count = len(axial_nodes)
@@ -517,25 +555,29 @@ def _solve_multigroup_eigenvalue(
                 matrix[row, _index(node - 1, group, group_count)] = -diffusion[group] / (dz_cm * dz_cm)
             if node + 1 < node_count:
                 matrix[row, _index(node + 1, group, group_count)] = -diffusion[group] / (dz_cm * dz_cm)
-    flux = np.ones(node_count * group_count, dtype=float)
-    flux /= np.mean(flux)
-    k_eff = 1.0
-    inverse_matrix = np.linalg.inv(matrix)
-    for _ in range(48):
-        old_fission = _total_fission_source(flux, nu_fission, node_count, group_count)
-        source = _scatter_source(flux, scatter, node_count, group_count)
-        source += _fission_source(flux, nu_fission, chi, node_count, group_count) / max(k_eff, 1.0e-12)
-        next_flux = inverse_matrix @ source
-        next_flux = np.maximum(next_flux, 1.0e-16)
-        new_fission = _total_fission_source(next_flux, nu_fission, node_count, group_count)
-        next_k = k_eff * new_fission / max(old_fission, 1.0e-16)
-        next_flux /= max(np.mean(next_flux), 1.0e-16)
-        if abs(next_k - k_eff) < 1.0e-8:
-            flux = next_flux
-            k_eff = next_k
-            break
-        flux = next_flux
-        k_eff = next_k
+    # Include scattering in the loss operator, then solve the small dense
+    # generalized eigenproblem directly instead of silently truncating iterations.
+    fission_matrix = np.zeros_like(matrix)
+    for node in range(node_count):
+        local = slice(node * group_count, (node + 1) * group_count)
+        matrix[local, local] -= scatter.T
+        fission_matrix[local, local] = np.outer(chi, nu_fission)
+    eigenvalues, eigenvectors = np.linalg.eig(np.linalg.solve(matrix, fission_matrix))
+    index = int(np.argmax(eigenvalues.real))
+    k_value = eigenvalues[index]
+    if abs(k_value.imag) > residual_tolerance or not np.isfinite(k_value) or k_value.real <= 0:
+        raise RuntimeError("Diffusion eigenproblem has no acceptable positive real dominant eigenvalue.")
+    k_eff = float(k_value.real)
+    flux = eigenvectors[:, index].real
+    if float(np.mean(flux)) < 0:
+        flux = -flux
+    flux /= max(float(np.mean(flux)), 1e-30)
+    source = fission_matrix @ flux / k_eff
+    residual = float(
+        np.linalg.norm(matrix @ flux - source, ord=np.inf) / max(np.linalg.norm(source, ord=np.inf), 1e-30)
+    )
+    if not math.isfinite(residual) or residual > residual_tolerance or np.any(flux < -residual_tolerance):
+        raise RuntimeError(f"Diffusion eigenproblem failed residual acceptance: {residual}.")
     power_by_node = _power_by_node(flux, nu_fission, node_count, group_count)
     power_shape = power_by_node / max(np.mean(power_by_node), 1.0e-16)
     adjoint = np.linalg.solve(matrix.T, np.tile(nu_fission, node_count))
@@ -549,6 +591,13 @@ def _solve_multigroup_eigenvalue(
     importance = power_shape * adjoint_by_node
     importance /= max(float(np.mean(importance)), 1.0e-16)
     return {
+        "numerical_checks": {
+            "converged": True,
+            "solver": "dense_generalized_eigenproblem",
+            "iterations": None,
+            "relative_residual": residual,
+            "tolerance": residual_tolerance,
+        },
         "method": method,
         "k_eff": float(k_eff),
         "dominance_proxy": float(np.linalg.norm(flux, ord=2) / max(np.linalg.norm(source, ord=2), 1.0e-16)),
@@ -588,22 +637,22 @@ def _feedback_coefficients(
     graphite_hot = solve(average_fuel_temp_c, average_graphite_temp_c + delta_t)
     uniform_hot = solve(average_fuel_temp_c + delta_t, average_graphite_temp_c + delta_t)
     return {
-        "fuel_temperature_pcm_per_c": _round_float(((fuel_hot - base_k) / max(base_k, 1.0e-12)) * 1.0e5 / delta_t),
-        "graphite_temperature_pcm_per_c": _round_float(
-            ((graphite_hot - base_k) / max(base_k, 1.0e-12)) * 1.0e5 / delta_t
-        ),
-        "uniform_temperature_pcm_per_c": _round_float(
-            ((uniform_hot - base_k) / max(base_k, 1.0e-12)) * 1.0e5 / delta_t
-        ),
+        "fuel_temperature_pcm_per_c": _round_float((1.0 / base_k - 1.0 / fuel_hot) * 1.0e5 / delta_t),
+        "graphite_temperature_pcm_per_c": _round_float((1.0 / base_k - 1.0 / graphite_hot) * 1.0e5 / delta_t),
+        "uniform_temperature_pcm_per_c": _round_float((1.0 / base_k - 1.0 / uniform_hot) * 1.0e5 / delta_t),
+        "reactivity_definition": "rho = 1 - 1/k",
+        "eigenvalue_basis": "calibrated" if calibration_factor != 1.0 else "raw",
         "perturbation_c": _round_float(delta_t),
     }
 
 
-def _scaled_neutronics_result(result: dict[str, Any], calibration_factor: float) -> dict[str, Any]:
+def _scaled_neutronics_result(result: dict[str, Any], calibration_factor: float | None) -> dict[str, Any]:
     return {
         "method": result["method"],
-        "k_eff": _round_float(result["k_eff"] * calibration_factor),
-        "raw_k_eff": _round_float(result["k_eff"]),
+        "k_eff": float(result["k_eff"]),
+        "calibrated_k_eff": result["k_eff"] * calibration_factor if calibration_factor is not None else None,
+        "numerical_checks": result["numerical_checks"],
+        "raw_k_eff": float(result["k_eff"]),
         "dominance_proxy": _round_float(result["dominance_proxy"]),
         "power_shape": result["power_shape"],
         "adjoint_weighted_importance": result["adjoint_weighted_importance"],
@@ -616,24 +665,40 @@ def _precursor_cells(
     loop_cell_count: int,
     *,
     loop_residence_time_s: float,
+    loop_length_m: float | None = None,
 ) -> list[dict[str, Any]]:
     cells: list[dict[str, Any]] = []
-    core_total_residence_s = sum(
-        float(node.get("cell_length_m", 0.1)) / max(float(node.get("velocity_m_s", 0.0)), 1.0e-6) for node in core_nodes
-    )
     power_total = sum(float(node["power_shape"]) for node in core_nodes)
+    flow_m3_s = abs(float(core_nodes[0].get("velocity_m_s", 0.0))) * float(core_nodes[0].get("flow_area_m2", 1.0))
+    loop_area_m2 = (
+        flow_m3_s * loop_residence_time_s / float(loop_length_m)
+        if loop_length_m is not None and float(loop_length_m) > 0 and flow_m3_s > 0
+        else float(core_nodes[0].get("flow_area_m2", 1.0))
+    )
     for node in core_nodes:
         cells.append(
             {
                 "id": f"core_{node['index']}",
                 "region": "core",
-                "residence_time_s": max(core_total_residence_s / max(len(core_nodes), 1), 1.0e-6),
+                "residence_time_s": float(node["cell_length_m"]) / abs(float(node["velocity_m_s"]))
+                if node.get("velocity_m_s")
+                else math.inf,
+                "length_m": float(node["cell_length_m"]),
+                "volume_m3": float(
+                    node.get("volume_m3", float(node["cell_length_m"]) * float(node.get("flow_area_m2", 1.0)))
+                ),
+                "face_area_m2": float(node.get("flow_area_m2", 1.0)),
                 "source_fraction": float(node["power_shape"]) / max(power_total, 1.0e-12),
                 "cleanup_weight": 0.0,
             }
         )
     normalized_segments = normalize_loop_segments(loop_segments)
     assignments = _loop_cell_segment_assignments(normalized_segments, loop_cell_count)
+    if loop_cell_count >= len(normalized_segments):
+        assignments = list(range(len(normalized_segments))) + _loop_cell_segment_assignments(
+            normalized_segments, loop_cell_count - len(normalized_segments)
+        )
+        assignments.sort()
     assignment_counts: dict[int, int] = {}
     for segment_index in assignments:
         assignment_counts[segment_index] = assignment_counts.get(segment_index, 0) + 1
@@ -654,7 +719,14 @@ def _precursor_cells(
                 "id": f"loop_{index}_{segment['id']}",
                 "region": "loop",
                 "segment_id": str(segment["id"]),
-                "residence_time_s": max(residence_time_s, 0.05),
+                "residence_time_s": residence_time_s,
+                "length_m": float(loop_length_m) * residence_time_s / loop_residence_time_s
+                if loop_length_m is not None
+                else None,
+                "volume_m3": loop_area_m2 * float(loop_length_m) * residence_time_s / loop_residence_time_s
+                if loop_length_m is not None
+                else None,
+                "face_area_m2": loop_area_m2,
                 "source_fraction": 0.0,
                 "cleanup_weight": float(segment["cleanup_weight"]),
             }
@@ -688,32 +760,64 @@ def _solve_ring_advection_diffusion_decay(
     source_strength: float,
     diffusion_m2_s: float,
     cleanup_rate_s: float,
+    diagnostics: dict[str, Any] | None = None,
 ) -> list[float]:
     count = len(cells)
-    inventory = [source_strength * float(cell["source_fraction"]) / max(decay_constant_s, 1.0e-12) for cell in cells]
-    min_tau = min(float(cell["residence_time_s"]) for cell in cells)
-    dt = min(max(0.2 * min_tau, 0.01), 0.5 / max(decay_constant_s, 1.0e-12))
-    diffusion_rate = diffusion_m2_s / max(min_tau * min_tau, 1.0e-12)
-    for _ in range(500):
-        updated = [0.0 for _ in cells]
-        max_delta = 0.0
-        for index, cell in enumerate(cells):
-            previous = (index - 1) % count
-            next_index = (index + 1) % count
-            out_rate = 1.0 / max(float(cell["residence_time_s"]), 1.0e-12)
-            in_rate = 1.0 / max(float(cells[previous]["residence_time_s"]), 1.0e-12)
-            cleanup = cleanup_rate_s * float(cell.get("cleanup_weight", 0.0))
-            source = source_strength * float(cell["source_fraction"])
-            numerator = inventory[index] + dt * (
-                source + in_rate * inventory[previous] + diffusion_rate * (inventory[previous] + inventory[next_index])
-            )
-            denominator = 1.0 + dt * (out_rate + decay_constant_s + cleanup + 2.0 * diffusion_rate)
-            updated[index] = max(numerator / max(denominator, 1.0e-18), 0.0)
-            max_delta = max(max_delta, abs(updated[index] - inventory[index]))
-        inventory = updated
-        if max_delta < 1.0e-10:
-            break
-    return inventory
+    if not count or any(
+        not math.isfinite(v) or v < 0 for v in (decay_constant_s, source_strength, diffusion_m2_s, cleanup_rate_s)
+    ):
+        raise ValueError("Ring rates must be finite and non-negative and cells nonempty.")
+    matrix = np.zeros((count, count))
+    production = np.array([source_strength * float(cell["source_fraction"]) for cell in cells])
+    removal = np.array([cleanup_rate_s * float(cell.get("cleanup_weight", 0)) for cell in cells])
+    if np.any(production < 0) or np.any(removal < 0) or not np.all(np.isfinite(production + removal)):
+        raise ValueError("Ring source and removal must be finite and non-negative.")
+    for i, cell in enumerate(cells):
+        tau = float(cell["residence_time_s"])
+        if math.isnan(tau) or tau <= 0:
+            raise ValueError("Cell residence times must be positive (infinity means zero flow).")
+        j = (i + 1) % count
+        matrix[i, i] += decay_constant_s + removal[i] + 1.0 / tau
+        matrix[j, i] -= 1.0 / tau
+        if diffusion_m2_s:
+            # Shared face flux D*A*(N_i/V_i - N_j/V_j)/distance.
+            try:
+                vi, vj = float(cell["volume_m3"]), float(cells[j]["volume_m3"])
+                li, lj = float(cell["length_m"]), float(cells[j]["length_m"])
+                area = min(float(cell["face_area_m2"]), float(cells[j]["face_area_m2"]))
+            except (KeyError, TypeError):
+                raise ValueError(
+                    "Nonzero ring diffusion requires explicit cell geometry; configure loop_length_m."
+                ) from None
+            if not all(math.isfinite(v) and v > 0 for v in (vi, vj, li, lj, area)):
+                raise ValueError("Ring diffusion geometry must be finite and positive.")
+            conductance = diffusion_m2_s * area / (0.5 * (li + lj))
+            matrix[i, i] += conductance / vi
+            matrix[j, i] -= conductance / vi
+            matrix[j, j] += conductance / vj
+            matrix[i, j] -= conductance / vj
+    try:
+        inventory = np.linalg.solve(matrix, production)
+    except np.linalg.LinAlgError as exc:
+        raise RuntimeError("Ring steady system has no unique solution.") from exc
+    residual = float(
+        np.linalg.norm(matrix @ inventory - production, ord=np.inf) / max(np.linalg.norm(production, ord=np.inf), 1e-30)
+    )
+    loss = float(np.dot(decay_constant_s + removal, inventory))
+    balance = abs(float(production.sum()) - loss) / max(float(production.sum()), 1e-30)
+    if not np.all(np.isfinite(inventory)) or np.any(inventory < 0) or residual > 1e-8 or balance > 1e-8:
+        raise RuntimeError(f"Ring steady solve failed numerical acceptance: residual={residual}, balance={balance}.")
+    if diagnostics is not None:
+        diagnostics.update(
+            converged=True,
+            relative_residual=residual,
+            balance_residual=balance,
+            tolerance=1e-8,
+            production=float(production.sum()),
+            decay=float(decay_constant_s * inventory.sum()),
+            removal=float(np.dot(removal, inventory)),
+        )
+    return inventory.tolist()
 
 
 def _decay_heat_precursor_summary(
@@ -739,12 +843,14 @@ def _decay_heat_precursor_summary(
     for index, group in enumerate(groups):
         decay = max(float(group.get("decay_constant_s", 0.0)), 1.0e-12)
         yield_fraction = max(float(group.get("yield_fraction", 0.0)), 0.0)
+        diagnostics: dict[str, Any] = {}
         inventory = _solve_ring_advection_diffusion_decay(
             cells,
             decay_constant_s=decay,
             source_strength=yield_fraction,
             diffusion_m2_s=diffusion_m2_s,
             cleanup_rate_s=cleanup_rate_s,
+            diagnostics=diagnostics,
         )
         for cell_index, value in enumerate(inventory):
             cell_decay_heat_sources[cell_index] += decay * value
@@ -755,6 +861,7 @@ def _decay_heat_precursor_summary(
         core_source += source_core
         group_results.append(
             {
+                "numerical_checks": diagnostics,
                 "name": str(group.get("name", f"decay_heat_group_{index + 1}")),
                 "decay_constant_s": _round_float(decay),
                 "yield_fraction": _round_float(yield_fraction),
@@ -825,6 +932,8 @@ def _cell_inventory_report(
     cells: list[dict[str, Any]],
     cell_inventories: list[float],
     cell_delayed_sources: list[float],
+    *,
+    precursor_production_rate: float,
 ) -> list[dict[str, Any]]:
     total_inventory = sum(cell_inventories)
     total_delayed_source = sum(cell_delayed_sources)
@@ -838,6 +947,9 @@ def _cell_inventory_report(
             "inventory_fraction": _round_float(cell_inventories[index] / max(total_inventory, 1.0e-12)),
             "delayed_neutron_source_fraction": _round_float(
                 cell_delayed_sources[index] / max(total_delayed_source, 1.0e-12)
+            ),
+            "delayed_neutron_source_absolute_fraction": _round_float(
+                cell_delayed_sources[index] / max(precursor_production_rate, 1.0e-12)
             ),
         }
         for index, cell in enumerate(cells)
@@ -895,12 +1007,15 @@ def _custom_xs(
         "nu_fission_cm_inv": array("nu_fission_cm_inv", 0.004),
         "scatter_cm_inv": [[float(value) for value in row[:group_count]] for row in scatter[:group_count]],
         "chi": [float(value) for value in chi[:group_count]],
-        "interpolation": "configured_temperature_dependent_library",
+        "interpolation": "configured_static_arrays_no_temperature_interpolation",
     }
 
 
 def _xs_report(xs: dict[str, Any]) -> dict[str, Any]:
     return {
+        "provenance": "user_supplied_arrays"
+        if xs["interpolation"].startswith("configured")
+        else "synthetic_screening_coefficients_not_evaluated_nuclear_data",
         "material": xs["material"],
         "interpolation": xs["interpolation"],
         "reference_temperature_c": xs["reference_temperature_c"],
@@ -938,18 +1053,6 @@ def _resample_profile(values: list[float], count: int) -> list[float]:
     return resampled
 
 
-def _reference_keff(config: Any, summary: dict[str, Any]) -> float:
-    metrics = summary.get("metrics", {})
-    if metrics.get("keff") is not None:
-        return float(metrics["keff"])
-    for target in config.validation_targets.values():
-        if not isinstance(target, dict) or target.get("metric") != "keff":
-            continue
-        if target.get("min") is not None and target.get("max") is not None:
-            return 0.5 * (float(target["min"]) + float(target["max"]))
-    return 1.01
-
-
 def _total_delayed_neutron_yield(config: Any) -> float:
     transient_config = config.data.get("transient", {})
     if not isinstance(transient_config, dict):
@@ -973,15 +1076,15 @@ def _cosine_power_shape(node_count: int) -> list[float]:
 
 
 def _method_diffusion_factor(method: str) -> float:
-    return {"diffusion": 1.0, "sp3": 0.92, "transport": 0.86}.get(method, 1.0)
+    return {"diffusion": 1.0, "diffusion_variant_a": 0.92, "diffusion_variant_b": 0.86}.get(method, 1.0)
 
 
 def _method_absorption_factor(method: str) -> float:
-    return {"diffusion": 1.0, "sp3": 1.01, "transport": 1.018}.get(method, 1.0)
+    return {"diffusion": 1.0, "diffusion_variant_a": 1.01, "diffusion_variant_b": 1.018}.get(method, 1.0)
 
 
 def _method_fission_factor(method: str) -> float:
-    return {"diffusion": 1.0, "sp3": 0.997, "transport": 0.992}.get(method, 1.0)
+    return {"diffusion": 1.0, "diffusion_variant_a": 0.997, "diffusion_variant_b": 0.992}.get(method, 1.0)
 
 
 def _index(node: int, group: int, group_count: int) -> int:
@@ -1219,6 +1322,9 @@ def _physics_core_checks(
     precursor_transport: dict[str, Any],
 ) -> dict[str, Any]:
     checks = {
+        "eigenvalue_converged": all(
+            result["numerical_checks"]["converged"] for result in neutronics["method_results"].values()
+        ),
         "finite_k_eff": math.isfinite(float(neutronics["k_eff"])),
         "positive_beta_eff": float(neutronics["beta_eff"]) > 0.0,
         "power_shape_positive": all(float(value) > 0.0 for value in neutronics["power_shape"]),
@@ -1229,6 +1335,7 @@ def _physics_core_checks(
     }
     return {
         "status": "ok" if all(checks.values()) else "failed",
+        "scope": "component numerical checks only; no coupled feedback or energy-balance validation",
         "checks": checks,
         "failures": [name for name, passed in checks.items() if not passed],
     }

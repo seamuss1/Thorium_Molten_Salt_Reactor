@@ -63,6 +63,14 @@ def test_unknown_cli_scenario_creates_no_bundle(repo, command, capsys):
     assert not (repo / "results").exists()
 
 
+def test_cli_rejected_transport_marks_stage_failed(repo, monkeypatch):
+    monkeypatch.setattr("thorium_reactor.cli.run_case", lambda *args, **kwargs: {})
+    monkeypatch.setattr("thorium_reactor.transport.run_transport_case", lambda *args: {"status": "failed"})
+    assert main(["--repo-root", str(repo), "transport", "example_pin", "--run-id", "bad-balance"]) == 1
+    manifest = json.loads((repo / "results/example_pin/bad-balance/stage_manifest.json").read_text())
+    assert manifest["stages"][-1]["status"] == "failed"
+
+
 @pytest.mark.parametrize(
     ("status", "dry", "expected"),
     [

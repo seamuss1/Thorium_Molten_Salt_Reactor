@@ -24,7 +24,7 @@ from thorium_reactor.capabilities import (
     get_case_capabilities,
     validate_case_capability,
 )
-from thorium_reactor.config import CaseConfig, load_yaml
+from thorium_reactor.config import CaseConfig, ConfigError, load_yaml
 from thorium_reactor.flow.primary_system import build_primary_system_summary
 from thorium_reactor.flow.properties import (
     average_primary_temperature_c,
@@ -685,6 +685,9 @@ def _build_pin_case(config: CaseConfig, benchmark: dict[str, Any]) -> BuiltCase:
         manifest={
             "case": config.name,
             "cell_count": cell_count,
+            "cell_count_basis": "declared_layers_and_surrounding_regions",
+            "openmc_void_gap_cell_count": _void_gap_cell_count(layers),
+            "openmc_cell_count": cell_count + _void_gap_cell_count(layers),
             "geometry_kind": geometry["kind"],
             "material_inventory": material_inventory,
             "invariants": invariants,
@@ -742,6 +745,13 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
             manifest={
                 "case": config.name,
                 "cell_count": channel_cell_count + static_cell_count,
+                "cell_count_basis": "declared_layers_and_surrounding_regions",
+                "openmc_void_gap_cell_count": sum(
+                    _void_gap_cell_count(channel["layers"]) for channel in resolved.channels
+                ),
+                "openmc_cell_count": channel_cell_count
+                + static_cell_count
+                + sum(_void_gap_cell_count(channel["layers"]) for channel in resolved.channels),
                 "channel_count": len(resolved.channels),
                 "channel_variant_counts": dict(resolved.channel_variant_counts),
                 "geometry_kind": geometry["kind"],
@@ -821,6 +831,9 @@ def _build_ring_lattice_core(config: CaseConfig, benchmark: dict[str, Any]) -> B
         manifest={
             "case": config.name,
             "cell_count": len(channels) * len(channel_layers) + 2,
+            "cell_count_basis": "declared_layers_and_surrounding_regions",
+            "openmc_void_gap_cell_count": len(channels) * _void_gap_cell_count(channel_layers),
+            "openmc_cell_count": len(channels) * (len(channel_layers) + _void_gap_cell_count(channel_layers)) + 2,
             "channel_count": len(channels),
             "geometry_kind": geometry["kind"],
             "material_inventory": material_inventory,
@@ -866,6 +879,56 @@ def _validate_layers(layers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return invariants
 
 
+def _void_gap_cell_count(layers: list[dict[str, Any]]) -> int:
+    previous_outer = 0.0
+    count = 0
+    for layer in layers:
+        count += float(layer.get("inner_radius", previous_outer)) > previous_outer
+        previous_outer = float(layer["outer_radius"])
+    return count
+
+
+def _openmc_radial_layer_cells(
+    layers: list[dict[str, Any]],
+    materials: dict[str, Any],
+    *,
+    x0: float = 0.0,
+    y0: float = 0.0,
+    axial_region: Any | None = None,
+    name_prefix: str = "",
+    cell_offset: int | None = None,
+) -> tuple[list[tuple[dict[str, Any] | None, Any]], Any]:
+    """Tile each declared annulus and its intervening void without changing radii."""
+    cells = []
+    previous_outer = 0.0
+    previous_surface = None
+    for index, layer in enumerate(layers):
+        inner = float(layer.get("inner_radius", previous_outer))
+        outer = float(layer["outer_radius"])
+        if not (math.isfinite(inner) and math.isfinite(outer) and inner >= previous_outer and outer > inner):
+            raise ConfigError(f"Layer {layer['name']} has overlapping or invalid radii ({inner}, {outer}).")
+        name = f"{name_prefix}{layer['name']}"
+        if cell_offset is not None:
+            name = f"{name}_{cell_offset + index}"
+        inner_surface = previous_surface
+        if inner > previous_outer:
+            inner_surface = openmc.ZCylinder(x0=x0, y0=y0, r=inner)
+            gap = openmc.Cell(name=f"{name}::inner_gap")
+            gap_region = -inner_surface if previous_surface is None else +previous_surface & -inner_surface
+            gap.region = gap_region if axial_region is None else gap_region & axial_region
+            cells.append((None, gap))
+        outer_surface = openmc.ZCylinder(x0=x0, y0=y0, r=outer)
+        cell = openmc.Cell(name=name)
+        if layer.get("material"):
+            cell.fill = materials[layer["material"]]
+        region = -outer_surface if inner_surface is None else +inner_surface & -outer_surface
+        cell.region = region if axial_region is None else region & axial_region
+        cells.append((layer, cell))
+        previous_outer = outer
+        previous_surface = outer_surface
+    return cells, previous_surface
+
+
 def _create_materials(config: CaseConfig):
     materials = {}
     for name, spec in config.materials.items():
@@ -897,23 +960,15 @@ def _create_openmc_pin_model(config: CaseConfig):
     materials = _create_materials(config)
     geometry = config.geometry
     layers = geometry["layers"]
-    surfaces = []
     cells = []
     cell_lookup = {}
 
-    for layer in layers:
-        surfaces.append(openmc.ZCylinder(r=layer["outer_radius"]))
-
-    previous_surface = None
-    for layer, surface in zip(layers, surfaces):
-        cell = openmc.Cell(name=layer["name"])
-        if layer.get("material"):
-            cell.fill = materials[layer["material"]]
-        cell.region = -surface if previous_surface is None else +previous_surface & -surface
-        previous_surface = surface
-        cell_lookup[layer["name"]] = cell
-        if layer.get("tag_as"):
-            cell_lookup[layer["tag_as"]] = cell
+    layer_cells, outermost_surface = _openmc_radial_layer_cells(layers, materials)
+    for layer, cell in layer_cells:
+        if layer is not None:
+            cell_lookup[layer["name"]] = cell
+            if layer.get("tag_as"):
+                cell_lookup[layer["tag_as"]] = cell
         cells.append(cell)
 
     pitch = geometry["pitch"]
@@ -924,7 +979,7 @@ def _create_openmc_pin_model(config: CaseConfig):
     top = openmc.YPlane(y0=pitch / 2.0, boundary_type=boundary)
     background = openmc.Cell(name=geometry.get("background_name", "background"))
     background.fill = materials[geometry["background_material"]]
-    background.region = +left & -right & +bottom & -top & +surfaces[-1]
+    background.region = +left & -right & +bottom & -top & +outermost_surface
     cells.append(background)
     cell_lookup[background.name] = background
 
@@ -963,20 +1018,15 @@ def _create_openmc_ring_core_model(config: CaseConfig):
             ]
         )
         for x_pos, y_pos in positions:
-            previous_surface = None
-            outermost_surface = None
-            for layer in channel_layers:
-                surface = openmc.ZCylinder(x0=x_pos, y0=y_pos, r=layer["outer_radius"])
-                cell = openmc.Cell(name=f"{layer['name']}_{len(root_cells)}")
-                if layer.get("material"):
-                    cell.fill = materials[layer["material"]]
-                cell.region = -surface if previous_surface is None else +previous_surface & -surface
+            layer_cells, outermost_surface = _openmc_radial_layer_cells(
+                channel_layers, materials, x0=x_pos, y0=y_pos, cell_offset=len(channel_surfaces) * len(channel_layers)
+            )
+            for layer, cell in layer_cells:
                 root_cells.append(cell)
-                cell_lookup[layer["name"]] = cell
-                if layer.get("tag_as") and layer["tag_as"] not in cell_lookup:
-                    cell_lookup[layer["tag_as"]] = cell
-                previous_surface = surface
-                outermost_surface = surface
+                if layer is not None:
+                    cell_lookup[layer["name"]] = cell
+                    if layer.get("tag_as") and layer["tag_as"] not in cell_lookup:
+                        cell_lookup[layer["tag_as"]] = cell
             if outermost_surface is not None:
                 channel_surfaces.append(+outermost_surface)
 
@@ -1047,21 +1097,21 @@ def _create_openmc_detailed_msr_model(config: CaseConfig, resolved) -> Any:
     channel_outer_regions = []
 
     for channel in resolved.channels:
-        previous_surface = None
-        outermost_surface = None
-        for layer in channel["layers"]:
-            surface = openmc.ZCylinder(x0=channel["x"], y0=channel["y"], r=layer["outer_radius"])
-            cell = openmc.Cell(name=f"{channel['name']}::{layer['name']}")
-            if layer.get("material"):
-                cell.fill = materials[layer["material"]]
-            cell.region = (-surface if previous_surface is None else +previous_surface & -surface) & axial_active_region
+        layer_cells, outermost_surface = _openmc_radial_layer_cells(
+            channel["layers"],
+            materials,
+            x0=channel["x"],
+            y0=channel["y"],
+            axial_region=axial_active_region,
+            name_prefix=f"{channel['name']}::",
+        )
+        for layer, cell in layer_cells:
             root_cells.append(cell)
-            if layer["name"] not in cell_lookup:
-                cell_lookup[layer["name"]] = cell
-            if layer.get("tag_as") and layer["tag_as"] not in cell_lookup:
-                cell_lookup[layer["tag_as"]] = cell
-            previous_surface = surface
-            outermost_surface = surface
+            if layer is not None:
+                if layer["name"] not in cell_lookup:
+                    cell_lookup[layer["name"]] = cell
+                if layer.get("tag_as") and layer["tag_as"] not in cell_lookup:
+                    cell_lookup[layer["tag_as"]] = cell
         if outermost_surface is not None:
             channel_outer_regions.append(+outermost_surface)
 

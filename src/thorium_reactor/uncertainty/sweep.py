@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import math
 import subprocess
@@ -103,6 +104,20 @@ def run_uncertainty_sweep_case(
         require_source_backed=require_source_backed,
         provenance=provenance,
     )
+    # Sample IDs are stable across seeds and input changes. They cannot establish
+    # that a saved eigenvalue belongs to this invocation's sampled inputs.
+    manifest["input_fingerprint"] = _input_fingerprint(
+        {
+            "model": DEFAULT_UNCERTAINTY_SWEEP_MODEL,
+            "case": config.data,
+            "benchmark": benchmark,
+            "uncertainty_inputs": inputs,
+            "seed": int(seed),
+            "sampler": sampler,
+        }
+    )
+    if resume:
+        _validate_resume_manifest(bundle, manifest)
     bundle.write_json("uncertainty_manifest.json", manifest)
     bundle.write_json("uncertainty_samples.json", {"samples": sample_definitions})
 
@@ -177,6 +192,24 @@ def run_uncertainty_sweep_case(
         bundle.write_json("benchmark_quality.json", root_summary["benchmark_quality"])
     bundle.write_metrics(root_summary.get("metrics", {}))
     return root_summary
+
+
+def _input_fingerprint(inputs: Mapping[str, Any]) -> str:
+    normalized = yaml.safe_dump(dict(inputs), sort_keys=True).encode("utf-8")
+    return hashlib.sha256(normalized).hexdigest()
+
+
+def _validate_resume_manifest(bundle: ResultBundle, manifest: dict[str, Any]) -> None:
+    path = bundle.root / "uncertainty_manifest.json"
+    samples_dir = bundle.root / "samples"
+    if not path.exists() and not (samples_dir.exists() and any(samples_dir.iterdir())):
+        return
+    try:
+        previous = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ConfigError("Cannot verify uncertainty resume inputs; start a new run.") from exc
+    if not isinstance(previous, dict) or previous.get("input_fingerprint") != manifest["input_fingerprint"]:
+        raise ConfigError("Uncertainty resume inputs differ or lack a verified fingerprint; start a new run.")
 
 
 def build_uncertainty_samples(
@@ -487,26 +520,33 @@ def _execute_sample(
     provenance: dict[str, Any] | None,
 ) -> dict[str, Any]:
     child_bundle = _child_bundle(root_bundle, str(sample["id"]))
+    perturbed_data = apply_sample_to_case(config.data, parameters, sample)
+    input_fingerprint = _input_fingerprint({"case": perturbed_data, "benchmark": benchmark, "sample": sample})
     summary_path = child_bundle.root / "summary.json"
     if resume and summary_path.exists():
         try:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             summary = {}
-        if summary.get("metrics", {}).get("keff") is not None:
+        if _sample_result(sample, child_bundle, summary)["status"] == "completed":
+            _validate_resume_sample(child_bundle, sample, input_fingerprint)
             return _sample_result(sample, child_bundle, summary, status="skipped_existing")
 
-    perturbed_data = apply_sample_to_case(config.data, parameters, sample)
+    # Invalidate old results before replacing any inputs. If the new solver
+    # fails (or is interrupted), an old eigenvalue must not inherit new inputs.
+    child_bundle.write_json("summary.json", {"case": config.name, "neutronics": {"status": "running"}, "metrics": {}})
     snapshot_path = child_bundle.root / "case_snapshot.yaml"
     snapshot_path.write_text(yaml.safe_dump(perturbed_data, sort_keys=False), encoding="utf-8")
-    if benchmark:
-        child_bundle.write_text("benchmark_snapshot.yaml", yaml.safe_dump(benchmark, sort_keys=False))
+    # Persist absence too: a rerun without benchmark inputs must not retain the
+    # previous run's benchmark and fail the next resume fingerprint check.
+    child_bundle.write_text("benchmark_snapshot.yaml", yaml.safe_dump(benchmark, sort_keys=False))
     sample_provenance = {
         "parent_run_id": root_bundle.run_id,
         "sample_id": sample["id"],
         "sample_kind": sample["kind"],
         "sample_index": sample["index"],
         "perturbations": sample["values"],
+        "input_fingerprint": input_fingerprint,
         "source_case_path": str(config.path),
         "source_benchmark_path": provenance.get("source_benchmark_path") if provenance else None,
     }
@@ -514,8 +554,13 @@ def _execute_sample(
     try:
         sample_config = load_case_config(snapshot_path)
         summary = executor(sample_config, child_bundle, benchmark, sample, sample_provenance)
+        child_bundle.write_json("summary.json", summary)
         return _sample_result(sample, child_bundle, summary)
     except Exception as exc:  # pragma: no cover - real solver failures are runtime-dependent
+        child_bundle.write_json(
+            "summary.json",
+            {"case": config.name, "neutronics": {"status": "failed", "error": str(exc)}, "metrics": {}},
+        )
         return {
             "index": sample["index"],
             "sample_id": sample["id"],
@@ -526,6 +571,25 @@ def _execute_sample(
             "values": sample["values"],
             "standardized": sample["standardized"],
         }
+
+
+def _validate_resume_sample(bundle: ResultBundle, sample: dict[str, Any], expected_fingerprint: str) -> None:
+    try:
+        provenance = json.loads((bundle.root / "provenance.json").read_text(encoding="utf-8"))
+        case_data = load_yaml(bundle.root / "case_snapshot.yaml")
+        benchmark_path = bundle.root / "benchmark_snapshot.yaml"
+        benchmark = load_yaml(benchmark_path) if benchmark_path.exists() else {}
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise ConfigError(
+            f"Cannot verify saved inputs for uncertainty sample {sample['id']}; start a new run."
+        ) from exc
+    actual_fingerprint = _input_fingerprint({"case": case_data, "benchmark": benchmark, "sample": sample})
+    if (
+        not isinstance(provenance, dict)
+        or provenance.get("input_fingerprint") != expected_fingerprint
+        or actual_fingerprint != expected_fingerprint
+    ):
+        raise ConfigError(f"Saved inputs differ for uncertainty sample {sample['id']}; start a new run.")
 
 
 def apply_sample_to_case(

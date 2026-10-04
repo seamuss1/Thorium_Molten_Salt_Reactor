@@ -2,6 +2,10 @@
 
 This note documents the equations, closures, and input-unit assumptions used by the repository as it exists today. It is intentionally scoped to the implemented reduced-order model, not a future higher-fidelity roadmap.
 
+See [Numerical method contracts and acceptance](numerical-integrity.md) for exact
+transient timing, diffusion-method naming, frozen calibration, one-way coupling,
+conservative precursor transport, and numerical rejection criteria.
+
 ## Scope
 
 The current workflow combines:
@@ -463,13 +467,13 @@ $$
 and also reports source fractions by configured loop segment. This remains the
 reduced-order screening handoff used by `physics_core`.
 
-## Native R-Z RKDG Scalar Transport
+## Native R-Z Finite-Volume Scalar Transport
 
-The additive `reactor transport <case>` path writes native high-fidelity
-precursor artifacts without replacing `physics_core`. Version 1 uses a
-structured axisymmetric R-Z mesh, polynomial-order DG field metadata, and an
-SSP-RK3 finite-volume/DG-compatible update for scalar advection,
-diffusion, decay, source, cleanup, and outlet terms:
+The additive `reactor transport <case>` path writes screening precursor artifacts
+without replacing `physics_core`. Version 2 uses one cell-average value per field
+on a structured axisymmetric R-Z mesh, first-order upwind advection, finite-volume
+diffusion, and SSP-RK3 time integration. Only `polynomial_order: 0` is supported;
+higher orders are rejected. The scalar equation is:
 
 $$
 \frac{\partial C_g}{\partial t}

@@ -115,6 +115,8 @@ def build_initial_precursor_state(
         "loop_segment_inventories": loop_segment_inventories,
         "loop_segments": segment_specs,
         "transport_model": transport_model,
+        "cleanup_rate_s": cleanup_rate,
+        "nominal_precursor_production_rate": sum(float(group["relative_yield_fraction"]) for group in groups),
     }
     core_inventory = sum(core_inventories)
     loop_inventory = sum(loop_inventories)
@@ -126,14 +128,19 @@ def build_initial_precursor_state(
         float(group["decay_constant_s"]) * loop_inventories[index] for index, group in enumerate(groups)
     )
     total_delayed_source = core_delayed_source + loop_delayed_source
+    cleanup_removal = _cleanup_removal_rate(state)
+    nominal_production = max(float(state["nominal_precursor_production_rate"]), 1.0e-12)
     state["steady_state"] = {
         "total_inventory": total_inventory,
         "core_inventory": core_inventory,
         "core_precursor_fraction": core_inventory / max(total_inventory, 1.0e-12),
         "core_delayed_neutron_source": core_delayed_source,
         "total_delayed_neutron_source": total_delayed_source,
-        "core_delayed_neutron_source_absolute_fraction": (core_delayed_source / max(total_delayed_source, 1.0e-12)),
-        "precursor_transport_loss_fraction": loop_delayed_source / max(total_delayed_source, 1.0e-12),
+        "nominal_precursor_production_rate": nominal_production,
+        "precursor_cleanup_removal_rate": cleanup_removal,
+        "core_delayed_neutron_source_absolute_fraction": core_delayed_source / nominal_production,
+        "precursor_transport_loss_fraction": (loop_delayed_source + cleanup_removal)
+        / max(total_delayed_source + cleanup_removal, 1.0e-12),
         "loop_segment_count": len(segment_specs) if transport_model == LOOP_SEGMENT_PRECURSOR_TRANSPORT_MODEL else 1,
     }
     return state
@@ -204,6 +211,10 @@ def step_precursor_state(
         "loop_segment_inventories": new_segments,
         "loop_segments": segment_specs,
         "transport_model": model,
+        "cleanup_rate_s": cleanup_rate,
+        "nominal_precursor_production_rate": state.get(
+            "nominal_precursor_production_rate", sum(float(group["relative_yield_fraction"]) for group in groups)
+        ),
         "steady_state": state["steady_state"],
     }
 
@@ -213,7 +224,7 @@ def summarize_precursor_state(
     groups: list[dict[str, float | str]],
     *,
     steady_state: dict[str, float] | None = None,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     reference = steady_state if steady_state is not None else state.get("steady_state")
     core_inventories = [float(value) for value in state["core_inventories"]]
     loop_inventories = [float(value) for value in state["loop_inventories"]]
@@ -229,6 +240,16 @@ def summarize_precursor_state(
     )
     total_delayed_source = core_delayed_source + loop_delayed_source
     segment_sources = _segment_delayed_sources(state, groups)
+    cleanup_removal = _cleanup_removal_rate(state)
+    disposition_rate = max(total_delayed_source + cleanup_removal, 1.0e-12)
+    nominal_production = max(
+        float(
+            state.get(
+                "nominal_precursor_production_rate", sum(float(group["relative_yield_fraction"]) for group in groups)
+            )
+        ),
+        1.0e-12,
+    )
 
     if reference:
         steady_total_inventory = max(float(reference["total_inventory"]), 1.0e-12)
@@ -246,11 +267,16 @@ def summarize_precursor_state(
         "core_delayed_neutron_source": _round_float(core_delayed_source),
         "loop_delayed_neutron_source": _round_float(loop_delayed_source),
         "total_delayed_neutron_source": _round_float(total_delayed_source),
+        "nominal_precursor_production_rate": nominal_production,
+        "absolute_source_fraction_basis": "nominal_precursor_production_before_cleanup",
+        "precursor_cleanup_removal_rate": _round_float(cleanup_removal),
         "core_delayed_neutron_source_fraction": _round_float(core_delayed_source / steady_core_source),
-        "core_delayed_neutron_source_absolute_fraction": _round_float(
-            core_delayed_source / max(total_delayed_source, 1.0e-12)
-        ),
-        "precursor_transport_loss_fraction": _round_float(loop_delayed_source / max(total_delayed_source, 1.0e-12)),
+        "core_delayed_neutron_source_absolute_fraction": _round_float(core_delayed_source / nominal_production),
+        "loop_delayed_neutron_source_absolute_fraction": _round_float(loop_delayed_source / nominal_production),
+        "cleanup_removal_absolute_fraction": _round_float(cleanup_removal / nominal_production),
+        "core_delayed_neutron_source_disposition_fraction": _round_float(core_delayed_source / disposition_rate),
+        "precursor_transport_loss_fraction": _round_float((loop_delayed_source + cleanup_removal) / disposition_rate),
+        "transport_loss_fraction_basis": "loop_decay_plus_cleanup_over_total_decay_plus_cleanup",
         "loop_segment_count": len(state.get("loop_segments") or []),
         "peak_loop_segment_delayed_neutron_source_fraction": _round_float(
             max(segment_sources) / max(total_delayed_source, 1.0e-12) if segment_sources else 0.0
@@ -486,6 +512,17 @@ def _segment_transport_rates(
         1.0 / max(float(segment["residence_fraction"]) * max(loop_residence_time_s, 1.0e-12), 1.0e-12)
         for segment in normalize_loop_segments(loop_segments)
     ]
+
+
+def _cleanup_removal_rate(state: dict[str, Any]) -> float:
+    cleanup_rate = max(float(state.get("cleanup_rate_s", 0.0)), 0.0)
+    if state.get("transport_model") == LOOP_SEGMENT_PRECURSOR_TRANSPORT_MODEL:
+        segments = normalize_loop_segments(state.get("loop_segments"))
+        inventories = _segment_inventories(state)
+        return cleanup_rate * sum(
+            float(segment["cleanup_weight"]) * inventory for segment, inventory in zip(segments, inventories)
+        )
+    return cleanup_rate * sum(float(value) for value in state["loop_inventories"])
 
 
 def _segment_delayed_sources(state: dict[str, Any], groups: list[dict[str, float | str]]) -> list[float]:

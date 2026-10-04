@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from thorium_reactor.config import CaseConfig, load_case_config, load_yaml, resolve_benchmark_path
-from thorium_reactor.paths import ResultBundle
+from thorium_reactor.config import CaseConfig, ConfigError, load_case_config, load_yaml, resolve_benchmark_path
+from thorium_reactor.paths import ResultBundle, case_config_path
 from thorium_reactor.runtime_context import build_runtime_context
 
 CASE_SNAPSHOT_NAME = "case_snapshot.yaml"
@@ -30,6 +30,7 @@ class BundleInputs:
 
 
 def ensure_bundle_inputs(repo_root: Path, bundle: ResultBundle, live_config: CaseConfig) -> BundleInputs:
+    _require_snapshot_integrity(bundle)
     case_snapshot_path = bundle.root / CASE_SNAPSHOT_NAME
     benchmark_snapshot_path = bundle.root / BENCHMARK_SNAPSHOT_NAME
     provenance_path = bundle.root / PROVENANCE_NAME
@@ -80,16 +81,18 @@ def ensure_bundle_inputs(repo_root: Path, bundle: ResultBundle, live_config: Cas
     return load_bundle_inputs(repo_root, bundle, live_config)
 
 
-def load_bundle_inputs(repo_root: Path, bundle: ResultBundle, live_config: CaseConfig) -> BundleInputs:
+def load_bundle_inputs(repo_root: Path, bundle: ResultBundle, live_config: CaseConfig | None = None) -> BundleInputs:
+    _require_snapshot_integrity(bundle)
     stored_provenance = _load_provenance(bundle.root / PROVENANCE_NAME)
     case_snapshot_path = bundle.root / CASE_SNAPSHOT_NAME
     benchmark_snapshot_path = bundle.root / BENCHMARK_SNAPSHOT_NAME
+    live_case_path = live_config.path if live_config is not None else case_config_path(repo_root, bundle.case_name)
 
     if case_snapshot_path.exists():
         config = load_case_config(case_snapshot_path)
         case_source = SNAPSHOT_SOURCE
     else:
-        config = live_config
+        config = live_config if live_config is not None else load_case_config(live_case_path)
         case_source = FALLBACK_SOURCE
 
     benchmark_source = NOT_CONFIGURED_SOURCE
@@ -115,7 +118,7 @@ def load_bundle_inputs(repo_root: Path, bundle: ResultBundle, live_config: CaseC
         provenance={
             "bundle_created_utc": stored_provenance.get("created_utc"),
             "case": {
-                "origin_path": stored_provenance.get("source_case_path") or _display_path(repo_root, live_config.path),
+                "origin_path": stored_provenance.get("source_case_path") or _display_path(repo_root, live_case_path),
                 "snapshot_path": CASE_SNAPSHOT_NAME if case_snapshot_path.exists() else None,
                 "source": case_source,
             },
@@ -130,7 +133,7 @@ def load_bundle_inputs(repo_root: Path, bundle: ResultBundle, live_config: CaseC
             "runtime": stored_provenance.get("runtime", {}),
             "schema_version": stored_provenance.get("schema_version", SNAPSHOT_SCHEMA_VERSION),
             "source_benchmark_path": benchmark_origin,
-            "source_case_path": stored_provenance.get("source_case_path") or _display_path(repo_root, live_config.path),
+            "source_case_path": stored_provenance.get("source_case_path") or _display_path(repo_root, live_case_path),
             "used_snapshot": case_source == SNAPSHOT_SOURCE or benchmark_source == SNAPSHOT_SOURCE,
             "benchmark": {
                 "origin_path": benchmark_origin,
@@ -139,6 +142,43 @@ def load_bundle_inputs(repo_root: Path, bundle: ResultBundle, live_config: CaseC
             },
         },
     )
+
+
+def bundle_snapshot_integrity_errors(bundle: ResultBundle) -> list[str]:
+    """Check recorded hashes against the portable snapshot files, including absence.
+
+    Legacy bundles without recorded hashes remain readable. Never replace a
+    historical hash with the current bytes: a mismatch invalidates provenance.
+    """
+    try:
+        stored = _load_provenance(bundle.root / PROVENANCE_NAME)
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"{PROVENANCE_NAME}: recorded provenance cannot be read ({exc})."]
+    if not isinstance(stored, dict):
+        return [f"{PROVENANCE_NAME}: recorded provenance must be a mapping."]
+    snapshots = stored.get("input_snapshots")
+    if not isinstance(snapshots, dict):
+        return []
+    errors = []
+    for kind, filename in (("case", CASE_SNAPSHOT_NAME), ("benchmark", BENCHMARK_SNAPSHOT_NAME)):
+        record = snapshots.get(kind)
+        if not isinstance(record, dict) or record.get("sha256") is None:
+            continue
+        path = bundle.root / filename
+        try:
+            actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError as exc:
+            errors.append(f"{filename}: recorded snapshot cannot be read ({exc}).")
+            continue
+        if actual_hash != record["sha256"]:
+            errors.append(f"{filename}: SHA-256 does not match the recorded provenance hash.")
+    return errors
+
+
+def _require_snapshot_integrity(bundle: ResultBundle) -> None:
+    errors = bundle_snapshot_integrity_errors(bundle)
+    if errors:
+        raise ConfigError("Bundle snapshot integrity failed: " + " ".join(errors))
 
 
 def _load_provenance(path: Path) -> dict[str, Any]:
