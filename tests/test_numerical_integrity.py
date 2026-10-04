@@ -14,6 +14,7 @@ from thorium_reactor.physics_core import (
     _solve_ring_advection_diffusion_decay,
     build_physics_core_summary,
 )
+from thorium_reactor.time_grid import transient_intervals
 from thorium_reactor.transient import (
     _build_transient_baseline,
     _integrate_transient,
@@ -25,6 +26,22 @@ from thorium_reactor.transient_sweep import _integrate_transient_ensemble, _reso
 from thorium_reactor.transport import TransportFieldSpec, build_rz_mesh, solve_transport_fields
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize("event_time", [0.3, math.nextafter(0.6, math.inf)])
+def test_time_grid_coalesces_regular_steps_with_declared_events(event_time):
+    intervals = list(transient_intervals(1.0, 0.1, [{"time_s": event_time}]))
+    assert len(intervals) == 11
+    assert sum(end == event_time for _, end, _ in intervals) == 1
+    assert [dt for _, _, dt in intervals[1:]] == pytest.approx([0.1] * 10)
+
+
+def test_time_grid_coalesces_roundoff_at_end_without_merging_distinct_events():
+    intervals = list(transient_intervals(0.9, 0.3, []))
+    assert [end for _, end, _ in intervals] == [0.0, 0.3, 0.6, 0.9]
+    later = math.nextafter(0.3, math.inf)
+    intervals = list(transient_intervals(0.9, 0.3, [{"time_s": 0.3}, {"time_s": later}]))
+    assert [end for _, end, _ in intervals] == [0.0, 0.3, later, 0.6, 0.9]
 
 
 @pytest.fixture
