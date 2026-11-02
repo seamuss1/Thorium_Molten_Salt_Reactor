@@ -19,7 +19,7 @@ COPY qa/ qa/
 COPY tests/ tests/
 COPY docker/ docker/
 COPY scripts/ scripts/
-COPY docker-compose.yml docker-compose.dev.yml docker-compose.openmc.yml ./
+COPY docker-compose.yml docker-compose.dev.yml ./
 COPY web/ui/package-lock.json web/ui/package-lock.json
 COPY web/README.md web/README.md
 COPY --from=frontend /ui/dist/ web/ui/dist/
