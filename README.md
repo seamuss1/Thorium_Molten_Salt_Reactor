@@ -200,7 +200,6 @@ These are pragmatic export adapters. They do not claim validated one-to-one tran
 - [benchmarks/README.md](benchmarks/README.md): benchmark evidence structure
 - [results/README.md](results/README.md): bundle anatomy
 - [resources/README.md](resources/README.md): README figure refresh notes
-- [experiments/gpu_viability/README.md](experiments/gpu_viability/README.md): GPU viability experiments
 - [archive/legacy_openmc_2022/README.md](archive/legacy_openmc_2022/README.md): preserved legacy prototype
 
 ## License
