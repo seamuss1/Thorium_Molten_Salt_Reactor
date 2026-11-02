@@ -2,8 +2,10 @@
 
 ## Runtime
 
-Everything runs in Docker Compose. There is no repo-local Python interpreter
-to bootstrap and no `reactor` console script on the host PATH.
+Everything runs in Docker Compose. There is no repo-local Python interpreter to
+bootstrap. The `reactor` console script exists wherever the package is
+installed -- inside the images and after a local editable install -- but not on
+the Windows host PATH.
 
 - `docker-compose.yml` is the release definition; `docker-compose.dev.yml`
   overlays a bind mount of the checkout onto `/workspace` so edits take effect
@@ -27,8 +29,8 @@ Add `-Bootstrap` to build the `app` image first:
 .\scripts\Enter-PytbknShell.cmd -Bootstrap
 ```
 
-Inside that shell, `python -m thorium_reactor.cli` and `python -m pytest` work
-directly.
+Inside that shell, `python -m thorium_reactor.cli`, `reactor` and
+`python -m pytest` all work directly.
 
 For POSIX hosts, or to skip the wrappers, use Compose directly:
 

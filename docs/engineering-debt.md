@@ -189,6 +189,21 @@ Characterization tests are a hard prerequisite. Also missing: tests for
 - No `py.typed`. Most modules have no docstring; `config.py` is ~1,050 LOC with
   one.
 
+### 12. SciPy is declared required but treated as optional
+
+`pyproject.toml` lists `scipy>=1.12` under `dependencies`, and
+`requirements.lock` pins it, so every supported install has it. But
+`depletion/matrix.py` wraps the import in `except Exception` and sets
+`scipy_sparse = None`, then branches on that at four sites and reports a
+`numpy_dense_expm_fallback` backend. That fallback is unreachable in any
+supported install, and no test exercises it -- the one occurrence of the label
+outside the module is a hardcoded string in a synthetic web fixture.
+
+Pick one: move SciPy to an optional extra and keep the fallback, or keep it
+required and delete the fallback, the branches and the `except Exception`
+import swallow (which rule 6 bans anyway; at minimum it should be
+`except ImportError`).
+
 ## Decisions owed by the maintainer
 
 1. **Quota/rate-limit subsystem** (~330 LOC in `permissions.py` plus the Admin
