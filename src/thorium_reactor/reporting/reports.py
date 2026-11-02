@@ -410,6 +410,16 @@ def generate_report(
             f"`{property_uncertainty.get('core_outlet_temperature_uncertainty_95_c', 'n/a')}`"
         )
         lines.append(f"- Source backing: `{property_uncertainty.get('property_source_backing', 'n/a')}`")
+        if property_uncertainty.get("heat_transfer_model"):
+            lines.append(f"- Heat-transfer uncertainty model: `{property_uncertainty['heat_transfer_model']}`")
+            lines.append(
+                f"- Heat-transfer applicability: {property_uncertainty.get('heat_transfer_applicability', 'n/a')}"
+            )
+            lines.append(
+                f"- Signed heat-transfer log sensitivities: `{property_uncertainty.get('heat_transfer_log_sensitivities', {})}`"
+            )
+        for key, reason in sorted(property_uncertainty.get("property_source_uncertainty_exclusions", {}).items()):
+            lines.append(f"- {key} source uncertainty excluded: {reason} Case override or default screening band used.")
         basis_by_property = property_uncertainty.get("basis_by_property", {})
         if isinstance(basis_by_property, dict) and basis_by_property:
             basis_parts = [f"{key}={value}" for key, value in sorted(basis_by_property.items())]

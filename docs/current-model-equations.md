@@ -6,7 +6,48 @@ See [Numerical method contracts and acceptance](numerical-integrity.md) for exac
 transient timing, diffusion-method naming, frozen calibration, one-way coupling,
 conservative precursor transport, and numerical rejection criteria.
 
-## Scope
+## Heat-transfer property uncertainty refresh
+
+The October 2026 literature refresh adds an optional local uncertainty screen.
+Enable it in a case draft only after checking applicability:
+
+```yaml
+property_uncertainty:
+  heat_transfer_model: dittus_boelter_fixed_mass_flux
+```
+
+For the existing turbulent heating closure, $Nu=0.023 Re^{0.8}Pr^{0.4}$,
+$Re=GD/\mu$, $Pr=c_p\mu/k$, and $h=Nu\,k/D$. At fixed mass flux $G$ and
+diameter $D$, this implies $h\propto k^{0.6}c_p^{0.4}\mu^{-0.4}$.
+The signed logarithmic sensitivities for density, heat capacity, conductivity,
+and viscosity are respectively $0,0.4,0.6,-0.4$. With independent small relative
+errors and a common coverage factor, the relative 95% property contribution is
+
+$$u_{h,95}=\sqrt{(0.4u_{c_p,95})^2+(0.6u_{k,95})^2+(0.4u_{\mu,95})^2}.$$
+
+The familiar 10% bands on those three properties give 8.246% for this screen.
+This derivation uses the implemented correlation, not fitted coefficients from
+the July 2026 SPECTRA/SUE paper. The optional result feeds the existing sweep's
+heat-sink multiplier (with its existing 0.09 one-sigma floor and explicit
+ensemble override precedence); it does not sample individual correlated properties
+or recalculate every local flow regime.
+
+Use only for fully developed turbulent internal flow with the heating exponent
+0.4 and fixed mass flux/diameter. The selector does not check Reynolds/Prandtl
+validity. Laminar/transition flow, cooling-exponent changes, natural circulation,
+flow-property feedback, covariance, correlation discrepancy, and system-level
+heat-exchanger resistance uncertainty require separate treatment. In particular,
+density need not have zero sensitivity when velocity or pump behavior replaces
+fixed mass flux as the constraint.
+
+The default `legacy_rss_screen` retains $\sqrt{u_{c_p}^2+u_k^2}$ as a heuristic.
+Existing outlet-temperature and flow uncertainty screens are unchanged. Neither
+screen establishes a calibrated plant-level confidence interval. Source bands
+outside a confirmed temperature range are excluded from automatic reuse; reports
+identify the fallback to an assumption/default, which does not bound extrapolation
+error. Source composition must still be independently appropriate.
+
+## Implemented model scope
 
 The current workflow combines:
 

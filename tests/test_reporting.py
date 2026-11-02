@@ -20,6 +20,29 @@ def _section(report: str, heading: str) -> str:
     return report[start:next_heading]
 
 
+def test_property_uncertainty_report_exposes_scope_and_excluded_source(tmp_path: Path) -> None:
+    (tmp_path / "summary.json").write_text(
+        json.dumps(
+            {
+                "property_uncertainty": {
+                    "heat_transfer_model": "dittus_boelter_fixed_mass_flux",
+                    "heat_transfer_applicability": "Fixed mass flux; flow regime is not checked.",
+                    "heat_transfer_log_sensitivities": {"dynamic_viscosity": -0.4},
+                    "property_source_uncertainty_exclusions": {"density": "Outside source temperature range."},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    config = load_case_config(REPO_ROOT / "configs/cases/example_pin/case.yaml")
+    report = generate_report("example_pin", config.data, tmp_path / "summary.json", None, None)
+    section = _section(report, "## Property Uncertainty")
+    assert "dittus_boelter_fixed_mass_flux" in section
+    assert "flow regime is not checked" in section
+    assert "-0.4" in section
+    assert "density source uncertainty excluded" in section
+
+
 def test_generate_report_includes_benchmark_evidence_and_novelty_tracks() -> None:
     scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)

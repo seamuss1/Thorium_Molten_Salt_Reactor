@@ -717,6 +717,11 @@ def _validate_optional_property_uncertainty_settings(path: Path, property_uncert
         return
     if not isinstance(property_uncertainty, Mapping):
         raise ConfigError(f"Case config {path} optional 'property_uncertainty' section must be a mapping.")
+    if property_uncertainty.get("heat_transfer_model", "legacy_rss_screen") not in (
+        "legacy_rss_screen",
+        "dittus_boelter_fixed_mass_flux",
+    ):
+        raise ConfigError(f"Case config {path} property_uncertainty.heat_transfer_model is unsupported.")
     for field_name in (
         "confidence_level",
         "density_uncertainty_95_fraction",
