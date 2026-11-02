@@ -47,8 +47,6 @@ inputs. The pinned base digest identifies the bundled data files; the index hash
 alone does not verify externally replaced HDF5 files. Rebuild comparisons should
 compare manifests, not expect identical image layers or timestamps.
 
-Thermochimica, SaltProc, and Moltres services use the shared app image as adapters;
-their external executables remain optional, separately provisioned integrations.
 The CPU image supports the built-in geometry renderers; Blender and FFmpeg are
 optional external render tools, not part of its supported dependency closure.
 

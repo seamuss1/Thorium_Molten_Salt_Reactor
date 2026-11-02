@@ -911,26 +911,6 @@ def generate_report(
                 f"pending=`{group.get('pending', 0)}`, blocked=`{group.get('blocked', 0)}`"
             )
 
-    integrations = summary.get("integrations", {})
-    if integrations:
-        lines.extend(["", "## External Integrations", ""])
-        for name in sorted(integrations):
-            item = integrations[name]
-            lines.append(f"- `{name}` status: `{item.get('status', 'n/a')}`")
-            if item.get("execution_mode"):
-                lines.append(f"- `{name}` execution mode: `{item.get('execution_mode', 'n/a')}`")
-            lines.append(f"- `{name}` input path: `{item.get('input_path', 'n/a')}`")
-            if item.get("handoff_path"):
-                lines.append(f"- `{name}` handoff path: `{item.get('handoff_path', 'n/a')}`")
-            if item.get("application"):
-                lines.append(f"- `{name}` application: `{item.get('application', 'n/a')}`")
-            if item.get("sequence"):
-                lines.append(f"- `{name}` sequence: `{item.get('sequence', 'n/a')}`")
-            if item.get("command"):
-                lines.append(f"- `{name}` command: `{item.get('command')}`")
-            if item.get("error"):
-                lines.append(f"- `{name}` note: {item.get('error')}")
-
     lines.extend(["", "## Evidence Sources", ""])
     if benchmark.get("evidence"):
         for item in benchmark_traceability.get("evidence", []):

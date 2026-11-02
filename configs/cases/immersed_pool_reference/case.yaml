@@ -405,15 +405,6 @@ graphite_lifetime:
   hexagonal_prism_assembly_credit: 0.08
   target_lifespan_years: 8.0
   capacity_factor: 0.85
-integrations:
-  moose:
-    application: app-opt
-    executioner: Transient
-    end_time: 120.0
-    dt: 1.0
-  scale:
-    sequence: csas6
-    executable: scalerte
 validation_targets:
   expected_cells:
     metric: expected_cells

@@ -30,9 +30,7 @@ a completed finite result and matching saved inputs. Before rerunning a child,
 its old result is invalidated; execution failure records a failed summary without
 stale metrics. Older sweeps without fingerprints require a new run.
 
-Explicit solver execution failures return nonzero CLI status for benchmarks and
-external integrations. Export-only integration commands remain successful when
-their requested artifacts were generated.
+Explicit solver execution failures return nonzero CLI status for benchmarks.
 
 ## Bundle Lifecycle
 
@@ -48,7 +46,6 @@ their requested artifacts were generated.
 | `transport` | Extends or creates bundle | `transport_mesh.json`, `transport_summary.json`, `transport_solution.npz`, finite-volume metrics folded into `summary.json` |
 | `deplete` | Extends or creates bundle | `depletion_chain.json`, `depletion_summary.json`, `depletion_history.json`, `depletion_matrix.npz`, depletion metrics folded into `summary.json` |
 | `economics` | Extends or creates bundle | `finance.json`, `schedule.json`, `cash_flow.csv`, `cost_breakdown.csv`, `project_plan.json`, finance plots |
-| integration exporters | Extends or creates bundle | `<tool>_integration.json`, `<tool>_handoff.json`, generated input decks |
 
 ## Core Files
 

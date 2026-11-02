@@ -37,7 +37,6 @@ The schema is intentionally plain YAML. Most fields are optional, but these sect
 | `economics` | Cost basis and scenario modifiers | `economics` for commercial cases |
 | `project_schedule` | Planning phases, durations, and dependencies | `economics` schedule outputs |
 | `validation_targets` | Acceptance bands mapped to metrics or build-manifest fields | `validate`, `report`, web status |
-| `integrations` | External-code command hints and deck metadata | MOOSE, SCALE, Thermochimica, SaltProc, Moltres exporters |
 
 ## Editing Rules
 
@@ -61,7 +60,7 @@ Validation targets such as `expected_cells` and `channel_count` intentionally pi
 
 ## Naming And Run IDs
 
-When a command does not receive `--run-id`, the CLI creates a timestamp-like run id. Reusing an existing bundle is only allowed by commands that extend results, such as `transient`, `transient-sweep`, `economics`, and integration exporters.
+When a command does not receive `--run-id`, the CLI creates a timestamp-like run id. Reusing an existing bundle is only allowed by commands that extend results, such as `transient`, `transient-sweep`, `economics`, `transport`, and `deplete`.
 
 Examples:
 

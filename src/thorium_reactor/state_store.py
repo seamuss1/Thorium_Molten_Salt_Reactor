@@ -54,7 +54,6 @@ def build_state_store(
         },
         "processing": {
             "config": json.loads(json.dumps(config.data.get("processing", {}))) if hasattr(config, "data") else {},
-            "integrations": json.loads(json.dumps(summary.get("integrations", {}))),
         },
         "source_term": {
             "offgas_fraction": chemistry.get("gas_stripping_efficiency"),
@@ -107,15 +106,6 @@ def _build_event_log(summary: dict[str, Any]) -> list[dict[str, Any]]:
                 "event_count": transient.get("event_count"),
             }
         )
-    if summary.get("integrations"):
-        for name, payload in summary["integrations"].items():
-            events.append(
-                {
-                    "event": "integration_recorded",
-                    "tool": name,
-                    "status": payload.get("status"),
-                }
-            )
     return events
 
 

@@ -8,12 +8,3 @@ services:
   openmc:
     volumes:
     - ./:/workspace
-  thermochimica:
-    volumes:
-    - ./:/workspace
-  saltproc:
-    volumes:
-    - ./:/workspace
-  moltres:
-    volumes:
-    - ./:/workspace

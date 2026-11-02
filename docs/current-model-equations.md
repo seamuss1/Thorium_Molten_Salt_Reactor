@@ -721,26 +721,6 @@ $$
 
 where `rho_depletion` depends on fissile and protactinium inventory fractions, and `rho_chemistry` depends on redox and impurity state.
 
-## MOOSE And SCALE Integration Surface
-
-The repository now exposes two external solver handoff paths:
-
-- `reactor moose <case>`
-- `reactor scale <case>`
-
-The current implementation does three things:
-
-1. ensures a steady-state summary exists for the case,
-2. exports a proxy input deck plus a structured handoff JSON into the result bundle,
-3. optionally tries to execute the external solver if the configured executable is available on `PATH`.
-
-The exported decks are intentionally lightweight:
-
-- the MOOSE deck carries steady-state thermal-hydraulic summary values into a simple input-file scaffold,
-- the SCALE deck carries case identity, sequence choice, particle/batch settings, and material inventory into a simple SCALE-style scaffold.
-
-This is an integration adapter layer, not a validated mesh/material translation or a benchmark-quality external deck generator.
-
 ## Current Boundaries And Limitations
 
 This document describes the implemented reduced-order model only. It does not imply:

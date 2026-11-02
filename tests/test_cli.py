@@ -71,24 +71,6 @@ def test_cli_registers_transient_command() -> None:
     assert namespace.scenario == "load_follow_step"
 
 
-def test_cli_registers_external_integration_commands() -> None:
-    parser = build_parser()
-    moose = parser.parse_args(["moose", "immersed_pool_reference", "--run-external"])
-    scale = parser.parse_args(["scale", "tmsr_lf1_core"])
-    thermochimica = parser.parse_args(["thermochimica", "tmsr_lf1_core"])
-    saltproc = parser.parse_args(["saltproc", "tmsr_lf1_core"])
-    moltres = parser.parse_args(["moltres", "immersed_pool_reference", "--run-external"])
-
-    assert moose.command == "moose"
-    assert moose.run_external is True
-    assert scale.command == "scale"
-    assert scale.run_external is False
-    assert thermochimica.command == "thermochimica"
-    assert saltproc.command == "saltproc"
-    assert moltres.command == "moltres"
-    assert moltres.run_external is True
-
-
 def test_cli_registers_transient_sweep_command() -> None:
     parser = build_parser()
     namespace = parser.parse_args(

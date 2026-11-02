@@ -947,62 +947,6 @@ def test_report_includes_transient_and_depletion_sections() -> None:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
 
-def test_report_includes_external_integration_section() -> None:
-    scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-integrations" / uuid.uuid4().hex
-    scratch_root.mkdir(parents=True, exist_ok=True)
-    try:
-        summary_path = scratch_root / "summary.json"
-        summary_path.write_text(
-            json.dumps(
-                {
-                    "result_dir": str(scratch_root),
-                    "neutronics": {"status": "dry-run"},
-                    "metrics": {"keff": 1.01},
-                    "integrations": {
-                        "moose": {
-                            "status": "exported",
-                            "input_path": "moose_input.i",
-                            "handoff_path": "moose_handoff.json",
-                            "application": "app-opt",
-                        },
-                        "scale": {
-                            "status": "exported_missing_runtime",
-                            "input_path": "scale_input.inp",
-                            "handoff_path": "scale_handoff.json",
-                            "sequence": "csas6",
-                            "error": "Executable 'scalerte' was not found on PATH.",
-                        },
-                    },
-                }
-            ),
-            encoding="utf-8",
-        )
-
-        report = generate_report(
-            "immersed_pool_reference",
-            {
-                "reactor": {
-                    "name": "Immersed Pool MSR Reference",
-                    "family": "reference-inspired immersed pool MSR demonstrator",
-                    "stage": "full-core",
-                    "design_power_mwth": 8.0,
-                    "benchmark": "benchmarks/tmsr_lf1/benchmark.yaml",
-                }
-            },
-            summary_path,
-            None,
-            None,
-        )
-
-        assert "## External Integrations" in report
-        assert "`moose` status" in report
-        assert "moose_input.i" in report
-        assert "moose_handoff.json" in report
-        assert "csas6" in report
-    finally:
-        shutil.rmtree(scratch_root, ignore_errors=True)
-
-
 def test_report_includes_runtime_context_and_benchmark_residuals() -> None:
     scratch_root = Path(__file__).resolve().parents[1] / ".tmp" / "test-reporting-runtime-context" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)

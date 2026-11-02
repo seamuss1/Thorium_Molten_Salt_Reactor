@@ -257,7 +257,7 @@ def test_web_run_detail_exposes_generated_data_and_plot_artifacts() -> None:
         bundle.write_json("flow_summary.json", {"reduced_order": {"primary_mass_flow_kg_s": 12.0}})
         bundle.write_json("finance.json", {"status": "completed"})
         bundle.write_text("cash_flow.csv", "month,cumulative_capitalized_cost_usd\n0,100\n")
-        bundle.write_json("saltproc_integration.json", {"status": "exported"})
+        bundle.write_json("chemistry_summary.json", {"status": "exported"})
         plot_path = bundle.plots_dir / "summary.svg"
         plot_path.write_text("<svg></svg>", encoding="utf-8")
 
@@ -269,7 +269,7 @@ def test_web_run_detail_exposes_generated_data_and_plot_artifacts() -> None:
             "cash_flow.csv",
             "finance.json",
             "flow_summary.json",
-            "saltproc_integration.json",
+            "chemistry_summary.json",
             "summary.svg",
         }.issubset(labels)
     finally:

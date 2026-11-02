@@ -176,20 +176,6 @@ Key science references and design reasoning are in:
 - [docs/reactor-taxonomy-and-flagship.md](docs/reactor-taxonomy-and-flagship.md)
 - [docs/openmsr-review.md](docs/openmsr-review.md)
 
-## External Tool Hooks
-
-The CLI can export integration inputs and handoff metadata for MOOSE/Cardinal-style workflows, SCALE, Thermochimica, SaltProc, and Moltres:
-
-```powershell
-.\scripts\Run-Reactor.cmd moose immersed_pool_reference
-.\scripts\Run-Reactor.cmd scale tmsr_lf1_core
-.\scripts\Run-Reactor.cmd thermochimica tmsr_lf1_core
-.\scripts\Run-Reactor.cmd saltproc tmsr_lf1_core
-.\scripts\Run-Reactor.cmd moltres immersed_pool_reference
-```
-
-These are pragmatic export adapters. They do not claim validated one-to-one translations into those external codes.
-
 ## Development Links
 
 - [AGENTS.md](AGENTS.md): local runtime and workflow rules
