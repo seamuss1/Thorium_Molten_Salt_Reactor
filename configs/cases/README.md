@@ -19,7 +19,7 @@ Each case is intentionally self-contained. The CLI snapshots the YAML into every
 | [`msre_u233_zero_power`](msre_u233_zero_power/case.yaml) | historic benchmark | U-233-focused zero-power MSRE harness | `.\scripts\Run-Reactor.cmd validate msre_u233_zero_power` |
 | [`tmsr_lf1_core`](tmsr_lf1_core/case.yaml) | full-core surrogate | Detailed TMSR-LF1-inspired CSG, thermal outputs, transient proxy, and uncertainty sweep | `.\scripts\Run-Reactor.cmd render tmsr_lf1_core` |
 | [`immersed_pool_reference`](immersed_pool_reference/case.yaml) | full-core demonstrator | Immersed-pool geometry, primary loop, heat-sink-loss transient, and flow animation assets | `.\scripts\Run-Reactor.cmd transient immersed_pool_reference --scenario partial_heat_sink_loss` |
-| [`flagship_grid_msr`](flagship_grid_msr/case.yaml) | commercial planning | 300 MWe grid target with plant economics plus stress transient, GPU sweep, native transport, and multi-zone depletion workloads | `.\scripts\Run-Reactor.cmd transient-sweep flagship_grid_msr --scenario flagship_grid_stress --prefer-gpu` |
+| [`flagship_grid_msr`](flagship_grid_msr/case.yaml) | commercial planning | 300 MWe grid target with plant economics plus stress transient, GPU sweep, native transport, and multi-zone depletion workloads | `.\scripts\Run-Reactor.cmd transient-sweep flagship_grid_msr --scenario flagship_grid_stress --backend auto` |
 
 ## Case Anatomy
 

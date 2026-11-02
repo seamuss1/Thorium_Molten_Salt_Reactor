@@ -334,8 +334,6 @@ def test_web_sweep_backend_selection_reaches_the_cli() -> None:
 
         assert "--backend" in command
         assert command[command.index("--backend") + 1] == requested
-        # The dead alias must not be forwarded alongside the real control.
-        assert "--prefer-gpu" not in command
 
 
 def test_web_sweep_rejects_unknown_backend() -> None:
@@ -347,19 +345,6 @@ def test_web_sweep_rejects_unknown_backend() -> None:
     )
 
     assert response.status_code == 422
-
-
-def test_web_legacy_prefer_gpu_false_selects_a_cpu_backend() -> None:
-    """An old client that unchecks "use GPU" must get a CPU backend.
-
-    Previously ``prefer_gpu`` mapped to ``--prefer-gpu``, an alias for the
-    ``auto`` that ``--backend`` already defaulted to, so unchecking it changed
-    nothing and the sweep still ran on the GPU.
-    """
-    draft = SimulationDraft(case_name="example_pin", phases=["transient-sweep"], prefer_gpu=False)
-    command = build_cli_command(draft, "transient-sweep")
-
-    assert command[command.index("--backend") + 1] == "numpy"
 
 
 def test_web_fake_run_records_status_and_streams_events(monkeypatch) -> None:
@@ -378,7 +363,6 @@ def test_web_fake_run_records_status_and_streams_events(monkeypatch) -> None:
                 "phases": ["run", "validate", "report"],
                 "sweep_samples": 8,
                 "sweep_seed": 1,
-                "prefer_gpu": False,
             },
         )
         assert response.status_code == 202

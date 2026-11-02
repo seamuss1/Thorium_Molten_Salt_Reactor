@@ -791,7 +791,6 @@ def _validate_optional_loop_segments(path: Path, loop_segments: Any) -> None:
         for field_name in (
             "residence_fraction",
             "volume_fraction",
-            "decay_heat_fraction",
             "cleanup_weight",
             "cleanup_fraction",
         ):

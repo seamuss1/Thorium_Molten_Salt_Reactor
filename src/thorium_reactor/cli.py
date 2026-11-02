@@ -102,11 +102,6 @@ def build_parser() -> argparse.ArgumentParser:
             )
             command.add_argument("--seed", type=int, default=42, help="Random seed for the ensemble perturbations.")
             command.add_argument(
-                "--prefer-gpu",
-                action="store_true",
-                help="Deprecated alias for --backend auto. Cannot be combined with an explicit --backend.",
-            )
-            command.add_argument(
                 "--backend",
                 default="auto",
                 choices=["auto", "python", "numpy", "torch-cpu", "torch-xpu"],
@@ -371,7 +366,6 @@ def main(argv: list[str] | None = None) -> int:
                 scenario_name=args.scenario,
                 samples=args.samples,
                 seed=args.seed,
-                prefer_gpu=args.prefer_gpu,
                 backend=args.backend,
                 dtype=args.dtype,
                 provenance=provenance,

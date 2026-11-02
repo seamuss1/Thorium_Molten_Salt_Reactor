@@ -113,9 +113,6 @@ class SimulationDraft(BaseModel):
     # orders of magnitude slower and would blow the job budget from a browser.
     sweep_backend: Literal["auto", "numpy", "torch-cpu", "torch-xpu"] = "auto"
     sweep_dtype: Literal["float32", "float64"] = "float32"
-    #: Deprecated. Retained so existing clients keep working; ``sweep_backend``
-    #: is the control that actually selects a backend.
-    prefer_gpu: bool = True
 
 
 class AuthSession(BaseModel):

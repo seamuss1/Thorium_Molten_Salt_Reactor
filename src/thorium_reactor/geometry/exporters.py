@@ -528,16 +528,11 @@ def _resolve_ffmpeg_binary() -> str | None:
         return ffmpeg_path
 
     runtime_roots: list[Path] = []
-    for env_name in ("PYTBKN_ENV", "CONDA_PREFIX"):
-        value = os.environ.get(env_name)
-        if value:
-            runtime_roots.append(Path(value))
+    conda_prefix = os.environ.get("CONDA_PREFIX")
+    if conda_prefix:
+        runtime_roots.append(Path(conda_prefix))
 
     runtime_roots.append(Path(sys.executable).resolve().parent)
-
-    repo_root = os.environ.get("REPO_ROOT")
-    if repo_root:
-        runtime_roots.append(Path(repo_root) / ".runtime-env")
 
     seen: set[Path] = set()
     for root in runtime_roots:
