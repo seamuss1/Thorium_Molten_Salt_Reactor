@@ -45,6 +45,25 @@ def build_property_uncertainty_summary(
     )
     flow_uncertainty = math.sqrt(density * density + viscosity * viscosity)
     heat_transfer_uncertainty = math.sqrt(cp * cp + conductivity * conductivity)
+    heat_transfer_model = settings.get("heat_transfer_model", "legacy_rss_screen")
+    sensitivities: dict[str, float] = {}
+    applicability = "Legacy heuristic; not a heat-transfer correlation uncertainty estimate."
+    if heat_transfer_model == "dittus_boelter_fixed_mass_flux":
+        # Nu = 0.023 Re**0.8 Pr**0.4; at fixed mass flux and diameter,
+        # h is proportional to k**0.6 cp**0.4 mu**-0.4.
+        sensitivities = {"density": 0.0, "cp": 0.4, "thermal_conductivity": 0.6, "dynamic_viscosity": -0.4}
+        heat_transfer_uncertainty = math.sqrt(
+            sum((sensitivities[key] * uncertainties[key]) ** 2 for key in uncertainties)
+        )
+        applicability = (
+            "Local first-order property screen for fully developed turbulent internal flow, "
+            "fixed mass flux and diameter, heating exponent 0.4. Independent small property "
+            "errors at a common 95% coverage are assumed. Flow regime is not checked here; "
+            "exclude laminar, transition, natural-circulation and variable-flow applications. "
+            "Correlation error, property covariance and whole-loop feedback are not included."
+        )
+    elif heat_transfer_model != "legacy_rss_screen":
+        raise ValueError(f"Unknown property uncertainty heat_transfer_model: {heat_transfer_model}")
     result = {
         "model": str(settings.get("model", "tmsr_sf0_property_uncertainty_screen")),
         "confidence_level": _setting_float(settings, "confidence_level", 0.95),
@@ -54,6 +73,10 @@ def build_property_uncertainty_summary(
         "dynamic_viscosity_uncertainty_95_fraction": _round_float(viscosity),
         "flow_uncertainty_95_fraction": _round_float(flow_uncertainty),
         "heat_transfer_uncertainty_95_fraction": _round_float(heat_transfer_uncertainty),
+        "heat_transfer_model": heat_transfer_model,
+        "heat_transfer_log_sensitivities": sensitivities,
+        "heat_transfer_applicability": applicability,
+        "heat_transfer_review_source": "https://doi.org/10.1080/00295450.2026.2700691",
         "core_outlet_temperature_uncertainty_95_c": _round_float(outlet_uncertainty_c),
         "basis": _property_uncertainty_basis_text(uncertainty_basis),
         "basis_by_property": uncertainty_basis,
@@ -62,6 +85,7 @@ def build_property_uncertainty_summary(
             key: _round_float(value) for key, value in source_summary["uncertainties"].items()
         },
         "property_source_applicability": source_summary["applicability"],
+        "property_source_uncertainty_exclusions": source_summary.get("uncertainty_exclusions", {}),
         "source": "https://doi.org/10.1016/j.net.2023.11.016",
     }
     if source_summary.get("error"):
@@ -317,6 +341,7 @@ def _primary_property_source_summary(config: Any) -> dict[str, Any]:
         source_records = {}
     uncertainties: dict[str, float] = {}
     applicability: dict[str, dict[str, Any]] = {}
+    exclusions: dict[str, str] = {}
     for key in DEFAULT_PROPERTY_UNCERTAINTIES_95:
         source = source_records.get(key)
         if not isinstance(source, Mapping):
@@ -324,9 +349,15 @@ def _primary_property_source_summary(config: Any) -> dict[str, Any]:
         uncertainty = source.get("uncertainty_95_fraction")
         if uncertainty is not None:
             try:
-                uncertainties[key] = float(uncertainty)
+                value = float(uncertainty)
+                if not math.isfinite(value) or value < 0.0:
+                    exclusions[key] = "Source uncertainty is not finite and nonnegative."
+                elif source.get("range_status") != "in_range":
+                    exclusions[key] = "Source uncertainty lacks confirmed in-range temperature applicability."
+                else:
+                    uncertainties[key] = value
             except (TypeError, ValueError):
-                pass
+                exclusions[key] = "Source uncertainty is not numeric."
         applicability[key] = {
             "provider": source.get("provider"),
             "source_kind": source.get("source_kind"),
@@ -341,6 +372,7 @@ def _primary_property_source_summary(config: Any) -> dict[str, Any]:
         "source_backing": properties.get("source_backing", "unavailable"),
         "uncertainties": uncertainties,
         "applicability": applicability,
+        "uncertainty_exclusions": exclusions,
     }
 
 

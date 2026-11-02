@@ -11,6 +11,53 @@ transport explicit in reports and metrics with core and external-loop segment
 source fractions. These implemented equations are documented in
 `docs/current-model-equations.md`.
 
+## October 28, 2026 Update
+
+This targeted refresh checks primary publisher and laboratory records available
+through October 28, 2026. It is not an exhaustive systematic review. The earlier
+addenda below are historical; the current numerical contract in
+[numerical-integrity.md](numerical-integrity.md) takes precedence over their
+older descriptions of adjoint weighting and coupled behavior.
+
+| Source and evidence accessed | Finding relevant to this repository | Action |
+| --- | --- | --- |
+| Stempniewicz et al., [MSRE SPECTRA/SUE property sensitivity](https://doi.org/10.1080/00295450.2026.2700691), published online July 29, 2026; publisher abstract | Conductivity dominates the reported HTC sensitivity; viscosity contributes negatively and heat capacity positively. These rankings belong to the studied conditions. | Add an opt-in correlation-based property screen that includes viscosity and publishes signed sensitivities. Do not treat the paper's rankings as universal coefficients. |
+| Walker et al., [structural coherence and ML interatomic potentials](https://doi.org/10.1007/s10765-026-03842-3), October 2026; [ORNL abstract and publication metadata](https://impact.ornl.gov/en/publications/integration-of-a-structural-coherence-model-with-a-semi-universal/) | A chloride-salt conductivity proof of concept combines atomistic structure with thermal-property inputs; experimental comparison remains important. | Retain composition-specific property provenance. Do not transplant chloride predictions into fluoride fuel cases. |
+| [Development of integrated system-level analysis capabilities in SAM](https://doi.org/10.1016/j.nucengdes.2026.115082), October 2026; [ORNL publication record](https://impact.ornl.gov/en/publications/development-of-integrated-system-level-analysis-capabilities-in-s/) | Integrated species, precursor drift, decay heat, corrosion and thermal hydraulics remain active system-model developments. | Keep coupled species/chemistry work deferred; the existing one-way screening model does not acquire SAM capability from this review. |
+| [Active-learned potentials in thorium molten salts](https://doi.org/10.1103/4dsc-6432), June 2026; publisher abstract | Actinide-induced structure changes can increase viscosity and reduce conductivity relative to the carrier salt. | Do not replace fuel-mixture properties with carrier-salt constants on the basis of composition similarity alone. No numerical fit was imported. |
+
+The accessible abstracts and metadata support the decisions above, but do not
+provide a complete case-matched coefficient dataset. No new plant operating
+point, cross-section library, corrosion rate, or validation acceptance band is
+inferred from them. The [official ORNL MSD site](https://msd.ornl.gov/) confirms
+the database naming and property role; it does not prove that a newer dataset
+has been downloaded into this repository.
+
+Implemented changes:
+
+- `property_uncertainty.heat_transfer_model: dittus_boelter_fixed_mass_flux`
+  enables a first-order sensitivity screen derived from the repository's existing
+  turbulent heating correlation. It includes viscosity and feeds the existing
+  transient-sweep heat-sink multiplier, subject to its existing floor and explicit
+  ensemble overrides. This is a local property screen,
+  not reproduction or validation of SPECTRA/SUE.
+- The default remains `legacy_rss_screen`. No canonical case is opted in without
+  establishing its flow regime and fixed-flow assumptions. Reports now state the
+  selected model, signed sensitivities and applicability limits.
+- Source uncertainty is automatically reused only when finite, nonnegative and
+  explicitly within its temperature range. Extrapolated/unknown-range uncertainty
+  falls back to an explicit case assumption or the existing default band, with
+  the exclusion reason recorded. The fallback is not a validated extrapolation
+  uncertainty, nor a conservative bound. Central property evaluation still obeys
+  the existing provider's extrapolation policy. Temperature applicability alone
+  does not establish composition applicability.
+
+See [the implemented equations](current-model-equations.md#heat-transfer-property-uncertainty-refresh)
+for derivation, assumptions and opt-in configuration. Tests compare the signed
+elasticities with direct perturbations of the dimensional correlation and cover
+source exclusion, explicit overrides, and report visibility. These are software
+verification checks; MSRE/plant validation maturity is unchanged.
+
 ## July 3, 2026 Addendum
 
 This follow-up screened recent primary sources from the last 24 months with

@@ -151,6 +151,12 @@ This repository is useful because it exposes uncertainty instead of pretending i
 
 ## Freshness Review
 
+The scientific basis was refreshed on 2026-10-28: see the
+[October literature update](docs/recent-msr-simulation-literature.md#october-28-2026-update)
+for an opt-in viscosity-aware heat-transfer uncertainty screen, source-band
+applicability checks, and remaining coupled-model gaps. This does not change
+benchmark readiness or establish new plant validation.
+
 The README was reviewed against the local repository state on 2026-05-19. The main stale item was the old physics overlay figure; it has been replaced with the full flagship plant render above.
 
 | Area | Current status | Needs update when |

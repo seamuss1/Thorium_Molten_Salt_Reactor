@@ -1,5 +1,8 @@
+import math
 from copy import deepcopy
 from pathlib import Path
+
+import pytest
 
 from thorium_reactor.config import load_case_config
 from thorium_reactor.literature_models import (
@@ -10,6 +13,77 @@ from thorium_reactor.literature_models import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_turbulent_heat_transfer_screen_matches_correlation_perturbations() -> None:
+    config = load_case_config(REPO_ROOT / "configs/cases/immersed_pool_reference/case.yaml")
+    config.data = deepcopy(config.data)
+    config.data["property_uncertainty"] = {"heat_transfer_model": "dittus_boelter_fixed_mass_flux"}
+    summary = build_property_uncertainty_summary(config)
+
+    def coefficient(values):
+        # Independently evaluate dimensional Re, Pr, Nu and h at fixed G and D.
+        cp, conductivity, viscosity = values
+        reynolds = 10000.0 * 0.05 / viscosity
+        prandtl = cp * viscosity / conductivity
+        return 0.023 * reynolds**0.8 * prandtl**0.4 * conductivity / 0.05
+
+    base = [1800.0, 1.0, 0.003]
+    for index, key in enumerate(("cp", "thermal_conductivity", "dynamic_viscosity")):
+        perturbed = base.copy()
+        perturbed[index] *= 1.0001
+        derivative = math.log(coefficient(perturbed) / coefficient(base)) / math.log(1.0001)
+        assert summary["heat_transfer_log_sensitivities"][key] == pytest.approx(derivative)
+    assert summary["heat_transfer_uncertainty_95_fraction"] == pytest.approx(math.sqrt(0.0068), abs=1e-6)
+    assert "Flow regime is not checked" in summary["heat_transfer_applicability"]
+    from thorium_reactor.transient_sweep import _resolve_uncertainty_model
+
+    # Integration retains the existing floor and explicit ensemble precedence.
+    assert _resolve_uncertainty_model({}, property_uncertainty=summary)["heat_sink_sigma_fraction"] == 0.09
+    config.data["property_uncertainty"]["thermal_conductivity_uncertainty_95_fraction"] = 0.4
+    larger = build_property_uncertainty_summary(config)
+    assert _resolve_uncertainty_model({}, property_uncertainty=larger)["heat_sink_sigma_fraction"] == pytest.approx(
+        larger["heat_transfer_uncertainty_95_fraction"] / 1.96
+    )
+    override = {"ensemble": {"uncertainties": {"heat_sink_sigma_fraction": 0.2}}}
+    assert _resolve_uncertainty_model(override, property_uncertainty=larger)["heat_sink_sigma_fraction"] == 0.2
+
+
+@pytest.mark.parametrize(
+    "range_status, uncertainty",
+    [
+        ("out_of_range", 0.001),
+        ("unknown", 0.001),
+        ("in_range", float("nan")),
+        ("in_range", -0.01),
+        ("in_range", "bad"),
+    ],
+)
+def test_inapplicable_source_uncertainty_falls_back_visibly(monkeypatch, range_status, uncertainty) -> None:
+    config = load_case_config(REPO_ROOT / "configs/cases/immersed_pool_reference/case.yaml")
+    config.data = deepcopy(config.data)
+    config.data["property_uncertainty"] = {}
+    monkeypatch.setattr(
+        "thorium_reactor.literature_models.evaluate_primary_coolant_properties",
+        lambda *a, **kw: {
+            "source_backing": "source_backed",
+            "property_sources": {"density": {"range_status": range_status, "uncertainty_95_fraction": uncertainty}},
+        },
+    )
+    summary = build_property_uncertainty_summary(config)
+    assert summary["density_uncertainty_95_fraction"] == 0.02
+    assert summary["basis_by_property"]["density"] == "default_band"
+    assert "density" in summary["property_source_uncertainty_exclusions"]
+    # An explicit assumption remains available even when source metadata is excluded.
+    config.data["property_uncertainty"]["density_uncertainty_95_fraction"] = 0.07
+    assert build_property_uncertainty_summary(config)["density_uncertainty_95_fraction"] == 0.07
+
+
+def test_property_uncertainty_model_rejects_unknown_selector() -> None:
+    from thorium_reactor.config import ConfigError, _validate_optional_property_uncertainty_settings
+
+    with pytest.raises(ConfigError, match="heat_transfer_model"):
+        _validate_optional_property_uncertainty_settings(Path("case.yaml"), {"heat_transfer_model": "typo"})
 
 
 def test_property_uncertainty_defaults_reflect_tmsr_sf0_bands() -> None:
