@@ -67,7 +67,6 @@ The relevant implementation lives in:
 - [src/thorium_reactor/flow/primary_system.py](../src/thorium_reactor/flow/primary_system.py)
 - [src/thorium_reactor/flow/properties.py](../src/thorium_reactor/flow/properties.py)
 - [src/thorium_reactor/transient.py](../src/thorium_reactor/transient.py)
-- [src/thorium_reactor/integrations.py](../src/thorium_reactor/integrations.py)
 - [src/thorium_reactor/chemistry.py](../src/thorium_reactor/chemistry.py)
 
 ## Input Units
