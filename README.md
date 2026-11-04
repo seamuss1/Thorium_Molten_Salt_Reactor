@@ -8,14 +8,14 @@ The workflow keeps evidence levels explicit. Dry-run neutronics, reduced-order t
 
 | Goal | Command | Output |
 | --- | --- | --- |
-| Open a configured shell | `.\scripts\Enter-PytbknShell.cmd` | Repo-aware shell with `PYTHONPATH=src` |
+| Open a configured shell | `.\scripts\Enter-PytbknShell.cmd` | Shell in the `app` container, with the repo at `/workspace` |
 | Build a smoke case | `.\scripts\Run-Reactor.cmd build example_pin` | `results/example_pin/<run_id>/build_manifest.json` |
 | Run without OpenMC | `.\scripts\Run-Reactor.cmd run example_pin --no-solver` | Summary, metrics, provenance, report inputs |
 | Render the TMSR core | `.\scripts\Run-Reactor.cmd render tmsr_lf1_core` | PNG/SVG/OBJ/STL/glTF geometry exports |
 | Start the browser lab | `.\scripts\Run-Web.cmd` | `http://localhost:18488` |
 | Run tests | `.\scripts\Run-Tests.cmd` | Full pytest suite |
 
-The Windows `.cmd` wrappers are the normal entrypoints on this host because PowerShell script execution is restricted. See [AGENTS.md](AGENTS.md) for the repo-local runtime rules and [web/README.md](web/README.md) for the browser stack.
+The Windows `.cmd` wrappers are the normal entrypoints on this host because PowerShell script execution is restricted. See [AGENTS.md](AGENTS.md) for the runtime and workflow rules and [web/README.md](web/README.md) for the browser stack.
 
 See [Reproducible runtime and deployment](docs/reproducible-runtime.md) for locked
 dependency installation, standalone release images, the development Compose
@@ -125,7 +125,7 @@ For routine Windows development, use the checked-in wrappers:
 .\scripts\Run-Tests.cmd
 ```
 
-Interactive work after entering the configured shell:
+Interactive work inside that container shell, where the `reactor` console script is installed:
 
 ```powershell
 python -m thorium_reactor.cli build example_pin
@@ -134,7 +134,7 @@ reactor render tmsr_lf1_core
 reactor report example_pin
 ```
 
-The native transport and depletion commands use NumPy plus SciPy sparse matrix routines when SciPy is installed by the repo-local runtime. OpenMC-backed runs remain a separate solver path. Dry-run workflows are the default Windows path for geometry, reporting, reduced-order flow, and browser-launched runs. Solver-backed OpenMC benchmarks should be run only through the documented OpenMC-capable runtime path.
+The native transport and depletion commands use NumPy plus SciPy sparse matrix routines; SciPy is a required dependency. OpenMC-backed runs remain a separate solver path. Dry-run workflows are the default Windows path for geometry, reporting, reduced-order flow, and browser-launched runs. Solver-backed OpenMC benchmarks should be run only through the documented OpenMC-capable runtime path.
 
 ## Validation Posture
 
@@ -176,20 +176,6 @@ Key science references and design reasoning are in:
 - [docs/reactor-taxonomy-and-flagship.md](docs/reactor-taxonomy-and-flagship.md)
 - [docs/openmsr-review.md](docs/openmsr-review.md)
 
-## External Tool Hooks
-
-The CLI can export integration inputs and handoff metadata for MOOSE/Cardinal-style workflows, SCALE, Thermochimica, SaltProc, and Moltres:
-
-```powershell
-.\scripts\Run-Reactor.cmd moose immersed_pool_reference
-.\scripts\Run-Reactor.cmd scale tmsr_lf1_core
-.\scripts\Run-Reactor.cmd thermochimica tmsr_lf1_core
-.\scripts\Run-Reactor.cmd saltproc tmsr_lf1_core
-.\scripts\Run-Reactor.cmd moltres immersed_pool_reference
-```
-
-These are pragmatic export adapters. They do not claim validated one-to-one translations into those external codes.
-
 ## Development Links
 
 - [AGENTS.md](AGENTS.md): local runtime and workflow rules
@@ -200,7 +186,6 @@ These are pragmatic export adapters. They do not claim validated one-to-one tran
 - [benchmarks/README.md](benchmarks/README.md): benchmark evidence structure
 - [results/README.md](results/README.md): bundle anatomy
 - [resources/README.md](resources/README.md): README figure refresh notes
-- [experiments/gpu_viability/README.md](experiments/gpu_viability/README.md): GPU viability experiments
 - [archive/legacy_openmc_2022/README.md](archive/legacy_openmc_2022/README.md): preserved legacy prototype
 
 ## License

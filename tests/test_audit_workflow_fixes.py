@@ -125,9 +125,8 @@ def test_cli_resolves_case_directory_alias_for_read_reuse_and_extend(tmp_path):
     assert cli.main([*common, "validate", *selected]) == 0
     assert cli.main([*common, "verify-bundle", *selected]) == 0
     assert cli.main([*common, "run", *selected, "--reuse-run-id", "--no-solver"]) == 0
-    assert cli.main([*common, "moose", *selected]) == 0
     manifest = json.loads((root / "stage_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["stages"][-1]["stage"] == "moose"
+    assert manifest["stages"][-1]["stage"] == "run"
     assert not (tmp_path / "results/example_pin").exists()
 
 
@@ -163,28 +162,6 @@ def test_local_benchmark_exit_matches_solver_result(tmp_path, monkeypatch, statu
     assert (code == 0) == (status == "completed")
     manifest = json.loads((tmp_path / "results/example_pin/benchmark/stage_manifest.json").read_text(encoding="utf-8"))
     assert manifest["stages"][-1]["status"] == ("completed" if status == "completed" else "failed")
-
-
-@pytest.mark.parametrize("command", cli.INTEGRATION_COMMANDS)
-@pytest.mark.parametrize("status", ["failed", "input_deck_exported_missing_runtime", "completed"])
-def test_external_cli_exit_matches_explicit_execution_result(tmp_path, monkeypatch, command, status):
-    _scratch_case(tmp_path)
-
-    def fake_integration(config, bundle, **kwargs):
-        assert kwargs["execute"] is True
-        bundle.write_json("summary.json", {"case": config.name, "neutronics": {"status": "dry-run"}, "metrics": {}})
-        return {"status": status, "returncode": 7 if status == "failed" else 0}
-
-    monkeypatch.setattr(cli, f"run_{command}_integration", fake_integration)
-    code = cli.main(["--repo-root", str(tmp_path), command, "example_pin", "--run-id", "external", "--run-external"])
-    assert (code == 0) == (status == "completed")
-    manifest = json.loads((tmp_path / "results/example_pin/external/stage_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["stages"][-1]["status"] == ("completed" if status == "completed" else "failed")
-
-
-def test_export_only_external_workflow_still_succeeds(tmp_path):
-    _scratch_case(tmp_path)
-    assert cli.main(["--repo-root", str(tmp_path), "moose", "example_pin", "--run-id", "export"]) == 0
 
 
 class _Region:

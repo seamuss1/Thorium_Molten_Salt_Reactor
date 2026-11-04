@@ -64,7 +64,7 @@ The API is intentionally filesystem-backed. Important endpoints include:
 Browser-launched runs are intentionally narrower than the CLI:
 
 - Allowed: `build`, `run --no-solver`, `transient`, `transient-sweep`, `validate`, `render`, `report`.
-- Not browser-launchable by default: solver-backed OpenMC benchmarks and external integrations.
+- Not browser-launchable by default: solver-backed OpenMC benchmarks.
 - Each browser job writes an isolated bundle under `results/<case>/<run_id>/`.
 - Drafted parameters are written to `case_snapshot.yaml` inside the bundle.
 - Canonical YAML under `configs/cases` stays untouched.

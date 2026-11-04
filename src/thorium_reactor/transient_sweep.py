@@ -65,7 +65,6 @@ def run_transient_sweep_case(
     scenario_name: str | None = None,
     samples: int = DEFAULT_TRANSIENT_SWEEP_SAMPLES,
     seed: int = 42,
-    prefer_gpu: bool = False,
     backend: str = "auto",
     dtype: str = DEFAULT_DTYPE,
     provenance: dict[str, Any] | None = None,
@@ -76,7 +75,6 @@ def run_transient_sweep_case(
         scenario_name=scenario_name,
         samples=samples,
         seed=seed,
-        prefer_gpu=prefer_gpu,
         backend=backend,
         dtype=dtype,
         provenance=provenance,
@@ -104,7 +102,6 @@ def build_transient_sweep_payload(
     scenario_name: str | None = None,
     samples: int = DEFAULT_TRANSIENT_SWEEP_SAMPLES,
     seed: int = 42,
-    prefer_gpu: bool = False,
     backend: str = "auto",
     dtype: str = DEFAULT_DTYPE,
     provenance: dict[str, Any] | None = None,
@@ -135,7 +132,7 @@ def build_transient_sweep_payload(
         seed=int(seed),
         requested_samples=sample_count,
     )
-    requested_backend = _resolve_requested_backend(backend, prefer_gpu=prefer_gpu)
+    requested_backend = _resolve_requested_backend(backend)
 
     (
         history,
@@ -189,24 +186,9 @@ def build_transient_sweep_payload(
     return payload
 
 
-def _resolve_requested_backend(backend: str, *, prefer_gpu: bool) -> str:
-    """Map the CLI/web backend request onto a concrete accelerator request.
-
-    ``--prefer-gpu`` is the deprecated spelling of ``--backend auto``. It only
-    means anything when no explicit backend was given: asking for
-    ``--backend numpy --prefer-gpu`` must keep numpy rather than silently
-    upgrading to the GPU, and asking for ``--prefer-gpu`` alone must not be a
-    no-op just because ``--backend`` happens to default to ``auto``.
-    """
-    requested = (backend or "auto").strip().lower()
-    if requested == "auto":
-        return "auto"
-    if prefer_gpu:
-        raise BackendUnavailable(
-            f"--prefer-gpu is the deprecated spelling of --backend auto and conflicts with "
-            f"--backend {requested}. Pass only one of them."
-        )
-    return requested
+def _resolve_requested_backend(backend: str) -> str:
+    """Normalize a ``--backend`` request into a concrete accelerator request."""
+    return (backend or "auto").strip().lower()
 
 
 def _effective_loop_segments(

@@ -221,15 +221,6 @@ graphite_lifetime:
   core_zoning_flattening_credit: 0.04
   target_lifespan_years: 8.0
   capacity_factor: 0.85
-integrations:
-  moose:
-    application: app-opt
-    executioner: Steady
-    end_time: 20.0
-    dt: 1.0
-  scale:
-    sequence: csas6
-    executable: scalerte
 validation_targets:
   expected_cells:
     metric: expected_cells

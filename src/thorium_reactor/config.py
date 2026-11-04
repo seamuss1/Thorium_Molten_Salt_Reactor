@@ -46,7 +46,6 @@ SUPPORTED_PROPERTY_PROVIDERS = {
     "msd_tp",
     "msd_tp_redlich_kister",
 }
-SUPPORTED_INTEGRATIONS = ("moose", "scale", "thermochimica", "saltproc", "moltres")
 SUPPORTED_DETERMINISTIC_NEUTRONICS_METHODS = {
     "diffusion",
     "diffusion_variant_a",
@@ -163,7 +162,6 @@ def _validate_case_schema(path: Path, raw: Mapping[str, Any]) -> None:
     _validate_optional_flow_settings(path, raw.get("flow"))
     _validate_optional_model_representation(path, raw.get("model_representation"))
     _validate_optional_physics_core_settings(path, raw.get("physics_core"))
-    _validate_optional_integrations(path, raw.get("integrations"))
     _validate_optional_economics_settings(path, raw.get("economics"))
     _validate_optional_project_schedule_settings(path, raw.get("project_schedule"))
     reactor = raw.get("reactor", {})
@@ -791,7 +789,6 @@ def _validate_optional_loop_segments(path: Path, loop_segments: Any) -> None:
         for field_name in (
             "residence_fraction",
             "volume_fraction",
-            "decay_heat_fraction",
             "cleanup_weight",
             "cleanup_fraction",
         ):
@@ -983,22 +980,6 @@ def _require_number(path: Path, field_name: str, value: Any) -> float:
     if not math.isfinite(parsed):
         raise ConfigError(f"Case config {path} field '{field_name}' must be finite.")
     return parsed
-
-
-def _validate_optional_integrations(path: Path, integrations: Any) -> None:
-    if integrations is None:
-        return
-    if not isinstance(integrations, Mapping):
-        raise ConfigError(f"Case config {path} optional 'integrations' section must be a mapping.")
-    for integration_name in SUPPORTED_INTEGRATIONS:
-        settings = integrations.get(integration_name)
-        if settings is None:
-            continue
-        if not isinstance(settings, Mapping):
-            raise ConfigError(f"Case config {path} integrations.{integration_name} must be a mapping.")
-        args = settings.get("args")
-        if args is not None and not isinstance(args, list):
-            raise ConfigError(f"Case config {path} integrations.{integration_name}.args must be a list.")
 
 
 def _validate_optional_economics_settings(path: Path, economics: Any) -> None:

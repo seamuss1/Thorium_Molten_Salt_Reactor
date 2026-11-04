@@ -19,14 +19,6 @@ from thorium_reactor.config import CaseConfig, ConfigError, load_case_config, va
 from thorium_reactor.economics import run_economics_case
 from thorium_reactor.evidence import build_evidence_status, load_canonical_artifact_status
 from thorium_reactor.geometry.exporters import export_geometry
-from thorium_reactor.integrations import (
-    persist_integration_result,
-    run_moltres_integration,
-    run_moose_integration,
-    run_saltproc_integration,
-    run_scale_integration,
-    run_thermochimica_integration,
-)
 from thorium_reactor.neutronics.openmc_compat import missing_openmc_runtime_message, openmc
 from thorium_reactor.neutronics.workflows import _build_visualization_state, build_case, run_case, validate_case
 from thorium_reactor.paths import (
@@ -48,7 +40,6 @@ from thorium_reactor.sidecar_schemas import validate_bundle_sidecars
 from thorium_reactor.transient_sweep import DEFAULT_TRANSIENT_SWEEP_SAMPLES
 from thorium_reactor.uncertainty import DEFAULT_UNCERTAINTY_SWEEP_SAMPLES
 
-INTEGRATION_COMMANDS = ("moose", "scale", "thermochimica", "saltproc", "moltres")
 NATIVE_ADVANCED_COMMANDS = ("transport", "deplete")
 UNCERTAINTY_COMMANDS = ("uncertainty-sweep",)
 EXTEND_EXISTING_RUN_COMMANDS = (
@@ -57,7 +48,6 @@ EXTEND_EXISTING_RUN_COMMANDS = (
     "economics",
     *UNCERTAINTY_COMMANDS,
     *NATIVE_ADVANCED_COMMANDS,
-    *INTEGRATION_COMMANDS,
 )
 
 
@@ -82,7 +72,6 @@ def build_parser() -> argparse.ArgumentParser:
         *UNCERTAINTY_COMMANDS,
         *NATIVE_ADVANCED_COMMANDS,
         "economics",
-        *INTEGRATION_COMMANDS,
     ):
         command = subparsers.add_parser(command_name, help=f"{command_name.capitalize()} a reactor case")
         command.add_argument("case", help="Case name under configs/cases")
@@ -101,11 +90,6 @@ def build_parser() -> argparse.ArgumentParser:
                 help="Number of ensemble trajectories to evaluate.",
             )
             command.add_argument("--seed", type=int, default=42, help="Random seed for the ensemble perturbations.")
-            command.add_argument(
-                "--prefer-gpu",
-                action="store_true",
-                help="Deprecated alias for --backend auto. Cannot be combined with an explicit --backend.",
-            )
             command.add_argument(
                 "--backend",
                 default="auto",
@@ -143,12 +127,6 @@ def build_parser() -> argparse.ArgumentParser:
                 "--force",
                 action="store_true",
                 help="Calculate commercial economics even when the case is not marked reactor.mode=commercial_grid.",
-            )
-        if command_name in INTEGRATION_COMMANDS:
-            command.add_argument(
-                "--run-external",
-                action="store_true",
-                help="Attempt to execute the external code after exporting the input deck.",
             )
         if command_name == "benchmark":
             command.add_argument(
@@ -211,7 +189,6 @@ def main(argv: list[str] | None = None) -> int:
         "economics",
         *UNCERTAINTY_COMMANDS,
         *NATIVE_ADVANCED_COMMANDS,
-        *INTEGRATION_COMMANDS,
     }
     allow_existing = bool(
         args.reuse_run_id or (args.run_id is not None and args.command in EXTEND_EXISTING_RUN_COMMANDS)
@@ -371,7 +348,6 @@ def main(argv: list[str] | None = None) -> int:
                 scenario_name=args.scenario,
                 samples=args.samples,
                 seed=args.seed,
-                prefer_gpu=args.prefer_gpu,
                 backend=args.backend,
                 dtype=args.dtype,
                 provenance=provenance,
@@ -604,151 +580,6 @@ def main(argv: list[str] | None = None) -> int:
                 print(plan["finance"]["outputs"]["lcoe_usd_per_mwh"])
                 print(plan["schedule"]["commercial_operation_date"])
             return 0
-
-        if args.command == "moose":
-            result = run_moose_integration(
-                config,
-                bundle,
-                benchmark=benchmark,
-                provenance=provenance,
-                execute=args.run_external,
-                repo_root=repo_root,
-            )
-            summary_path = bundle.root / "summary.json"
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            persist_integration_result(bundle, summary, "moose", result)
-            refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(
-                bundle,
-                args.command,
-                stage_command,
-                stage_started_utc,
-                stage_artifacts_before,
-                provenance,
-                summary=summary,
-                status="failed"
-                if args.run_external and result.get("status") != "completed"
-                else result.get("status", "completed"),
-            )
-            print(bundle.root)
-            print(result["status"])
-            return _external_execution_exit_code(result, requested=args.run_external)
-
-        if args.command == "scale":
-            result = run_scale_integration(
-                config,
-                bundle,
-                benchmark=benchmark,
-                provenance=provenance,
-                execute=args.run_external,
-                repo_root=repo_root,
-            )
-            summary_path = bundle.root / "summary.json"
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            persist_integration_result(bundle, summary, "scale", result)
-            refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(
-                bundle,
-                args.command,
-                stage_command,
-                stage_started_utc,
-                stage_artifacts_before,
-                provenance,
-                summary=summary,
-                status="failed"
-                if args.run_external and result.get("status") != "completed"
-                else result.get("status", "completed"),
-            )
-            print(bundle.root)
-            print(result["status"])
-            return _external_execution_exit_code(result, requested=args.run_external)
-
-        if args.command == "thermochimica":
-            result = run_thermochimica_integration(
-                config,
-                bundle,
-                benchmark=benchmark,
-                provenance=provenance,
-                execute=args.run_external,
-                repo_root=repo_root,
-            )
-            summary_path = bundle.root / "summary.json"
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            persist_integration_result(bundle, summary, "thermochimica", result)
-            refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(
-                bundle,
-                args.command,
-                stage_command,
-                stage_started_utc,
-                stage_artifacts_before,
-                provenance,
-                summary=summary,
-                status="failed"
-                if args.run_external and result.get("status") != "completed"
-                else result.get("status", "completed"),
-            )
-            print(bundle.root)
-            print(result["status"])
-            return _external_execution_exit_code(result, requested=args.run_external)
-
-        if args.command == "saltproc":
-            result = run_saltproc_integration(
-                config,
-                bundle,
-                benchmark=benchmark,
-                provenance=provenance,
-                execute=args.run_external,
-                repo_root=repo_root,
-            )
-            summary_path = bundle.root / "summary.json"
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            persist_integration_result(bundle, summary, "saltproc", result)
-            refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(
-                bundle,
-                args.command,
-                stage_command,
-                stage_started_utc,
-                stage_artifacts_before,
-                provenance,
-                summary=summary,
-                status="failed"
-                if args.run_external and result.get("status") != "completed"
-                else result.get("status", "completed"),
-            )
-            print(bundle.root)
-            print(result["status"])
-            return _external_execution_exit_code(result, requested=args.run_external)
-
-        if args.command == "moltres":
-            result = run_moltres_integration(
-                config,
-                bundle,
-                benchmark=benchmark,
-                provenance=provenance,
-                execute=args.run_external,
-                repo_root=repo_root,
-            )
-            summary_path = bundle.root / "summary.json"
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            persist_integration_result(bundle, summary, "moltres", result)
-            refresh_bundle_artifact_statuses(bundle, summary=summary)
-            _finish_cli_stage(
-                bundle,
-                args.command,
-                stage_command,
-                stage_started_utc,
-                stage_artifacts_before,
-                provenance,
-                summary=summary,
-                status="failed"
-                if args.run_external and result.get("status") != "completed"
-                else result.get("status", "completed"),
-            )
-            print(bundle.root)
-            print(result["status"])
-            return _external_execution_exit_code(result, requested=args.run_external)
 
         if args.command == "validate":
             result = validate_case(config, bundle, benchmark=benchmark, provenance=provenance)
@@ -1018,13 +849,6 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             pass
         raise
-
-
-def _external_execution_exit_code(result: dict[str, object], *, requested: bool) -> int:
-    if requested and result.get("status") != "completed":
-        print(result.get("error") or "Requested external solver execution did not complete.", file=sys.stderr)
-        return 1
-    return 0
 
 
 def _refresh_benchmark_evidence(

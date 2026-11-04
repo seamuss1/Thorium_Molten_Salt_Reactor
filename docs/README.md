@@ -18,6 +18,10 @@ The browser Science view indexes the top-level [README.md](../README.md) and eve
 | [browser-front-end.md](browser-front-end.md) | Browser lab runtime, access controls, run safety, and development checks |
 | [github-projects.md](github-projects.md) | GitHub issue, project-board, and status-field workflow |
 | [openmsr-review.md](openmsr-review.md) | Notes from adjacent open MSR projects and where this repo can borrow ideas |
+| [result-bundles.md](result-bundles.md) | Which command writes which bundle file, and the bundle lifecycle |
+| [numerical-integrity.md](numerical-integrity.md) | Time-grid, backend-parity and solver-accuracy guarantees |
+| [reproducible-runtime.md](reproducible-runtime.md) | Lockfile regeneration, image provenance, and runtime reproducibility |
+| [engineering-debt.md](engineering-debt.md) | Known structural debt, the standing anti-slop rules, and decisions owed |
 
 ## Writing Notes
 

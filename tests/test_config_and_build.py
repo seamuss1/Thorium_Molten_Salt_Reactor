@@ -362,23 +362,6 @@ def test_case_loader_rejects_invalid_depletion_solver_steps() -> None:
         shutil.rmtree(scratch_root, ignore_errors=True)
 
 
-def test_case_loader_rejects_non_list_integration_args() -> None:
-    scratch_root = REPO_ROOT / ".tmp" / "test-config-and-build" / uuid.uuid4().hex
-    scratch_root.mkdir(parents=True, exist_ok=True)
-    try:
-        payload = yaml.safe_load(
-            (REPO_ROOT / "configs" / "cases" / "immersed_pool_reference" / "case.yaml").read_text(encoding="utf-8")
-        )
-        payload.setdefault("integrations", {}).setdefault("moose", {})["args"] = "--fast"
-        case_path = scratch_root / "case.yaml"
-        case_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-
-        with pytest.raises(ConfigError, match="integrations.moose.args"):
-            load_case_config(case_path)
-    finally:
-        shutil.rmtree(scratch_root, ignore_errors=True)
-
-
 def test_case_loader_rejects_invalid_commercial_grid_characteristics() -> None:
     scratch_root = REPO_ROOT / ".tmp" / "test-commercial-grid-config" / uuid.uuid4().hex
     scratch_root.mkdir(parents=True, exist_ok=True)

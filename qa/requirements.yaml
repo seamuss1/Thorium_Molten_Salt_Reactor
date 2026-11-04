@@ -208,25 +208,3 @@ requirements:
     status: active
     related_issues:
       - "#32"
-
-  - id: REQ-EXTERNAL-HANDOFF-EXPORTS
-    title: External-code handoff exports
-    category: integrations
-    statement: External solver adapters shall export structured handoff metadata and distinguish export-only status from executed evidence.
-    implementation_area:
-      - src/thorium_reactor/integrations.py
-      - configs/cases/README.md
-    verification_tests:
-      - tests/test_cli.py::test_cli_registers_external_integration_commands
-      - tests/test_container_workflow.py::test_canonical_docker_compose_defines_required_services
-      - tests/test_web_backend.py::test_web_run_detail_exposes_generated_data_and_plot_artifacts
-    validation_evidence:
-      - configs/cases/README.md
-      - docs/current-model-equations.md
-    acceptance_criteria:
-      - Handoff artifacts identify tool, input kind, runtime context, and export-only or executed status.
-      - Reports surface external integration outputs without calling proxy decks validated solver translations.
-    status: active
-    related_issues:
-      - "#20"
-      - "#21"

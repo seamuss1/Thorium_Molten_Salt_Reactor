@@ -114,9 +114,7 @@ export function Builder() {
       sweep_samples: sweepSamples,
       sweep_seed: sweepSeed,
       sweep_backend: sweepBackend,
-      sweep_dtype: sweepDtype,
-      // Kept in step with the real control so an older server still honours it.
-      prefer_gpu: sweepBackend !== "numpy" && sweepBackend !== "torch-cpu"
+      sweep_dtype: sweepDtype
     };
     createRun.mutate(draft);
   }

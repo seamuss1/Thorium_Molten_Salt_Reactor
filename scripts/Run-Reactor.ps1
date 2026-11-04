@@ -25,9 +25,6 @@ function Resolve-DockerService {
         }
         return "openmc"
     }
-    if ($command -in @("thermochimica", "saltproc", "moltres")) {
-        return $command
-    }
     return "app"
 }
 

@@ -295,23 +295,8 @@ def build_cli_command(draft: SimulationDraft, phase: str) -> list[str]:
         if draft.scenario:
             command.extend(["--scenario", draft.scenario])
         command.extend(["--samples", str(draft.sweep_samples), "--seed", str(draft.sweep_seed)])
-        # Pass the backend explicitly. The old code sent --prefer-gpu, which is
-        # an alias for the "auto" that --backend already defaults to, so the
-        # browser's GPU control selected nothing at all.
-        command.extend(["--backend", resolve_draft_backend(draft), "--dtype", draft.sweep_dtype])
+        command.extend(["--backend", draft.sweep_backend, "--dtype", draft.sweep_dtype])
     return command
-
-
-def resolve_draft_backend(draft: SimulationDraft) -> str:
-    """The backend a draft asks for, honouring the deprecated ``prefer_gpu``.
-
-    ``sweep_backend`` wins whenever it is explicit. ``prefer_gpu`` only still
-    speaks for drafts that left the backend at "auto", so an old client that
-    unchecks it gets the CPU path it asked for instead of being ignored.
-    """
-    if draft.sweep_backend != "auto":
-        return draft.sweep_backend
-    return "auto" if draft.prefer_gpu else "numpy"
 
 
 def phase_timeout_seconds(phase: str) -> float:

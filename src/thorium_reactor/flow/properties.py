@@ -291,15 +291,6 @@ def _evaluate_property_spec_with_metadata(
     raise ValueError(f"Unsupported property model: {model}")
 
 
-def _evaluate_property_spec(spec: dict[str, Any] | None, *, temperature_c: float) -> float:
-    value, _metadata = _evaluate_property_spec_with_metadata(
-        spec,
-        temperature_c=temperature_c,
-        expected_quantity=str(spec.get("quantity", "density")) if isinstance(spec, dict) else "density",
-    )
-    return value
-
-
 def _evaluate_tabulated_property(spec: dict[str, Any], *, temperature_c: float) -> float:
     temperatures = spec.get("temperatures_c")
     values = spec.get("values")

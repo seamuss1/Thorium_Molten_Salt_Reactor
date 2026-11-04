@@ -128,13 +128,6 @@ loop_segments:
   - { id: external_loop, label: External Loop, residence_fraction: 0.48, volume_fraction: 0.60 }
   - { id: offgas, label: Off-Gas, residence_fraction: 0.0, volume_fraction: 0.0 }
   - { id: drain_tank, label: Drain Tank, residence_fraction: 0.0, volume_fraction: 0.0 }
-integrations:
-  thermochimica:
-    executable: thermochimica
-  saltproc:
-    executable: saltproc
-  moltres:
-    executable: moltres-opt
 validation_targets:
   expected_cells:
     metric: expected_cells

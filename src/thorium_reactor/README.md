@@ -37,14 +37,13 @@ The command entrypoint is [`cli.py`](cli.py). It keeps command dispatch thin and
 | [`benchmarking.py`](benchmarking.py) | Benchmark residuals, traceability, and Docker/OpenMC benchmark helpers |
 | [`qa.py`](qa.py) | Load and validate QA requirement records and the requirements traceability matrix |
 | [`reporting/`](reporting) | Markdown report generation and SVG plot generation |
-| [`integrations.py`](integrations.py) | External-code export and optional execution adapters |
 | [`web/`](web) | FastAPI app, filesystem repository adapter, job runner, permissions, schemas |
 
 ## Result Contracts
 
 The package writes JSON with stable, explicit names rather than hidden process state. If a new workflow needs to add data, prefer one of these patterns:
 
-- Add domain-specific detail to a new file such as `chemistry.json` or `<tool>_integration.json`.
+- Add domain-specific detail to a new file such as `chemistry.json` or `transport_summary.json`.
 - Add headline metrics to `summary.json` so reports and the web app can discover them.
 - Add flat numeric values to `metrics.csv` when the value should appear in generic charts.
 - Add generated figures to `plots/` and register them in `plots_manifest.json`.

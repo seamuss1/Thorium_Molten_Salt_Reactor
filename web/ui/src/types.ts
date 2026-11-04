@@ -102,8 +102,6 @@ export interface SimulationDraft {
   sweep_seed: number;
   sweep_backend: SweepBackend;
   sweep_dtype: SweepDtype;
-  /** @deprecated Superseded by `sweep_backend`; sent for older servers. */
-  prefer_gpu: boolean;
 }
 
 export type SweepBackend = "auto" | "numpy" | "torch-cpu" | "torch-xpu";

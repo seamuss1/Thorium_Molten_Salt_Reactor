@@ -111,19 +111,14 @@ def test_configure_torch_environment_sets_the_openmp_guard() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_prefer_gpu_alone_still_means_auto() -> None:
-    assert _resolve_requested_backend("auto", prefer_gpu=True) == "auto"
-    assert _resolve_requested_backend("auto", prefer_gpu=False) == "auto"
-
-
-def test_prefer_gpu_conflicting_with_an_explicit_backend_is_rejected() -> None:
-    """The alias used to be an unconditional no-op, so this combination lied."""
-    with pytest.raises(BackendUnavailable, match="deprecated"):
-        _resolve_requested_backend("numpy", prefer_gpu=True)
+def test_backend_request_defaults_to_auto() -> None:
+    assert _resolve_requested_backend("auto") == "auto"
+    assert _resolve_requested_backend("") == "auto"
 
 
 def test_explicit_backend_is_honoured_verbatim() -> None:
-    assert _resolve_requested_backend("torch-cpu", prefer_gpu=False) == "torch-cpu"
+    assert _resolve_requested_backend("torch-cpu") == "torch-cpu"
+    assert _resolve_requested_backend("  Torch-CPU  ") == "torch-cpu"
 
 
 def test_unknown_backend_and_dtype_are_rejected() -> None:

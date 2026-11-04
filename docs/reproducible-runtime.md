@@ -11,12 +11,17 @@ To update the lock deliberately, use uv 0.10.12:
 uv pip compile pyproject.toml --extra dev --universal --python-version 3.11 --generate-hashes --cache-dir .pip-cache/uv --output-file requirements.lock
 ```
 
-For a repo-local Windows interpreter, install without another dependency resolution:
+To install the lock into a local interpreter without another dependency
+resolution -- which is what CI does, and the only supported way to work outside
+Docker:
 
-```powershell
-.\.runtime-env\python.exe -m pip install --require-hashes -r requirements.lock --cache-dir .pip-cache
-.\.runtime-env\python.exe -m pip install --no-deps --no-build-isolation -e .
+```text
+python -m pip install --require-hashes -r requirements.lock --cache-dir .pip-cache
+python -m pip install --no-deps --no-build-isolation -e .
 ```
+
+There is no checked-in repo-local interpreter to bootstrap. The supported
+runtime is Docker Compose; see AGENTS.md.
 
 The Conda environment files bootstrap interpreters and consume the same lock.
 The optional Conda OpenMC environment is for exploration; its compiled dependency
@@ -47,8 +52,6 @@ inputs. The pinned base digest identifies the bundled data files; the index hash
 alone does not verify externally replaced HDF5 files. Rebuild comparisons should
 compare manifests, not expect identical image layers or timestamps.
 
-Thermochimica, SaltProc, and Moltres services use the shared app image as adapters;
-their external executables remain optional, separately provisioned integrations.
 The CPU image supports the built-in geometry renderers; Blender and FFmpeg are
 optional external render tools, not part of its supported dependency closure.
 

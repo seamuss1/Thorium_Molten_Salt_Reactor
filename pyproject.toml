@@ -72,21 +72,20 @@ markers = [
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-extend-exclude = ["archive", "experiments"]
+extend-exclude = ["archive"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
 ignore = [
   "E501",    # line length is enforced by the formatter, not the linter
   "B008",    # FastAPI Depends() in defaults is idiomatic
-  "SIM108",  # ternaries are not always clearer than if/else here
-  # --- Deferred to named refactor-plan phases, not permanent exemptions. ---
-  "B905",    # zip(strict=): changes behavior on ragged input; audit in Phase 3
+  # --- Deferred, not permanent. See docs/engineering-debt.md. ---
+  "B905",    # zip(strict=): changes behavior on ragged input (18 sites)
   "RUF046",  # int(round(x)): the int() cast forces a JSON-serializable Python
              # int out of numpy scalars, so removing it is not safe here
-  "SIM105",  # contextlib.suppress: these are the except/pass sites the plan
-             # bans outright in Phase 2 — they get deleted, not rewritten
-  "SIM102",  # one site in reports.py, rewritten in Phase 3
+  "SIM105",  # contextlib.suppress: these are the 7 except/pass sites that
+             # should be deleted with a logged reason, not rewritten
+  "SIM102",  # one collapsible nested if in reports.py
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -99,15 +98,15 @@ ignore_missing_imports = true
 follow_imports = "silent"
 warn_unused_configs = true
 warn_redundant_casts = true
-# Permissive baseline: the plan ratchets these on package by package as
-# typed models land (refactor plan Phase 4).
+# Permissive baseline: ratchet these on package by package as typed models
+# land. See docs/engineering-debt.md, item 4.
 disallow_untyped_defs = false
 check_untyped_defs = false
 
 # Typing debt list. Every module below fails mypy today; the 30 modules NOT
 # listed are clean and are gated, so new code and regressions are caught.
-# This list may only ever shrink — Phase 4 of docs/refactor-plan.md burns it
-# down, and several entries disappear with the Phase 0.5 deletions.
+# This list may only ever shrink. See docs/engineering-debt.md, item 4, for the
+# typing migration that burns it down.
 [[tool.mypy.overrides]]
 module = [
   "thorium_reactor.benchmarking",
