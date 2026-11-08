@@ -1,5 +1,9 @@
 blank_issues_enabled: true
 contact_links:
-  - name: Project workflow guide
-    url: https://github.com/seamuss1/Thorium_Molten_Salt_Reactor/blob/main/docs/github-projects.md
-    about: Use this guide to understand issue states, labels, and Project fields.
+- name: Project workflow guide
+  url: https://github.com/seamuss1/Thorium_Molten_Salt_Reactor/blob/main/docs/github-projects.md
+  about: Use this guide to understand issue states, labels, and Project fields.
+- name: Issue classification and work queues
+  url: https://github.com/seamuss1/Thorium_Molten_Salt_Reactor/blob/main/.github/ISSUE_CONVENTION.md
+  about: Choose owner-requested or auto-generated; preserve existing priority and
+    Project fields.
